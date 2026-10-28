@@ -205,6 +205,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         drawable.getOutline(outline);
         Rect r = new Rect();
         if (!outline.getRect(r) || r.isEmpty() || outline.getRadius() <= 0f) {
+            // No arbitrary corner guess: the OEM shape is required for this rendering path.
             if (blurFusionLogs++ < 6) log("BLUR_FUSION_SKIPPED reason=outline_unavailable class="+drawableTag(drawable));
             return;
         }
@@ -679,6 +680,24 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         try {
                             if ("drawBackground".equals(methodName)) {
+                                // Draw on the preview's actual Canvas after its OEM background has been drawn.
+                                // This avoids hooking an inherited/nonexistent LayerBlurDrawable.draw method.
+                                Canvas targetCanvas=null;
+                                if (param.args!=null) for(Object arg:param.args) {
+                                    if (arg instanceof Canvas) { targetCanvas=(Canvas)arg; break; }
+                                }
+                                if (targetCanvas!=null && glassEnabled && probeMode!=1) {
+                                    Object bg=null;
+                                    try {
+                                        Method getter=param.thisObject.getClass().getDeclaredMethod("getBgDrawable");
+                                        getter.setAccessible(true);
+                                        bg=getter.invoke(param.thisObject);
+                                    } catch(Throwable ignored) {}
+                                    if (bg instanceof Drawable && bg.getClass().getName().endsWith(".LayerBlurDrawable")) {
+                                        try { drawBlurGlassOverlay((Drawable)bg,targetCanvas); }
+                                        catch(Throwable e) { if(blurFusionLogs++<10) log("BLUR_FUSION_FAILED reason="+e.getClass().getSimpleName()); }
+                                    } else if(blurFusionLogs++<5) log("BLUR_FUSION_SKIPPED reason=not_blur_drawable class="+drawableTag(bg));
+                                } else if(blurFusionLogs++<5) log("BLUR_FUSION_SKIPPED reason="+(targetCanvas==null?"no_canvas":"material_disabled"));
                                 if (diagnostics && previewTraceLogs++ < 32) {
                                     Object result=null;
                                     try { Method bg=param.thisObject.getClass().getDeclaredMethod("getBgDrawable"); bg.setAccessible(true); result=bg.invoke(param.thisObject); }
@@ -955,14 +974,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.17 NATIVE_BLUR_EXPERIMENT_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.18 PREVIEW_CANVAS_FUSION_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
             hook(find("com.android.systemui.qs.QSPanel", p.classLoader), "onLayout", layout, "QSPanel", false);
         } else {
             hookNativeDrawableDraw();
-            hookLayerBlurDrawableDraw(p.classLoader);
+            // V1.9.18: render from the confirmed preview drawBackground entry, not a nonexistent LayerBlurDrawable.draw override.
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
@@ -971,6 +990,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.17 NATIVE_BLUR_EXPERIMENT_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.18 PREVIEW_CANVAS_FUSION_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
