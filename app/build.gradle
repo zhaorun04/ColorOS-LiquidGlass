@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 12
-        versionName '1.9.2-highlight-offset-fix'
+        versionCode 13
+        versionName '1.9.3-drawable-canvas-alignment'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

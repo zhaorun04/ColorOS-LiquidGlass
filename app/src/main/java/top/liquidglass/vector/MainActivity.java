@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.2",23);
-        label("原生模糊兼容性诊断版。所有桌面文件夹统一材质；此版本仅观察原生模糊状态，不强制调用隐藏方法。",14);
+        label("ColorOS Liquid Glass V1.9.3",23);
+        label("原生 Drawable 同画布描边实验版。所有桌面文件夹统一材质；不再估算视图偏移，继续被动诊断原生模糊。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
         SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);

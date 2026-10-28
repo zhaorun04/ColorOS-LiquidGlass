@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.RectF;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.database.Cursor;
 import android.net.Uri;
 import android.util.Log;
@@ -132,6 +133,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Object result=m.invoke(preview);
             if(!(result instanceof Drawable))return;
             Drawable d=(Drawable)result;
+            if (d instanceof GradientDrawable) {
+                synchronized (TRACKED_BACKGROUNDS) { TRACKED_BACKGROUNDS.add(d); }
+            }
             synchronized(ORIGINAL_ALPHA){if(!ORIGINAL_ALPHA.containsKey(d))ORIGINAL_ALPHA.put(d,d.getAlpha());}
             int original=ORIGINAL_ALPHA.get(d);
             int requested=glassAlpha;
@@ -149,49 +153,53 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 " alpha="+alpha+" tint="+tintMode+" drawable="+d.getClass().getSimpleName());
         }catch(Throwable t){if(alphaLogs++<12)log("MATERIAL_FAILED reason="+t.getClass().getSimpleName());}
     }
+    // Weak references avoid retaining Launcher drawables beyond their lifecycle.
+    // Drawing inside GradientDrawable.draw(Canvas) uses the SAME canvas matrix and
+    // bounds as the native background. No FolderIcon size/padding guesses.
+    private static final Set<Drawable> TRACKED_BACKGROUNDS = Collections.newSetFromMap(new WeakHashMap<Drawable, Boolean>());
     private static int geometryLogs = 0;
-    private static void drawHighlight(View v, Canvas canvas) {
-        if (!glassEnabled || !highlightEnabled || v.getWidth() < 2 || v.getHeight() < 2) return;
+    private static int nativeDrawLogs = 0;
+    private static void drawHighlightOnNativeCanvas(Drawable drawable, Canvas canvas) {
+        if (!glassEnabled || !highlightEnabled) return;
+        Rect bounds = drawable.getBounds();
+        if (bounds == null || bounds.isEmpty()) return;
+        float density = android.content.res.Resources.getSystem().getDisplayMetrics().density;
+        float stroke = Math.max(0.7f, density * 0.55f);
+        float inset = stroke * 0.5f;
+        RectF rect = new RectF(bounds.left + inset, bounds.top + inset,
+                bounds.right - inset, bounds.bottom - inset);
+        if (rect.width() < 4 || rect.height() < 4) return;
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(stroke);
+        paint.setColor(Color.argb(22, 255, 255, 255));
+        float radius = Math.min(rect.width(), rect.height()) * 0.18f;
+        canvas.drawRoundRect(rect, radius, radius, paint);
+        if (nativeDrawLogs++ < 24) log("HIGHLIGHT_NATIVE_CANVAS bounds=" + bounds.toShortString() +
+                " finalRect=" + rect.toShortString() + " matrix=" + canvas.getMatrix().toShortString());
+    }
+    private static void hookNativeDrawableDraw() {
         try {
-            Object preview = field(v.getClass(), "mBackground").get(v);
-            if (preview == null) return;
-            Method getter = preview.getClass().getDeclaredMethod("getBgDrawable");
-            getter.setAccessible(true);
-            Object result = getter.invoke(preview);
-            if (!(result instanceof Drawable)) return;
-            Drawable drawable = (Drawable) result;
-            Rect bounds = drawable.getBounds();
-            // Only draw when the drawable supplies a valid, view-local rectangle.
-            // Never fall back to the full FolderIcon bounds: those include label/padding.
-            if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0 ||
-                bounds.right > v.getWidth() || bounds.bottom > v.getHeight()) {
-                if (geometryLogs++ < 12) log("HIGHLIGHT_SKIPPED invalid_drawable_bounds=" + bounds.toShortString() +
-                    " view=" + v.getWidth() + "x" + v.getHeight());
-                return;
-            }
-            float density = v.getResources().getDisplayMetrics().density;
-            float stroke = Math.max(0.7f, density * 0.55f);
-            float inset = stroke / 2f;
-            // Drawable bounds are local to the background and do not include its
-            // placement inside FolderIcon. Center the square in the icon area,
-            // not in the full view height (which includes the label region).
-            float dx = (v.getWidth() - bounds.width()) * 0.5f - bounds.left;
-            float iconAreaTop = Math.max(0f, (v.getHeight() - v.getWidth()) * 0.5f);
-            float dy = iconAreaTop - bounds.top;
-            RectF rect = new RectF(bounds.left + dx + inset, bounds.top + dy + inset,
-                                   bounds.right + dx - inset, bounds.bottom + dy - inset);
-            if (rect.width() < 4 || rect.height() < 4) return;
-            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setStyle(Paint.Style.STROKE);
-            p.setStrokeWidth(stroke);
-            p.setColor(Color.argb(22, 255, 255, 255));
-            float radius = Math.min(rect.width(), rect.height()) * 0.18f;
-            canvas.drawRoundRect(rect, radius, radius, p);
-            if (geometryLogs++ < 12) log("HIGHLIGHT_ALIGNED bounds=" + bounds.toShortString() +
-                " view=" + v.getWidth() + "x" + v.getHeight() +
-                " offsetX=" + dx + " offsetY=" + dy + " finalRect=" + rect.toShortString());
+            Method method = GradientDrawable.class.getDeclaredMethod("draw", Canvas.class);
+            XposedBridge.hookMethod(method, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (!(param.thisObject instanceof Drawable) || param.args == null || param.args.length == 0 ||
+                            !(param.args[0] instanceof Canvas)) return;
+                    Drawable drawable = (Drawable) param.thisObject;
+                    synchronized (TRACKED_BACKGROUNDS) {
+                        if (!TRACKED_BACKGROUNDS.contains(drawable)) return;
+                    }
+                    try { drawHighlightOnNativeCanvas(drawable, (Canvas)param.args[0]); }
+                    catch (Throwable t) {
+                        if (geometryLogs++ < 8) log("HIGHLIGHT_NATIVE_ERROR reason=" + t.getClass().getSimpleName());
+                    }
+                }
+            });
+            installed++;
+            log("NATIVE_DRAW_HOOK_INSTALLED class=android.graphics.drawable.GradientDrawable method=draw");
         } catch (Throwable t) {
-            if (geometryLogs++ < 12) log("HIGHLIGHT_SKIPPED reason=" + t.getClass().getSimpleName());
+            failed++;
+            log("NATIVE_DRAW_HOOK_FAILED reason=" + t.getClass().getName() + " message=" + t.getMessage());
         }
     }
     private static void hook(Class<?> c, String methodName, Class<?>[] args, final String label, final boolean draw) {
@@ -206,8 +214,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     try {
                         inspect(label,param.thisObject);
-                        if(draw && param.thisObject instanceof View && param.args!=null && param.args.length>0 && param.args[0] instanceof Canvas)
-                            drawHighlight((View)param.thisObject,(Canvas)param.args[0]);
+                        // No highlight in FolderIcon.dispatchDraw: its canvas coordinates
+                        // are NOT the same as the background drawable's coordinates.
                     } catch(Throwable t){log("PROBE_ERROR label="+label+" reason="+t.getClass().getSimpleName());}
                 }
             });
@@ -259,16 +267,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.2 HIGHLIGHT_OFFSET_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.3 DRAWABLE_CANVAS_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
             hook(find("com.android.systemui.qs.QSPanel", p.classLoader), "onLayout", layout, "QSPanel", false);
         } else {
+            hookNativeDrawableDraw();
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9.2 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.3 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
