@@ -2329,8 +2329,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                             PREVIEW_CONFIRMED.remove(activeIcon);
                                             if(compositionLogs++<24)log("REFRACTION_COMPOSITION_FALLBACK reason=matrix_unavailable");
                                         }
-                                    } else {
-                                        if(compositionLogs++<24)log("REFRACTION_COMPOSITION mode=EARLY_FRAME_CALLBACK_OBSERVED");
                                     }
                                     // Do not treat callback observation alone as proof
                                     // that a refractive surface was actually composited.
