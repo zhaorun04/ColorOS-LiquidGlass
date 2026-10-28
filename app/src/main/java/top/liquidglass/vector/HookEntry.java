@@ -48,6 +48,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile int probeMode = 0;
     private static volatile boolean nativeAlphaProbe = false;
     private static final Set<String> BLUR_API_SEEN = Collections.synchronizedSet(new HashSet<String>());
+    private static final Set<String> BLUR_PARAMS_PROBED = Collections.synchronizedSet(new HashSet<String>());
     private static volatile int nativeBlurExperiment = 0; // 0=off, 1=only material switch accessor
     private static final java.util.Set<String> EXPERIMENT_ONCE = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     private static int layerTraceLogs = 0;
@@ -173,10 +174,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     // V1.9.35: read-only, bounded native blur parameter probe. Never mutate OEM blur state.
     private static void inspectBlurParameters(Object child) {
-        if (!diagnostics || child == null) return;
+        if (!diagnostics) return;
+        if (child == null) { log("BLUR_PARAMS_PROBE_SKIP reason=child_null"); return; }
+        log("BLUR_PARAMS_PROBE_ENTER child=" + child.getClass().getName());
         try {
-            Method getter = child.getClass().getMethod("getBlurParams");
-            if (getter.getParameterTypes().length != 0) return;
+            Method getter;
+            try { getter = child.getClass().getMethod("getBlurParams"); }
+            catch (NoSuchMethodException missingPublic) {
+                getter = child.getClass().getDeclaredMethod("getBlurParams");
+                getter.setAccessible(true);
+            }
+            if (getter.getParameterTypes().length != 0) { log("BLUR_PARAMS_PROBE_SKIP reason=requires_arguments"); return; }
             Object params = getter.invoke(child);
             if (params == null) { log("BLUR_PARAMS null"); return; }
             log("BLUR_PARAMS_CLASS " + params.getClass().getName());
@@ -200,8 +208,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
             if (count == 0) log("BLUR_PARAMS_NO_MATCHING_FIELDS");
-        } catch (NoSuchMethodException t) { log("BLUR_PARAMS_GETTER_UNAVAILABLE"); }
-        catch (Throwable t) { log("BLUR_PARAMS_ERROR " + t.getClass().getSimpleName()); }
+        } catch (NoSuchMethodException t) { log("BLUR_PARAMS_GETTER_UNAVAILABLE child=" + child.getClass().getName()); }
+        catch (Throwable t) { log("BLUR_PARAMS_ERROR " + t.getClass().getSimpleName() + " cause=" + (t.getCause() == null ? "none" : t.getCause().getClass().getSimpleName())); }
     }
     private static void applyNativeBackground(View v) {
         refresh(v);
@@ -232,13 +240,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                     Object child=d.getClass().getMethod("getBlurDrawable").invoke(d);
                     log("NATIVE_BLUR_CHILD "+(child==null?"null":child.getClass().getName()));
-                    inspectBlurParameters(child);
                     if(child!=null)for(Method method:child.getClass().getMethods()) {
                         String name=method.getName().toLowerCase(java.util.Locale.ROOT);
                         if(name.contains("blur") || name.contains("alpha") || name.contains("radius"))
                             log("NATIVE_BLUR_CHILD_API "+method.toGenericString());
                     }
                 }catch(Throwable t){log("NATIVE_BLUR_API_ERROR "+t.getClass().getSimpleName());}
+            }
+            // V1.9.36: diagnostic probing is independent of BLUR_API_SEEN.
+            // A first draw with diagnostics off must not permanently suppress later probes.
+            if (isBlur && diagnostics && BLUR_PARAMS_PROBED.add(d.getClass().getName())) {
+                try {
+                    Object child = d.getClass().getMethod("getBlurDrawable").invoke(d);
+                    inspectBlurParameters(child);
+                } catch (Throwable t) {
+                    log("BLUR_PARAMS_PROBE_ERROR " + t.getClass().getSimpleName());
+                }
             }
             // Verified native blur drawable alpha control. This does not change blur radius.
             int alpha=isBlur ? (glassEnabled && nativeAlphaProbe ? requested : original) : (glassEnabled?requested:original);
