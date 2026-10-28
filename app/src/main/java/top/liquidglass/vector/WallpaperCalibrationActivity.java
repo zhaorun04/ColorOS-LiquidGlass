@@ -15,6 +15,8 @@ public final class WallpaperCalibrationActivity extends Activity {
     private TextView info;
     private int imageW, imageH, screenW, screenH, desiredW;
     private float pointX=.5f, pointY=.45f, offsetX=.5f;
+    private float verticalShiftPx=0f, scaleCorrection=1f;
+    private int insetTop=0, insetBottom=0, viewScreenTop=0;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
@@ -56,18 +58,25 @@ public final class WallpaperCalibrationActivity extends Activity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(18,28,18,18);
         root.setBackgroundColor(0x11000000);
-        TextView heading=new TextView(this);heading.setText("V1.9.53 · 壁纸映射目视校准（实验）");
+        TextView heading=new TextView(this);heading.setText("V1.9.54 · 壁纸垂直映射校准（实验）");
         heading.setTextColor(Color.WHITE);heading.setTextSize(18);heading.setShadowLayer(3,1,1,Color.BLACK);root.addView(heading);
         info=new TextView(this);info.setTextColor(Color.WHITE);info.setTextSize(12);info.setShadowLayer(3,1,1,Color.BLACK);root.addView(info);
         TextView state=new TextView(this);state.setTextColor(0xFFFFD78C);state.setTextSize(13);
         state.setText("校准样本："+statusText+("OK".equals(statusText)?"（来自 Launcher 私有缓存）":"\n请开启详细诊断、重启 Launcher、打开文件夹，再返回本页。"));
         root.addView(state);
         preview=new CalibrationView(this);root.addView(preview,new LinearLayout.LayoutParams(-1,0,1f));
+        // Geometry comes from the actual activity window, not assumed status-bar dimensions.
+        root.setOnApplyWindowInsetsListener((v,insets)->{
+            insetTop=insets.getSystemWindowInsetTop();insetBottom=insets.getSystemWindowInsetBottom();
+            update();return v.onApplyWindowInsets(insets);
+        });
         addSlider(root,"屏幕采样 X",50,v->pointX=v/100f);
         addSlider(root,"屏幕采样 Y",45,v->pointY=v/100f);
         addSlider(root,"假设的壁纸水平偏移",50,v->offsetX=v/100f);
-        TextView warning=new TextView(this);warning.setText("注意：背景由 Android 壁纸窗口提供，可能与桌面实际裁切/偏移不同。两种模型均未验证；截图仅供人工对照。没有读取桌面图标或录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
-        setContentView(root);update();
+        addSlider(root,"原图垂直平移（-400 至 +400 像素）",50,v->verticalShiftPx=(v-50)*8f);
+        addSlider(root,"模型缩放修正（0.75 至 1.25 倍）",50,v->scaleCorrection=.75f+v*.005f);
+        TextView warning=new TextView(this);warning.setText("注意：黄色十字是采样屏幕坐标在本页的定位提示，不是系统壁纸纹理上的真实锚点。垂直平移和缩放只调整候选采样模型；独立 Activity 与桌面壁纸的裁切可能不同。均未验证；不录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
+        setContentView(root);root.post(this::update);update();
     }
     interface Change {void apply(int v);}
     private void addSlider(LinearLayout root,String name,int initial,Change change){
@@ -78,7 +87,13 @@ public final class WallpaperCalibrationActivity extends Activity {
             public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}
         });
     }
-    private void update(){if(preview!=null)preview.invalidate();if(info!=null)info.setText("原图 "+imageW+"×"+imageH+" · 屏幕 "+screenW+"×"+screenH+" · 期望宽度 "+desiredW+"\n采样屏幕坐标 ("+(int)(pointX*screenW)+","+(int)(pointY*screenH)+")  偏移假设 "+String.format(java.util.Locale.US,"%.2f",offsetX));}
+    private void update(){
+        if(preview!=null){int[] loc=new int[2];preview.getLocationOnScreen(loc);viewScreenTop=loc[1];preview.invalidate();}
+        if(info!=null)info.setText("原图 "+imageW+"×"+imageH+" · 屏幕 "+screenW+"×"+screenH+" · 期望宽度 "+desiredW
+            +"\n采样屏幕坐标 ("+(int)(pointX*screenW)+","+(int)(pointY*screenH)+") 偏移 "+String.format(java.util.Locale.US,"%.2f",offsetX)
+            +"\nInsets 上/下 "+insetTop+"/"+insetBottom+" · 预览屏幕Y="+viewScreenTop
+            +"\n模型Y平移 "+(int)verticalShiftPx+"px · 缩放修正 "+String.format(java.util.Locale.US,"%.3f",scaleCorrection));
+    }
     @Override protected void onDestroy(){super.onDestroy();if(source!=null&&!source.isRecycled())source.recycle();}
     private final class CalibrationView extends View {
         private final Paint p=new Paint(3);
@@ -95,8 +110,8 @@ public final class WallpaperCalibrationActivity extends Activity {
                 float xx=x+i*(side+12f);RectF dst=new RectF(xx,y,xx+side,y+side);
                 p.setColor(0xFF26323B);c.drawRect(dst,p);
                 if(source!=null&&!source.isRecycled()&&scales[i]>0f){
-                    float scale=scales[i];float px=(pointX*screenW+Math.max(0f,imageW*scale-screenW)*offsetX)/scale;
-                    float py=(pointY*screenH+Math.max(0f,imageH*scale-screenH)*.5f)/scale;
+                    float scale=scales[i]*scaleCorrection;float px=(pointX*screenW+Math.max(0f,imageW*scale-screenW)*offsetX)/scale;
+                    float py=(pointY*screenH+verticalShiftPx+Math.max(0f,imageH*scale-screenH)*.5f)/scale;
                     float radius=Math.min(imageW,imageH)*.065f;
                     float l=Math.max(0,px-radius),t=Math.max(0,py-radius),r=Math.min(imageW,px+radius),b=Math.min(imageH,py+radius);
                     Rect src=new Rect((int)(l*source.getWidth()/imageW),(int)(t*source.getHeight()/imageH),
@@ -107,7 +122,12 @@ public final class WallpaperCalibrationActivity extends Activity {
                 p.setColor(0xFFFFE4A0);c.drawLine(dst.centerX()-8,dst.centerY(),dst.centerX()+8,dst.centerY(),p);
                 c.drawLine(dst.centerX(),dst.centerY()-8,dst.centerX(),dst.centerY()+8,p);
             }
-            float markerX=pointX*w,markerY=pointY*Math.max(0,h-side-55);
+            // Map absolute screen position into this View's local coordinates.
+            // Do not compress the Y axis to fit the available drawing area.
+            int[] location=new int[2];getLocationOnScreen(location);
+            float markerX=pointX*screenW-location[0],markerY=pointY*screenH-location[1];
+            boolean markerVisible=markerX>=0&&markerX<=w&&markerY>=0&&markerY<=h;
+            if(!markerVisible)return;
             p.setColor(0xFFFFD85E);p.setStrokeWidth(2);c.drawCircle(markerX,markerY,10,p);c.drawLine(markerX-18,markerY,markerX+18,markerY,p);c.drawLine(markerX,markerY-18,markerX,markerY+18,p);
         }
     }
