@@ -32,6 +32,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "ColorOSLiquidGlass";
     private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
     private static volatile long lastRead = 0;
+    private static volatile boolean configEverLoaded = false;
     private static volatile long lastExperimentRead = 0;
     private static volatile boolean glassEnabled = false;
     private static volatile int glassAlpha = 210, tintMode = 0, tintStrength = 30;
@@ -140,9 +141,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static void refreshFromContext(android.content.Context context) {
         long now = android.os.SystemClock.uptimeMillis();
         if (now-lastRead < 1500) return;
-        lastRead=now;
         try (Cursor c = context.getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
+                lastRead=now;
+                configEverLoaded=true;
                 glassEnabled=c.getInt(0)==1;
                 glassAlpha=Math.max(40,Math.min(255,c.getInt(1)));
                 tintMode=Math.max(0,Math.min(3,c.getInt(2)));
@@ -167,7 +169,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
-        } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
+        } catch(Throwable t) { if(alphaLogs++<8) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
     }
     private static void refreshConfigFromContext(android.content.Context ctx) {
         long now=android.os.SystemClock.uptimeMillis();
@@ -1643,12 +1645,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // 0.439 edge alpha washed out both sides of the glass, especially on
         // bright wallpapers. Attenuate overlay opacity with sampled luminance.
         " float luminance=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
-        // V1.9.77: protect near-white wallpaper areas from additive washout.
-        // No extra white RGB boost; alpha fades completely for bright samples.
-        " float bright=smoothstep(0.38,0.86,luminance);\n"+
+        // V1.9.81: near-white wallpaper requires contrast compensation, not
+        // just transparent refraction (the OEM blur underneath can be white).
+        // Continuous luminance response prevents abrupt changes while swiping.
+        " float bright=smoothstep(0.60,0.94,luminance);\n"+
         " float edgeWeight=envelope*envelope;\n"+
-        " float opacity=0.105*edgeWeight*(1.0-bright);\n"+
-        " color.a=half(clamp(opacity,0.0,0.105));\n"+
+        " float refractOpacity=0.105*edgeWeight*(1.0-bright);\n"+
+        " float neutralOpacity=0.19*bright;\n"+
+        " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(bright));\n"+
+        " color.a=half(clamp(refractOpacity+neutralOpacity,0.0,0.19));\n"+
         " return color;\n"+
         "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
@@ -2482,6 +2487,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    private static void invalidateGlassViews(){
+        synchronized(DYNAMIC_REFRACTION){
+            for(View v:DYNAMIC_REFRACTION.keySet()){
+                if(v!=null && v.isAttachedToWindow()){
+                    v.invalidate();
+                    View root=v.getRootView();
+                    if(root!=null)root.invalidate();
+                }
+            }
+        }
+        log("BOOT_CONFIG_INVALIDATED tracked="+DYNAMIC_REFRACTION.size());
+    }
+
     // Restore persisted settings as soon as the hooked process obtains a Context.
     // This is not a background service: LSPosed installs it when Launcher starts.
     private static void hookBootConfigRestore() {
@@ -2493,10 +2511,37 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(p.args.length==0 || !(p.args[0] instanceof android.content.Context))return;
                     // Avoid blocking process startup; drawing will retry if provider isn't ready.
                     final android.content.Context context=(android.content.Context)p.args[0];
-                    new Thread(()->{
-                        refreshFromContext(context);
-                        log("BOOT_CONFIG_RESTORE enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
-                    },"LiquidGlass-ConfigRestore").start();
+                    if (!"com.android.launcher".equals(context.getPackageName())) return;
+                    final android.content.Context app=context.getApplicationContext()==null?context:context.getApplicationContext();
+                    final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
+                    // Direct-boot/credential storage can make the config provider
+                    // unavailable when Launcher starts. Retry after unlock without
+                    // killing Launcher. No persistent polling or background service.
+                    final Runnable restore=new Runnable(){
+                        @Override public void run(){
+                            new Thread(()->{
+                                boolean wasLoaded=configEverLoaded;
+                                refreshFromContext(app);
+                                log("BOOT_CONFIG_RESTORE loaded="+configEverLoaded+" enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
+                                if(!wasLoaded && configEverLoaded)handler.post(()->invalidateGlassViews());
+                            },"LiquidGlass-ConfigRestore").start();
+                        }
+                    };
+                    restore.run();
+                    handler.postDelayed(restore,2000L);
+                    handler.postDelayed(restore,8000L);
+                    handler.postDelayed(restore,25000L);
+                    handler.postDelayed(restore,60000L);
+                    try {
+                        android.content.IntentFilter filter=new android.content.IntentFilter(android.content.Intent.ACTION_USER_UNLOCKED);
+                        app.registerReceiver(new android.content.BroadcastReceiver(){
+                            @Override public void onReceive(android.content.Context c,android.content.Intent i){
+                                lastRead=0L;
+                                handler.postDelayed(restore,1000L);
+                                handler.postDelayed(restore,4000L);
+                            }
+                        },filter);
+                    }catch(Throwable t){log("BOOT_UNLOCK_LISTENER_FAILED "+t.getClass().getSimpleName());}
                 }
             });
             log("BOOT_CONFIG_RESTORE_HOOK_READY");
