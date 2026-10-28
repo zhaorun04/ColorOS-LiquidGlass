@@ -348,6 +348,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static volatile int wallpaperImageW = -1, wallpaperImageH = -1;
     private static volatile int wallpaperDisplayW = -1, wallpaperDisplayH = -1;
+    private static volatile int wallpaperDesiredW = -1, wallpaperDesiredH = -1;
+    private static int mappingModelLogs = 0;
     // V1.9.47: diagnostic-only, one-shot, tiny source-image region decode.
     // The sampled points are in SOURCE IMAGE coordinates, not verified screen coordinates.
     // This never draws sampled pixels and never retains the wallpaper bitmap.
@@ -399,6 +401,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(display!=null) display.getRealSize(real);
             wallpaperDisplayW=real.x; wallpaperDisplayH=real.y;
             int desiredW=wm.getDesiredMinimumWidth(), desiredH=wm.getDesiredMinimumHeight();
+            wallpaperDesiredW=desiredW; wallpaperDesiredH=desiredH;
             log("REFRACTION_WALLPAPER_GEOMETRY displayReal="+real.x+"x"+real.y
                 +" desiredMinimum="+desiredW+"x"+desiredH
                 +" note=desired_minimum_not_rendered_size");
@@ -424,6 +427,51 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("REFRACTION_MAPPING_STATUS mode=METADATA_ONLY actualCrop=UNKNOWN actualScale=UNKNOWN"
                 +" compositorTransform=UNKNOWN wallpaperPixels=NOT_SAMPLED");
         } catch(Throwable t){log("REFRACTION_WALLPAPER_GEOMETRY_ERROR "+t.getClass().getSimpleName());}
+    }
+    // V1.9.48: hypothetical screen->source mappings. These are NOT compositor measurements.
+    // Center-crop assumes a static source image scaled uniformly to fill the display.
+    // A second model assumes the source is uniformly scaled to at least desiredMinimumWidth.
+    private static String mappingHypothesis(String name, float scale, float offset,
+                                            float sx, float sy, int iw, int ih, int dw, int dh) {
+        if (!(scale > 0f) || Float.isNaN(scale) || Float.isInfinite(scale)) return name + "=INVALID_SCALE";
+        float renderedW = iw * scale, renderedH = ih * scale;
+        float extraX = Math.max(0f, renderedW - dw);
+        float extraY = Math.max(0f, renderedH - dh);
+        // Android wallpaper offset request is treated as a hypothesis for excess-image panning.
+        float sourceX = (sx + extraX * offset) / scale;
+        float sourceY = (sy + extraY * 0.5f) / scale;
+        boolean inside = sourceX >= 0f && sourceX < iw && sourceY >= 0f && sourceY < ih;
+        return name + "{scale=" + fmt(scale) + ",rendered=" + Math.round(renderedW) + "x"
+            + Math.round(renderedH) + ",excess=" + Math.round(extraX) + "x" + Math.round(extraY)
+            + ",src=" + fmt(sourceX) + "," + fmt(sourceY) + ",inside=" + inside + "}";
+    }
+    private static String fmt(float n) {
+        return String.format(java.util.Locale.US, "%.3f", n);
+    }
+    private static void inspectMappingModels(View folder, int x, int y, int w, int h,
+                                             int sw, int sh, boolean visible, long now) {
+        if (mappingModelLogs >= 32 || !visible || wallpaperImageW <= 0 || wallpaperImageH <= 0
+            || wallpaperDisplayW <= 0 || wallpaperDisplayH <= 0) return;
+        // The request is process-local and may be stale when a folder first appears.
+        long age = wallpaperOffsetTime == 0 ? -1 : now - wallpaperOffsetTime;
+        float offset = wallpaperRequestedX;
+        if (age < 0 || age > 2000 || Float.isNaN(offset) || offset < 0f || offset > 1f) {
+            if (mappingModelLogs++ < 32) log("REFRACTION_MAPPING_MODELS status=SKIPPED reason=offset_stale_or_invalid ageMs="+age
+                +" id="+Integer.toHexString(System.identityHashCode(folder)));
+            return;
+        }
+        int iw=wallpaperImageW, ih=wallpaperImageH, dw=wallpaperDisplayW, dh=wallpaperDisplayH;
+        float sx=Math.max(0f,Math.min(dw-1f,x+w*0.5f));
+        float sy=Math.max(0f,Math.min(dh-1f,y+h*0.5f));
+        float coverScale=Math.max((float)dw/iw,(float)dh/ih);
+        float desiredScale=wallpaperDesiredW>0 ? Math.max(coverScale,(float)wallpaperDesiredW/iw) : Float.NaN;
+        mappingModelLogs++;
+        log("REFRACTION_MAPPING_MODELS status=HYPOTHETICAL id="+Integer.toHexString(System.identityHashCode(folder))
+            +" screenPoint=["+fmt(sx)+","+fmt(sy)+"] wallpaperOffsetRequest="+fmt(offset)
+            +" offsetAgeMs="+age
+            +" "+mappingHypothesis("CENTER_COVER",coverScale,offset,sx,sy,iw,ih,dw,dh)
+            +" "+mappingHypothesis("DESIRED_WIDTH",desiredScale,offset,sx,sy,iw,ih,dw,dh)
+            +" compositorCrop=UNKNOWN compositorScale=UNKNOWN verified=false pixelsRead=false rendering=false");
     }
     private static void inspectScrollCoordinates(View folder) {
         if (!diagnostics || refractionMotionLogs >= 48 || !folder.isAttachedToWindow()) return;
@@ -468,6 +516,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     +" wallpaperRequest=["+wallpaperRequestedX+","+wallpaperRequestedY+"]"
                     +" metadataReady="+valid+" mappingVerified=false reason=final_crop_scale_unavailable");
             }
+            inspectMappingModels(folder,screen[0],screen[1],w,h,sw,sh,visible,now);
             refractionMotionLogs++;
             log("REFRACTION_SCROLL_SAMPLE id="+Integer.toHexString(System.identityHashCode(folder))
                 +" screen=["+screen[0]+","+screen[1]+"] delta=["+dx+","+dy+"]"
