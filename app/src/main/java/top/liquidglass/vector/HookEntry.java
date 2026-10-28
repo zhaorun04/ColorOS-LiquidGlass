@@ -909,7 +909,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 if (param.args!=null) for(Object arg:param.args) {
                                     if (arg instanceof Canvas) { targetCanvas=(Canvas)arg; break; }
                                 }
-                                if (targetCanvas!=null && glassEnabled && probeMode!=1) {
+                                if (false && targetCanvas!=null && glassEnabled && probeMode!=1) { // V1.9.25: legacy overlay disabled
                                     Object bg=null;
                                     try {
                                         Method getter=param.thisObject.getClass().getDeclaredMethod("getBgDrawable");
@@ -920,7 +920,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                         try { drawBlurGlassOverlay((Drawable)bg,targetCanvas); }
                                         catch(Throwable e) { if(blurFusionLogs++<10) log("BLUR_FUSION_FAILED reason="+e.getClass().getSimpleName()); }
                                     } else if(blurFusionLogs++<5) log("BLUR_FUSION_SKIPPED reason=not_blur_drawable class="+drawableTag(bg));
-                                } else if(blurFusionLogs++<5) log("BLUR_FUSION_SKIPPED reason="+(targetCanvas==null?"no_canvas":"material_disabled"));
+                                } else if(blurFusionLogs++<5) log("BLUR_FUSION_SKIPPED reason="+(targetCanvas==null?"no_canvas":"legacy_overlay_disabled"));
                                 if (diagnostics && previewTraceLogs++ < 32) {
                                     Object result=null;
                                     try { Method bg=param.thisObject.getClass().getDeclaredMethod("getBgDrawable"); bg.setAccessible(true); result=bg.invoke(param.thisObject); }
