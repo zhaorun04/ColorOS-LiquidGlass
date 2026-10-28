@@ -443,6 +443,38 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 +" rendering=false");
         } finally { if (decoder != null) try { decoder.recycle(); } catch (Throwable ignored) {} }
     }
+    // V1.9.53: explicit diagnostic opt-in; publish a bounded JPEG preview to the
+    // module's private provider, never the full-resolution wallpaper or screenshots.
+    private static void publishCalibrationPreview(View folder, int sourceW, int sourceH) {
+        android.os.ParcelFileDescriptor fd=null;
+        android.graphics.Bitmap sample=null;
+        try {
+            android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(folder.getContext());
+            fd=wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM);
+            if(fd==null){log("REFRACTION_CALIBRATION_SOURCE status=NO_FILE");return;}
+            android.graphics.BitmapFactory.Options o=new android.graphics.BitmapFactory.Options();
+            o.inSampleSize=Math.max(1,Math.max(sourceW/480,sourceH/900));
+            sample=android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,o);
+            if(sample==null){log("REFRACTION_CALIBRATION_SOURCE status=DECODE_NULL");return;}
+            // Cap binder payload; downsample further when required.
+            java.io.ByteArrayOutputStream stream=new java.io.ByteArrayOutputStream();
+            sample.compress(android.graphics.Bitmap.CompressFormat.JPEG,68,stream);
+            byte[] jpeg=stream.toByteArray();
+            if(jpeg.length>320000){stream.reset();sample.compress(android.graphics.Bitmap.CompressFormat.JPEG,40,stream);jpeg=stream.toByteArray();}
+            if(jpeg.length>320000){log("REFRACTION_CALIBRATION_SOURCE status=TOO_LARGE");return;}
+            android.os.Bundle data=new android.os.Bundle();
+            data.putByteArray("jpeg",jpeg);data.putInt("sourceW",sourceW);data.putInt("sourceH",sourceH);
+            try {data.putInt("wallpaperId",wm.getWallpaperId(android.app.WallpaperManager.FLAG_SYSTEM));}
+            catch(Throwable ignored){data.putInt("wallpaperId",-1);}
+            android.os.Bundle result=folder.getContext().getContentResolver().call(
+                android.net.Uri.parse("content://top.liquidglass.vector.config/settings"),
+                "publishCalibrationPreview",null,data);
+            log("REFRACTION_CALIBRATION_SOURCE status="+(result==null?"NULL_REPLY":result.getString("status","UNKNOWN"))
+                +" source="+sourceW+"x"+sourceH+" preview="+sample.getWidth()+"x"+sample.getHeight()
+                +" bytes="+jpeg.length+" mappingVerified=false");
+        }catch(Throwable t){log("REFRACTION_CALIBRATION_SOURCE status=ERROR reason="+t.getClass().getSimpleName());}
+        finally {if(sample!=null)sample.recycle();if(fd!=null)try{fd.close();}catch(Throwable ignored){}}
+    }
     private static void inspectWallpaperGeometry(View folder) {
         if (!diagnostics || !WALLPAPER_GEOMETRY_ONCE.compareAndSet(false, true)) return;
         try {
@@ -470,6 +502,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         +" bitmapRead=false pixelsRead=false");
                     // Explicit diagnostics opt-in only. Never use these pixels for the folder UI.
                     inspectWallpaperPixels(fd, wallpaperImageW, wallpaperImageH);
+                    if(wallpaperImageW>0&&wallpaperImageH>0) publishCalibrationPreview(folder,wallpaperImageW,wallpaperImageH);
                 }
             } catch (Throwable t) {
                 log("REFRACTION_WALLPAPER_FILE status=UNAVAILABLE reason="+t.getClass().getSimpleName()

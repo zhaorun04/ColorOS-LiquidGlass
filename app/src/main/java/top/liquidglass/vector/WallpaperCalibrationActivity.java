@@ -24,24 +24,44 @@ public final class WallpaperCalibrationActivity extends Activity {
         screenW=dm.widthPixels;screenH=dm.heightPixels;
         WallpaperManager wm=WallpaperManager.getInstance(this);
         desiredW=wm.getDesiredMinimumWidth();
-        android.os.ParcelFileDescriptor fd=null;
+        // Read only from our app's private provider. The Launcher publishes this
+        // preview when detailed diagnostics run; no wallpaper permission is needed here.
+        String previewStatus="MISSING";
         try {
-            fd=wm.getWallpaperFile(WallpaperManager.FLAG_SYSTEM);
-            if(fd!=null){
-                BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;
-                BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,o);
-                imageW=o.outWidth;imageH=o.outHeight;
-                // A bounded preview decode avoids full-resolution allocations.
-                o=new BitmapFactory.Options();o.inSampleSize=8;
-                source=BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,o);
+            android.os.Bundle bundle=getContentResolver().call(
+                android.net.Uri.parse("content://top.liquidglass.vector.config/settings"),
+                "readCalibrationPreview",null,null);
+            if(bundle!=null){
+                previewStatus=bundle.getString("status","UNKNOWN");
+                if("OK".equals(previewStatus)){
+                    imageW=bundle.getInt("sourceW",0);imageH=bundle.getInt("sourceH",0);
+                    byte[] jpeg=bundle.getByteArray("jpeg");
+                    if(jpeg!=null)source=BitmapFactory.decodeByteArray(jpeg,0,jpeg.length);
+                    if(source==null||imageW<=0||imageH<=0)previewStatus="INVALID_IMAGE";
+                    int cachedId=bundle.getInt("wallpaperId",-1);
+                    try {
+                        int currentId=wm.getWallpaperId(WallpaperManager.FLAG_SYSTEM);
+                        if(cachedId>=0 && currentId>=0 && cachedId!=currentId)previewStatus="WALLPAPER_CHANGED";
+                    }catch(Throwable ignored){}
+                    long age=System.currentTimeMillis()-bundle.getLong("time",0);
+                    if(age<0 || age>86400000L)previewStatus="STALE_PREVIEW";
+                }
             }
-        }catch(Throwable ignored){}finally{if(fd!=null)try{fd.close();}catch(Throwable ignored){}}
+        }catch(Throwable t){previewStatus="READ_"+t.getClass().getSimpleName();}
+        if(!"OK".equals(previewStatus)){
+            if(source!=null){source.recycle();source=null;}
+            imageW=0;imageH=0;
+        }
+        final String statusText=previewStatus;
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(18,28,18,18);
         root.setBackgroundColor(0x11000000);
-        TextView heading=new TextView(this);heading.setText("V1.9.52 · 壁纸映射目视校准（实验）");
+        TextView heading=new TextView(this);heading.setText("V1.9.53 · 壁纸映射目视校准（实验）");
         heading.setTextColor(Color.WHITE);heading.setTextSize(18);heading.setShadowLayer(3,1,1,Color.BLACK);root.addView(heading);
         info=new TextView(this);info.setTextColor(Color.WHITE);info.setTextSize(12);info.setShadowLayer(3,1,1,Color.BLACK);root.addView(info);
+        TextView state=new TextView(this);state.setTextColor(0xFFFFD78C);state.setTextSize(13);
+        state.setText("校准样本："+statusText+("OK".equals(statusText)?"（来自 Launcher 私有缓存）":"\n请开启详细诊断、重启 Launcher、打开文件夹，再返回本页。"));
+        root.addView(state);
         preview=new CalibrationView(this);root.addView(preview,new LinearLayout.LayoutParams(-1,0,1f));
         addSlider(root,"屏幕采样 X",50,v->pointX=v/100f);
         addSlider(root,"屏幕采样 Y",45,v->pointY=v/100f);
