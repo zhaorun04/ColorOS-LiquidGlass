@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.33",23);
-        label("液态玻璃局部高光增强版：左上角聚光反射，保持圆角、直边与透明度逻辑。",14);
+        label("ColorOS Liquid Glass V1.9.34",23);
+        label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
         SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
@@ -62,13 +62,41 @@ public final class MainActivity extends Activity {
         label("建议在模式 0 测试高光宽度 1～5 与方向性反射。模式 2 的红线是几何对照，不是正式外观。",13);
         label("V1.9.28 的圆角校正已保留；本版不改变圆角几何。",14);
         label("原生模糊强度暂不可调：旧滑块误修改圆角半径，已停用。",14);
+        label("V1.9.35：若需研究真实模糊参数，请开启详细诊断并重启桌面，导出 BLUR_PARAMS 日志。只读探测，不会修改模糊半径。",13);
         label("模糊可见度通过 Drawable Alpha 调节，不等于真正改变模糊半径。",13);
         label("原生模糊背景透明度",18);
         final Switch nativeAlpha=toggle("透明度滑块同时控制原生模糊背景","native_alpha_probe",true);
         label("已在 V1.9.29 真机验证有效。控制模糊层可见度，不是模糊半径。",13);
-        label("一键视觉预设",18);
+        label("一键视觉预设（首次应用时保存当前设置）",18);
+        final String[] presetKeys={"enabled","alpha","tint","tint_strength","highlight","highlight_strength","highlight_width","directional_light","probe_mode","native_alpha_probe","native_blur_experiment_enabled","native_blur_experiment"};
+        final boolean[] presetBool={true,false,false,false,true,false,false,true,false,true,true,false};
+        final Runnable savePresetBackup=()->{
+            if(prefs.getBoolean("preset_backup_valid",false))return;
+            SharedPreferences.Editor e=prefs.edit();
+            for(int i=0;i<presetKeys.length;i++){
+                String k=presetKeys[i];
+                if(presetBool[i])e.putBoolean("preset_backup_"+k,prefs.getBoolean(k,false));
+                else e.putInt("preset_backup_"+k,prefs.getInt(k,0));
+            }
+            e.putBoolean("preset_backup_valid",true).commit();
+        };
+        final Switch[] nativeExpUi=new Switch[1];
+        final Runnable syncPresetUi=()->{
+            enabled.setChecked(prefs.getBoolean("enabled",false));
+            normal.setProgress(Math.max(0,prefs.getInt("alpha",210)-40));
+            tint.setSelection(prefs.getInt("tint",0));
+            tintStrength.setProgress(prefs.getInt("tint_strength",30));
+            highlight.setChecked(prefs.getBoolean("highlight",false));
+            highlightStrength.setProgress(prefs.getInt("highlight_strength",35));
+            highlightWidth.setProgress(Math.max(0,prefs.getInt("highlight_width",2)-1));
+            directional.setChecked(prefs.getBoolean("directional_light",true));
+            probe.setSelection(prefs.getInt("probe_mode",0));
+            nativeAlpha.setChecked(prefs.getBoolean("native_alpha_probe",true));
+            if(nativeExpUi[0]!=null)nativeExpUi[0].setChecked(prefs.getBoolean("native_blur_experiment_enabled",false));
+        };
         Button clearPreset=new Button(this);clearPreset.setText("应用清透液态玻璃预设");root.addView(clearPreset);
         clearPreset.setOnClickListener(v->{
+            savePresetBackup.run();
             prefs.edit().putBoolean("enabled",true).putInt("alpha",95)
                 .putInt("tint",0).putInt("tint_strength",20)
                 .putBoolean("highlight",true).putInt("highlight_strength",55)
@@ -80,13 +108,37 @@ public final class MainActivity extends Activity {
             directional.setChecked(true);probe.setSelection(0);nativeAlpha.setChecked(true);
             Toast.makeText(this,"已应用清透预设；原生模糊开关保持原设置，返回桌面查看效果",Toast.LENGTH_LONG).show();
         });
-        label("预设：背景不透明度 95/255、原生色调、高光 55/100、宽度 2 px。可继续手动微调。",13);
+        Button restorePreset=new Button(this);restorePreset.setText("恢复应用预设前的设置");root.addView(restorePreset);
+        restorePreset.setOnClickListener(v->{
+            if(!prefs.getBoolean("preset_backup_valid",false)){
+                Toast.makeText(this,"暂无预设前的设置备份",Toast.LENGTH_SHORT).show();return;
+            }
+            SharedPreferences.Editor e=prefs.edit();
+            for(int i=0;i<presetKeys.length;i++){
+                String k=presetKeys[i];
+                if(presetBool[i])e.putBoolean(k,prefs.getBoolean("preset_backup_"+k,false));
+                else e.putInt(k,prefs.getInt("preset_backup_"+k,0));
+                e.remove("preset_backup_"+k);
+            }
+            e.remove("preset_backup_valid").commit();
+            syncPresetUi.run();
+            Toast.makeText(this,"已恢复预设前设置；若原生模糊状态改变请重启桌面",Toast.LENGTH_LONG).show();
+        });
+        label("预设：背景不透明度 95/255、原生色调、高光 55/100、宽度 2 px。原生模糊默认保留当前开关。",13);
         label("ColorOS 原生模糊隔离实验（切换后重启桌面生效）",18);
         final Switch nativeExp=toggle("实验 A：仅将材质模糊开关返回值设为 true（风险：桌面异常）","native_blur_experiment_enabled",false);
+        Button presetWithBlur=new Button(this);presetWithBlur.setText("应用清透预设并开启原生模糊");root.addView(presetWithBlur);
+        presetWithBlur.setOnClickListener(v->{
+            clearPreset.performClick();
+            nativeExp.setChecked(true);
+            prefs.edit().putBoolean("native_blur_experiment_enabled",true).putInt("native_blur_experiment",1).commit();
+            Toast.makeText(this,"已开启原生模糊实验；请重启桌面使其生效",Toast.LENGTH_LONG).show();
+        });
+        nativeExpUi[0]=nativeExp;
         // Store the integer mode consumed by the provider, not the checkbox key.
         nativeExp.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("native_blur_experiment_enabled",on).putInt("native_blur_experiment",on?1:0).apply());
         label("实验仅修改 Launcher 内部一个已确认的布尔访问器，不修改其他模糊条件。出现闪退或显示异常时关闭此开关并重启桌面。",13);
-        Switch diag=toggle("保留诊断日志","diagnostics",true);
+        Switch diag=toggle("详细诊断日志（排查时开启）","diagnostics",false);
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
         reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
             .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).putBoolean("native_alpha_probe",false).apply();

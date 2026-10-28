@@ -44,7 +44,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile int blurRadiusPercent = 100; // legacy config ignored
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
-    private static volatile boolean diagnostics = true;
+    private static volatile boolean diagnostics = false;
     private static volatile int probeMode = 0;
     private static volatile boolean nativeAlphaProbe = false;
     private static final Set<String> BLUR_API_SEEN = Collections.synchronizedSet(new HashSet<String>());
@@ -62,6 +62,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static int installed, failed, drawCount;
     private static int backgroundCalls, drawableCalls, blurCalls, switchLogs;
     private static void log(String s) {
+        if(!diagnostics && (s.startsWith("PREVIEW_METHOD ") || s.startsWith("PREVIEW_FIELD ") || s.startsWith("NATIVE_BLUR_FIELD ") || s.startsWith("FUSION_GEOMETRY_FIELD ") || s.startsWith("NATIVE_BLUR_API ") || s.startsWith("NATIVE_BLUR_CHILD_API ")))return;
         Log.i(TAG, s);
         try { XposedBridge.log(TAG + ": " + s); } catch (Throwable ignored) {}
     }
@@ -170,6 +171,38 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(tintMode==2)return Color.rgb(185,192,202);
         return Color.rgb(40,50,65);
     }
+    // V1.9.35: read-only, bounded native blur parameter probe. Never mutate OEM blur state.
+    private static void inspectBlurParameters(Object child) {
+        if (!diagnostics || child == null) return;
+        try {
+            Method getter = child.getClass().getMethod("getBlurParams");
+            if (getter.getParameterTypes().length != 0) return;
+            Object params = getter.invoke(child);
+            if (params == null) { log("BLUR_PARAMS null"); return; }
+            log("BLUR_PARAMS_CLASS " + params.getClass().getName());
+            int count = 0;
+            for (Class<?> c = params.getClass(); c != null && count < 20; c = c.getSuperclass()) {
+                for (Field f : c.getDeclaredFields()) {
+                    if (count >= 20) break;
+                    if (Modifier.isStatic(f.getModifiers())) continue;
+                    String name = f.getName().toLowerCase(java.util.Locale.ROOT);
+                    if (!(name.contains("blur") || name.contains("radius") || name.contains("level") || name.contains("sigma") || name.contains("alpha") || name.contains("strength"))) continue;
+                    try {
+                        f.setAccessible(true);
+                        Object value = f.get(params);
+                        if (value == null || value instanceof Number || value instanceof Boolean || value instanceof String) {
+                            log("BLUR_PARAMS_FIELD " + f.getName() + "=" + String.valueOf(value));
+                        } else {
+                            log("BLUR_PARAMS_FIELD " + f.getName() + " type=" + value.getClass().getName());
+                        }
+                    } catch (Throwable t) { log("BLUR_PARAMS_FIELD_ERROR " + f.getName() + "=" + t.getClass().getSimpleName()); }
+                    count++;
+                }
+            }
+            if (count == 0) log("BLUR_PARAMS_NO_MATCHING_FIELDS");
+        } catch (NoSuchMethodException t) { log("BLUR_PARAMS_GETTER_UNAVAILABLE"); }
+        catch (Throwable t) { log("BLUR_PARAMS_ERROR " + t.getClass().getSimpleName()); }
+    }
     private static void applyNativeBackground(View v) {
         refresh(v);
         inspectFolderBlur(v);
@@ -199,6 +232,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                     Object child=d.getClass().getMethod("getBlurDrawable").invoke(d);
                     log("NATIVE_BLUR_CHILD "+(child==null?"null":child.getClass().getName()));
+                    inspectBlurParameters(child);
                     if(child!=null)for(Method method:child.getClass().getMethods()) {
                         String name=method.getName().toLowerCase(java.util.Locale.ROOT);
                         if(name.contains("blur") || name.contains("alpha") || name.contains("radius"))
