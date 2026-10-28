@@ -489,6 +489,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         shade.setXfermode(null);
                         shade.setShader(null);
                     } finally { canvas.restoreToCount(rimLayer); }
+                    // V1.9.33: concentrated top-left specular reflection. Reuse
+                    // the SAME OEM-aligned glow bitmap, so no second contour,
+                    // geometry inset or outline is introduced. The shader only
+                    // changes intensity inside the existing optical rim.
+                    int specLayer=canvas.saveLayer(0,0,cache.w,cache.h,null);
+                    try {
+                        Paint spec=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                        spec.setAlpha(Math.round(190f*strength));
+                        canvas.drawBitmap(cache.glow,0,0,spec);
+                        Paint beam=new Paint(Paint.ANTI_ALIAS_FLAG);
+                        beam.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+                        beam.setShader(new android.graphics.RadialGradient(
+                            cache.w*0.10f,cache.h*0.04f,
+                            Math.max(cache.w,cache.h)*0.78f,
+                            new int[]{0xDFFFFFFF,0x74F1FAFF,0x00FFFFFF},
+                            new float[]{0f,0.38f,1f},
+                            android.graphics.Shader.TileMode.CLAMP));
+                        canvas.drawRect(0,0,cache.w,cache.h,beam);
+                        beam.setXfermode(null);
+                        beam.setShader(null);
+                    } finally { canvas.restoreToCount(specLayer); }
                     // Second pass: soft lower-edge depth; never draws outside mask.
                     int depthLayer=canvas.saveLayer(0,0,cache.w,cache.h,null);
                     try {
