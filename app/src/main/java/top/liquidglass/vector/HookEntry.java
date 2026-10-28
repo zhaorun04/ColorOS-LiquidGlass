@@ -1561,6 +1561,59 @@ public final class HookEntry implements IXposedHookLoadPackage {
             finally{REFRACTION_LOADING=false;}
         }},"LiquidGlass-Wallpaper-Reference").start();
     }
+    // Keep each icon's shader and pre-draw observer in a weak map. No disk IO on UI thread.
+    private static final java.util.Map<View, DynamicRefraction> DYNAMIC_REFRACTION =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, DynamicRefraction>());
+    private static final class DynamicRefraction {
+        final int[] screen=new int[2], window=new int[2];
+        final float[] points=new float[2];
+        final Matrix transform=new Matrix(), shaderMatrix=new Matrix();
+        final Paint samplePaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+        final Paint rimPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Path clip=new Path();
+        android.graphics.BitmapShader shader;
+        android.graphics.Bitmap source;
+        float lastX=Float.NaN,lastY=Float.NaN;
+        android.view.ViewTreeObserver.OnPreDrawListener listener;
+        int moveLogs;
+    }
+    private static DynamicRefraction dynamicState(final View view) {
+        DynamicRefraction state=DYNAMIC_REFRACTION.get(view);
+        if(state!=null)return state;
+        state=new DynamicRefraction();
+        final DynamicRefraction tracked=state;
+        // A parent translation can move a hardware-cached child without dispatchDraw.
+        // Only invalidate on actual screen-coordinate change, never every frame.
+        tracked.listener=new android.view.ViewTreeObserver.OnPreDrawListener(){
+            @Override public boolean onPreDraw(){
+                if(!REFRACTION_ENABLED || REFRACTION_FRAME==null || !view.isAttachedToWindow())return true;
+                try {
+                    float[] xy=dynamicScreenPosition(view,tracked);
+                    if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>.25f || Math.abs(xy[1]-tracked.lastY)>.25f){
+                        tracked.lastX=xy[0];tracked.lastY=xy[1];
+                        view.invalidate();
+                    }
+                }catch(Throwable ignored){}
+                return true;
+            }
+        };
+        view.getViewTreeObserver().addOnPreDrawListener(tracked.listener);
+        DYNAMIC_REFRACTION.put(view,state);
+        return state;
+    }
+    private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
+        state.transform.reset();
+        view.transformMatrixToGlobal(state.transform);
+        state.points[0]=0f;state.points[1]=0f;
+        state.transform.mapPoints(state.points);
+        // transformMatrixToGlobal is in window coordinates; compensate window origin.
+        View root=view.getRootView();
+        root.getLocationOnScreen(state.screen);
+        root.getLocationInWindow(state.window);
+        state.points[0]+=state.screen[0]-state.window[0];
+        state.points[1]+=state.screen[1]-state.window[1];
+        return state.points;
+    }
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(!REFRACTION_ENABLED || rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
@@ -1572,34 +1625,45 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=DISPLAY_MISMATCH frame="+frame.getWidth()+"x"+frame.getHeight()+" display="+sw+"x"+sh);
             return;
         }
-        int[] location=new int[2];view.getLocationOnScreen(location);
-        float left=location[0]+rect.left,top=location[1]+rect.top;
+        DynamicRefraction state=dynamicState(view);
+        float[] xy=dynamicScreenPosition(view,state);
+        float left=xy[0]+rect.left,top=xy[1]+rect.top;
         if(left<0||top<0||left+rect.width()>sw||top+rect.height()>sh)return;
+        if(state.source!=frame){
+            state.source=frame;
+            state.shader=new android.graphics.BitmapShader(frame,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+        }
         int save=canvas.save();
         try {
-            android.graphics.Path shape=new android.graphics.Path();
-            shape.addRoundRect(rect,radius,radius,android.graphics.Path.Direction.CW);
-            canvas.clipPath(shape);
-            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-            android.graphics.BitmapShader shader=new android.graphics.BitmapShader(frame,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
-            android.graphics.Matrix matrix=new android.graphics.Matrix();
-            // Screen-space reference: no wallpaperX, desiredWidth or guessed crop.
-            // Shift source texture toward the center only within the rim.
-            final int bands=24;
+            state.clip.reset();state.clip.addRoundRect(rect,radius,radius,Path.Direction.CW);
+            canvas.clipPath(state.clip);
+            // Fewer bands and reused objects keep per-frame allocation near zero.
+            final int bands=12;
             float band=rect.width()/bands;
             for(int i=0;i<bands;i++){
-                float x0=rect.left+i*band,x1=(i==bands-1?rect.right:x0+band+1);
+                float x0=rect.left+i*band,x1=(i==bands-1?rect.right:x0+band+0.5f);
                 float nx=(i+0.5f)/bands;
                 float distance=Math.min(nx,1f-nx)*2f;
                 float displacement=(float)Math.pow(1f-distance,2.4f)*9f;
                 float dx=nx<0.5f?displacement:-displacement;
-                matrix.reset();matrix.setTranslate(-left+dx,-top);
-                shader.setLocalMatrix(matrix);p.setShader(shader);
-                p.setAlpha(Math.round(170f*(float)Math.pow(1f-distance,2.1f)));
-                canvas.drawRect(x0,rect.top,x1,rect.bottom,p);
+                state.shaderMatrix.reset();state.shaderMatrix.setTranslate(-left+dx,-top);
+                state.shader.setLocalMatrix(state.shaderMatrix);
+                state.samplePaint.setShader(state.shader);
+                state.samplePaint.setAlpha(Math.round(170f*(float)Math.pow(1f-distance,2.1f)));
+                canvas.drawRect(x0,rect.top,x1,rect.bottom,state.samplePaint);
             }
-            p.setShader(null);
-            if(REFRACTION_LOGS++<12)log("REFRACTION_PIXEL_SAMPLE status=DRAWN screenRect=["+left+","+top+","+(left+rect.width())+","+(top+rect.height())+"] bands=24 edgeMaxShift=9 verifiedByUser=true");
+            state.samplePaint.setShader(null);
+            state.rimPaint.setStyle(Paint.Style.STROKE);
+            state.rimPaint.setStrokeWidth(Math.max(1.2f,Math.min(2.4f,rect.width()*0.006f)));
+            state.rimPaint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,
+                rect.right,rect.bottom,new int[]{0xA0FFFFFF,0x35FFFFFF,0x12FFFFFF,0x42DDE9FF},
+                new float[]{0f,0.30f,0.72f,1f},android.graphics.Shader.TileMode.CLAMP));
+            float inset=state.rimPaint.getStrokeWidth()*0.5f+0.5f;
+            canvas.drawRoundRect(rect.left+inset,rect.top+inset,rect.right-inset,rect.bottom-inset,
+                Math.max(0f,radius-inset),Math.max(0f,radius-inset),state.rimPaint);
+            state.rimPaint.setShader(null);
+            if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
+                " sampleX="+left+" sampleY="+top+" bands="+bands+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
     }
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
@@ -1661,8 +1725,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             int save=canvas.save();
             FOLDER_FUSION_GUARD.set(Boolean.TRUE);
             try {
-                canvas.translate(rect.left,rect.top);
                 if(!edgeOnly)drawReferenceRefraction(v,canvas,rect,radius);
+                canvas.translate(rect.left,rect.top);
                 drawUnifiedMaterial(canvas,mask,edgeOnly);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
