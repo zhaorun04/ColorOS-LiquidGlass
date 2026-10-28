@@ -188,6 +188,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Object params = getter.invoke(child);
             if (params == null) { log("BLUR_PARAMS null"); return; }
             log("BLUR_PARAMS_CLASS " + params.getClass().getName());
+            // V1.9.37: log geometry as coordinates, not merely a Rect class name.
+            // Read-only: no setters, no field mutation, no draw calls.
+            for (Method candidate : child.getClass().getMethods()) {
+                String n = candidate.getName().toLowerCase(java.util.Locale.ROOT);
+                if ((n.contains("blur") || n.contains("invalidate") || n.contains("update")) &&
+                        candidate.getParameterTypes().length <= 3) {
+                    log("BLUR_CONTROL_CANDIDATE " + candidate.toGenericString());
+                }
+            }
             int count = 0;
             for (Class<?> c = params.getClass(); c != null && count < 20; c = c.getSuperclass()) {
                 for (Field f : c.getDeclaredFields()) {
@@ -198,7 +207,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     try {
                         f.setAccessible(true);
                         Object value = f.get(params);
-                        if (value == null || value instanceof Number || value instanceof Boolean || value instanceof String) {
+                        if (value instanceof android.graphics.Rect) {
+                            android.graphics.Rect r = (android.graphics.Rect) value;
+                            log("BLUR_PARAMS_RECT " + f.getName() + "=[" + r.left + "," + r.top + "," + r.right + "," + r.bottom + "]");
+                        } else if (value instanceof android.graphics.RectF) {
+                            android.graphics.RectF r = (android.graphics.RectF) value;
+                            log("BLUR_PARAMS_RECT_F " + f.getName() + "=[" + r.left + "," + r.top + "," + r.right + "," + r.bottom + "]");
+                        } else if (value == null || value instanceof Number || value instanceof Boolean || value instanceof String) {
                             log("BLUR_PARAMS_FIELD " + f.getName() + "=" + String.valueOf(value));
                         } else {
                             log("BLUR_PARAMS_FIELD " + f.getName() + " type=" + value.getClass().getName());
@@ -211,9 +226,25 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch (NoSuchMethodException t) { log("BLUR_PARAMS_GETTER_UNAVAILABLE child=" + child.getClass().getName()); }
         catch (Throwable t) { log("BLUR_PARAMS_ERROR " + t.getClass().getSimpleName() + " cause=" + (t.getCause() == null ? "none" : t.getCause().getClass().getSimpleName())); }
     }
+    private static final java.util.concurrent.atomic.AtomicBoolean SAMPLE_FEASIBILITY_LOGGED =
+            new java.util.concurrent.atomic.AtomicBoolean(false);
+    // V1.9.37: strictly read-only feasibility check. No wallpaper capture, no pixel reads.
+    private static void inspectSamplingFeasibility(View folder) {
+        if (!diagnostics || !SAMPLE_FEASIBILITY_LOGGED.compareAndSet(false, true)) return;
+        try {
+            View root = folder.getRootView();
+            log("REFRACTION_FEASIBILITY root=" + (root == null ? "null" : root.getClass().getName())
+                + " folder=" + folder.getWidth() + "x" + folder.getHeight()
+                + " attached=" + folder.isAttachedToWindow());
+            log("REFRACTION_FEASIBILITY status=NOT_IMPLEMENTED reason=requires_safe_backdrop_pixels");
+        } catch (Throwable t) {
+            log("REFRACTION_FEASIBILITY_ERROR " + t.getClass().getSimpleName());
+        }
+    }
     private static void applyNativeBackground(View v) {
         refresh(v);
         inspectFolderBlur(v);
+        inspectSamplingFeasibility(v);
         traceViewHierarchy(v);
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
