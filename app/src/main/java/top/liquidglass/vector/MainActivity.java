@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.23",23);
+        label("ColorOS Liquid Glass V1.9.29",23);
         label("保留现有材质；新增仅针对 Launcher 的原生模糊开关隔离实验。默认关闭，异常时立即关闭并重启桌面。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
@@ -63,6 +63,9 @@ public final class MainActivity extends Activity {
         label("V1.9.23：安全撤回无效模糊半径调节；保留原生模糊与玻璃材质融合，继续诊断圆角双线。",14);
         label("原生模糊强度暂不可调：旧滑块误修改圆角半径，已停用。",14);
         label("建议先尝试 35%～60%。此项调整的是原生半径参数，视觉效果可能非线性；若系统忽略设置，将记录 BLUR_RADIUS_UNSUPPORTED。",13);
+        label("V1.9.29：原生模糊透明度实验",18);
+        toggle("实验：将透明度滑块应用到原生模糊背景（默认关闭）","native_alpha_probe",false);
+        label("仅测试 LayerBlurDrawable.setAlpha() 是否生效，不代表模糊强度可调。若背景异常，关闭此实验并重启桌面。日志 NATIVE_BLUR_API / NATIVE_BLUR_CHILD_API 记录可用方法。",13);
         label("ColorOS 原生模糊隔离实验（切换后重启桌面生效）",18);
         final Switch nativeExp=toggle("实验 A：仅将材质模糊开关返回值设为 true（风险：桌面异常）","native_blur_experiment_enabled",false);
         // Store the integer mode consumed by the provider, not the checkbox key.

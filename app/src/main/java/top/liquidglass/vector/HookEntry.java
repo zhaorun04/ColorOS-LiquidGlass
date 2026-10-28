@@ -45,6 +45,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
     private static volatile int probeMode = 0;
+    private static volatile boolean nativeAlphaProbe = false;
+    private static final Set<String> BLUR_API_SEEN = Collections.synchronizedSet(new HashSet<String>());
     private static volatile int nativeBlurExperiment = 0; // 0=off, 1=only material switch accessor
     private static final java.util.Set<String> EXPERIMENT_ONCE = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     private static int layerTraceLogs = 0;
@@ -144,7 +146,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 probeMode=Math.max(0,Math.min(3,c.getInt(7)));
                 int expIndex=c.getColumnIndex("native_blur_experiment");
                 nativeBlurExperiment=expIndex>=0 ? Math.max(0,Math.min(1,c.getInt(expIndex))) : 0;
-                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent;
+                int alphaProbeIndex=c.getColumnIndex("native_alpha_probe");
+                nativeAlphaProbe=alphaProbeIndex>=0 && c.getInt(alphaProbeIndex)==1;
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -184,13 +188,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
             synchronized(ORIGINAL_ALPHA){if(!ORIGINAL_ALPHA.containsKey(d))ORIGINAL_ALPHA.put(d,d.getAlpha());}
             int original=ORIGINAL_ALPHA.get(d);
             int requested=glassAlpha;
-            int alpha=(d.getClass().getName().endsWith(".LayerBlurDrawable")) ? original : (glassEnabled?requested:original);
+            boolean isBlur=d.getClass().getName().endsWith(".LayerBlurDrawable");
+            if(isBlur && BLUR_API_SEEN.add(d.getClass().getName())) {
+                try {
+                    for(Method method:d.getClass().getMethods()) {
+                        String name=method.getName().toLowerCase(java.util.Locale.ROOT);
+                        if(name.contains("blur") || name.contains("alpha") || name.contains("radius"))
+                            log("NATIVE_BLUR_API "+method.toGenericString());
+                    }
+                    Object child=d.getClass().getMethod("getBlurDrawable").invoke(d);
+                    log("NATIVE_BLUR_CHILD "+(child==null?"null":child.getClass().getName()));
+                    if(child!=null)for(Method method:child.getClass().getMethods()) {
+                        String name=method.getName().toLowerCase(java.util.Locale.ROOT);
+                        if(name.contains("blur") || name.contains("alpha") || name.contains("radius"))
+                            log("NATIVE_BLUR_CHILD_API "+method.toGenericString());
+                    }
+                }catch(Throwable t){log("NATIVE_BLUR_API_ERROR "+t.getClass().getSimpleName());}
+            }
+            // Experimental alpha is opt-in. It does not change blur radius.
+            int alpha=isBlur ? (glassEnabled && nativeAlphaProbe ? requested : original) : (glassEnabled?requested:original);
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
             // V1.9.4 tint is painted directly on the native Canvas after background.draw.
             // Clear any legacy color filter previously applied by V1.9.3.
             synchronized(TINTED){if(TINTED.remove(d))d.clearColorFilter();}
             if(alphaLogs++<16)log("MATERIAL_APPLIED enabled="+glassEnabled+" size="+v.getWidth()+"x"+v.getHeight()+
-                " alpha="+alpha+" tint="+tintMode+" drawable="+drawableTag(d));
+                " alpha="+alpha+" nativeAlphaProbe="+nativeAlphaProbe+" tint="+tintMode+" drawable="+drawableTag(d));
         }catch(Throwable t){if(alphaLogs++<12)log("MATERIAL_FAILED reason="+t.getClass().getSimpleName());}
     }
     // Weak references avoid retaining Launcher drawables beyond their lifecycle.
