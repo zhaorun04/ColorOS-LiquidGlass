@@ -1500,26 +1500,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         beam.setXfermode(null);
                         beam.setShader(null);
                     } finally { canvas.restoreToCount(specLayer); }
-                    // Second pass: soft lower-edge depth; never draws outside mask.
-                    int depthLayer=canvas.saveLayer(0,0,cache.w,cache.h,null);
-                    try {
-                        Paint depth=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-                        depth.setAlpha(Math.round(125f*strength));
-                        canvas.drawBitmap(cache.glow,0,0,depth);
-                        Paint dark=new Paint(Paint.ANTI_ALIAS_FLAG);
-                        dark.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
-                        dark.setShader(new android.graphics.LinearGradient(
-                            0f,cache.h*0.25f,0f,cache.h,
-                            new int[]{0x00000000,0x00243850,0x7034495C,0xA025384A},
-                            new float[]{0f,0.42f,0.8f,1f},
-                            android.graphics.Shader.TileMode.CLAMP));
-                        canvas.drawRect(0,0,cache.w,cache.h,dark);
-                        dark.setXfermode(null);
-                        dark.setShader(null);
-                    } finally { canvas.restoreToCount(depthLayer); }
-                    // Size-aware internal shading: small baseline, tall moderate,
-                    // large stronger and wider. The existing rim remains intact.
-                    drawAdaptiveBottomDepth(canvas, cache, strength);
+                    // V1.9.74: no additional bottom-right dark arc. The OEM
+                    // folder already supplies its own shadow and corner antialiasing.
+
                 }
             }
         }
@@ -1705,16 +1688,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
             }
             state.samplePaint.setShader(null);
-            state.rimPaint.setStyle(Paint.Style.STROKE);
-            state.rimPaint.setStrokeWidth(Math.max(1.2f,Math.min(2.4f,rect.width()*0.006f)));
-            if(state.rimGradient==null)state.rimGradient=new android.graphics.LinearGradient(rect.left,rect.top,
-                rect.right,rect.bottom,new int[]{0xA0FFFFFF,0x35FFFFFF,0x12FFFFFF,0x42DDE9FF},
-                new float[]{0f,0.30f,0.72f,1f},android.graphics.Shader.TileMode.CLAMP);
-            state.rimPaint.setShader(state.rimGradient);
-            float inset=state.rimPaint.getStrokeWidth()*0.5f+0.5f;
-            canvas.drawRoundRect(rect.left+inset,rect.top+inset,rect.right-inset,rect.bottom-inset,
-                Math.max(0f,contourRadius-inset),Math.max(0f,contourRadius-inset),state.rimPaint);
-            state.rimPaint.setShader(null);
+            // V1.9.74: the refraction pass must not draw a second outline.
+            // The unified highlight renderer owns the complete edge treatment.
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
                 " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
