@@ -17,6 +17,10 @@ public final class WallpaperCalibrationActivity extends Activity {
     private float pointX=.5f, pointY=.45f, offsetX=.5f;
     private float verticalShiftPx=0f, scaleCorrection=1f;
     private int insetTop=0, insetBottom=0, viewScreenTop=0;
+    private final float[] savedX={Float.NaN,Float.NaN},savedY={Float.NaN,Float.NaN};
+    private final float[] savedShift={0f,0f},savedScale={1f,1f};
+    private int activePoint=0;
+    private TextView anchors;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
@@ -58,13 +62,18 @@ public final class WallpaperCalibrationActivity extends Activity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(18,28,18,18);
         root.setBackgroundColor(0x11000000);
-        TextView heading=new TextView(this);heading.setText("V1.9.54 · 壁纸垂直映射校准（实验）");
+        TextView heading=new TextView(this);heading.setText("V1.9.55 · 采样中心与双点校准（实验）");
         heading.setTextColor(Color.WHITE);heading.setTextSize(18);heading.setShadowLayer(3,1,1,Color.BLACK);root.addView(heading);
         info=new TextView(this);info.setTextColor(Color.WHITE);info.setTextSize(12);info.setShadowLayer(3,1,1,Color.BLACK);root.addView(info);
         TextView state=new TextView(this);state.setTextColor(0xFFFFD78C);state.setTextSize(13);
         state.setText("校准样本："+statusText+("OK".equals(statusText)?"（来自 Launcher 私有缓存）":"\n请开启详细诊断、重启 Launcher、打开文件夹，再返回本页。"));
         root.addView(state);
         preview=new CalibrationView(this);root.addView(preview,new LinearLayout.LayoutParams(-1,0,1f));
+        LinearLayout buttons=new LinearLayout(this);buttons.setOrientation(LinearLayout.HORIZONTAL);
+        Button saveA=new Button(this);saveA.setText("记录点 A");saveA.setOnClickListener(v->savePoint(0));buttons.addView(saveA,new LinearLayout.LayoutParams(0,-2,1));
+        Button saveB=new Button(this);saveB.setText("记录点 B");saveB.setOnClickListener(v->savePoint(1));buttons.addView(saveB,new LinearLayout.LayoutParams(0,-2,1));
+        root.addView(buttons);
+        anchors=new TextView(this);anchors.setTextColor(Color.WHITE);anchors.setTextSize(11);root.addView(anchors);
         // Geometry comes from the actual activity window, not assumed status-bar dimensions.
         root.setOnApplyWindowInsetsListener((v,insets)->{
             insetTop=insets.getSystemWindowInsetTop();insetBottom=insets.getSystemWindowInsetBottom();
@@ -75,7 +84,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         addSlider(root,"假设的壁纸水平偏移",50,v->offsetX=v/100f);
         addSlider(root,"原图垂直平移（-400 至 +400 像素）",50,v->verticalShiftPx=(v-50)*8f);
         addSlider(root,"模型缩放修正（0.75 至 1.25 倍）",50,v->scaleCorrection=.75f+v*.005f);
-        TextView warning=new TextView(this);warning.setText("注意：黄色十字是采样屏幕坐标在本页的定位提示，不是系统壁纸纹理上的真实锚点。垂直平移和缩放只调整候选采样模型；独立 Activity 与桌面壁纸的裁切可能不同。均未验证；不录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
+        TextView warning=new TextView(this);warning.setText("注意：候选图中央十字严格对应标出的原图采样坐标（包括靠近边缘时）；黄色屏幕十字只是页面定位提示。点 A/B 保存的是当前手动校准参数，不能自动证明映射正确。独立 Activity 与 Launcher 裁切可能不同。未启用折射或录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
         setContentView(root);root.post(this::update);update();
     }
     interface Change {void apply(int v);}
@@ -87,8 +96,25 @@ public final class WallpaperCalibrationActivity extends Activity {
             public void onStartTrackingTouch(SeekBar b){}public void onStopTrackingTouch(SeekBar b){}
         });
     }
+    private void savePoint(int which){
+        savedX[which]=pointX*screenW;savedY[which]=pointY*screenH;
+        savedShift[which]=verticalShiftPx;savedScale[which]=scaleCorrection;
+        activePoint=which;update();
+    }
+    private String pointSummary(int which){
+        if(Float.isNaN(savedX[which]))return (which==0?"A":"B")+": 未记录";
+        return String.format(java.util.Locale.US,"%s: 屏幕(%.0f,%.0f) Y平移%+.0f 缩放%.3f",which==0?"A":"B",savedX[which],savedY[which],savedShift[which],savedScale[which]);
+    }
     private void update(){
         if(preview!=null){int[] loc=new int[2];preview.getLocationOnScreen(loc);viewScreenTop=loc[1];preview.invalidate();}
+        if(anchors!=null){
+            String diff="";
+            if(!Float.isNaN(savedX[0])&&!Float.isNaN(savedX[1])){
+                float dy=savedY[1]-savedY[0];float ds=savedShift[1]-savedShift[0];
+                diff=String.format(java.util.Locale.US,"\n双点差: 屏幕ΔY=%.0f, 所需平移ΔY=%+.0f。若不同高度需要不同补偿，优先排查缩放。",dy,ds);
+            }
+            anchors.setText(pointSummary(0)+"\n"+pointSummary(1)+diff);
+        }
         if(info!=null)info.setText("原图 "+imageW+"×"+imageH+" · 屏幕 "+screenW+"×"+screenH+" · 期望宽度 "+desiredW
             +"\n采样屏幕坐标 ("+(int)(pointX*screenW)+","+(int)(pointY*screenH)+") 偏移 "+String.format(java.util.Locale.US,"%.2f",offsetX)
             +"\nInsets 上/下 "+insetTop+"/"+insetBottom+" · 预览屏幕Y="+viewScreenTop
@@ -110,17 +136,39 @@ public final class WallpaperCalibrationActivity extends Activity {
                 float xx=x+i*(side+12f);RectF dst=new RectF(xx,y,xx+side,y+side);
                 p.setColor(0xFF26323B);c.drawRect(dst,p);
                 if(source!=null&&!source.isRecycled()&&scales[i]>0f){
-                    float scale=scales[i]*scaleCorrection;float px=(pointX*screenW+Math.max(0f,imageW*scale-screenW)*offsetX)/scale;
+                    float scale=scales[i]*scaleCorrection;
+                    float px=(pointX*screenW+Math.max(0f,imageW*scale-screenW)*offsetX)/scale;
                     float py=(pointY*screenH+verticalShiftPx+Math.max(0f,imageH*scale-screenH)*.5f)/scale;
-                    float radius=Math.min(imageW,imageH)*.065f;
-                    float l=Math.max(0,px-radius),t=Math.max(0,py-radius),r=Math.min(imageW,px+radius),b=Math.min(imageH,py+radius);
-                    Rect src=new Rect((int)(l*source.getWidth()/imageW),(int)(t*source.getHeight()/imageH),
-                        Math.max(1,(int)(r*source.getWidth()/imageW)),Math.max(1,(int)(b*source.getHeight()/imageH)));
-                    p.setColor(Color.WHITE);p.setFilterBitmap(true);c.drawBitmap(source,src,dst,p);
+                    // Convert the actual source center once, then construct a fixed-size
+                    // source rectangle around it. Never silently shift the center at edges.
+                    float cacheX=px*source.getWidth()/imageW;
+                    float cacheY=py*source.getHeight()/imageH;
+                    float radius=Math.min(source.getWidth(),source.getHeight())*.065f;
+                    float l=cacheX-radius,t=cacheY-radius,r=cacheX+radius,b=cacheY+radius;
+                    RectF srcF=new RectF(l,t,r,b);
+                    RectF visible=new RectF(Math.max(0,l),Math.max(0,t),Math.min(source.getWidth(),r),Math.min(source.getHeight(),b));
+                    if(visible.width()>0&&visible.height()>0){
+                        Rect src=new Rect((int)Math.floor(visible.left),(int)Math.floor(visible.top),
+                            Math.min(source.getWidth(),(int)Math.ceil(visible.right)),Math.min(source.getHeight(),(int)Math.ceil(visible.bottom)));
+                        RectF actualDst=new RectF(dst.left+(src.left-srcF.left)/srcF.width()*dst.width(),
+                            dst.top+(src.top-srcF.top)/srcF.height()*dst.height(),
+                            dst.left+(src.right-srcF.left)/srcF.width()*dst.width(),
+                            dst.top+(src.bottom-srcF.top)/srcF.height()*dst.height());
+                        p.setColor(Color.WHITE);p.setFilterBitmap(true);c.save();c.clipRect(dst);c.drawBitmap(source,src,actualDst,p);c.restore();
+                    }
+                    p.setColor(Color.WHITE);p.setTextSize(10f*getResources().getDisplayMetrics().scaledDensity);
+                    c.drawText(String.format(java.util.Locale.US,"原图(%.1f,%.1f)",px,py),xx+4,y+side-8,p);
+                    p.setColor(0xFFFFE4A0);
+                    if(px>=0&&px<imageW&&py>=0&&py<imageH){
+                        c.drawLine(dst.centerX()-8,dst.centerY(),dst.centerX()+8,dst.centerY(),p);
+                        c.drawLine(dst.centerX(),dst.centerY()-8,dst.centerX(),dst.centerY()+8,p);
+                    }else{
+                        c.drawText("越界",dst.centerX()-18,dst.centerY(),p);
+                    }
+                }else{
+                    p.setColor(Color.WHITE);c.drawText("无可用壁纸预览",xx+10,y+side*.5f,p);
                 }
                 p.setColor(Color.WHITE);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(2);c.drawRect(dst,p);p.setStyle(Paint.Style.FILL);
-                p.setColor(0xFFFFE4A0);c.drawLine(dst.centerX()-8,dst.centerY(),dst.centerX()+8,dst.centerY(),p);
-                c.drawLine(dst.centerX(),dst.centerY()-8,dst.centerX(),dst.centerY()+8,p);
             }
             // Map absolute screen position into this View's local coordinates.
             // Do not compress the Y axis to fit the available drawing area.
