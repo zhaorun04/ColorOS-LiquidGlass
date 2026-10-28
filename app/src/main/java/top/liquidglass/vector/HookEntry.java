@@ -358,26 +358,24 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // NOT claim to capture the internal LayerBlurDrawable alpha pixels.
     private static final java.util.Map<String, MaskCache> BLUR_SHAPE_MASKS =
         new java.util.LinkedHashMap<String, MaskCache>();
-    // V1.9.27: a conservative INWARD mask for LayerBlurDrawable only.
-    // OEM Outline is not guaranteed to match the visible blur edge. Keep a
-    // safety margin instead of allowing synthetic highlight pixels outside it.
-    private static final int BLUR_EDGE_SAFE_INSET_PX = 3;
+    // V1.9.28: preserve all four straight edges; correct only the corner curve.
+    // This is a geometry experiment, not an exact OEM LayerBlurDrawable alpha mask.
+    private static final float BLUR_CORNER_RADIUS_DELTA_PX = 6f;
     private static MaskCache blurShapeMask(int w,int h,float radius) {
-        String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth+"/inset"+BLUR_EDGE_SAFE_INSET_PX;
+        String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth+"/cornerDelta"+BLUR_CORNER_RADIUS_DELTA_PX;
         synchronized(BLUR_SHAPE_MASKS) {
             MaskCache cached=BLUR_SHAPE_MASKS.get(key);
             if(cached!=null)return cached;
         }
         if(w<8||h<8||w>1400||h>1400)return null;
         try {
-            final int inset=BLUR_EDGE_SAFE_INSET_PX;
+            final float correctedRadius=Math.min(Math.min(w,h)*0.5f, radius+BLUR_CORNER_RADIUS_DELTA_PX);
             android.graphics.Bitmap base=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
             Canvas mc=new Canvas(base);
             Paint fill=new Paint(Paint.ANTI_ALIAS_FLAG);
             fill.setColor(Color.WHITE);
-            RectF inner=new RectF(inset,inset,w-inset,h-inset);
-            float innerRadius=Math.max(0f,radius-inset);
-            mc.drawRoundRect(inner,innerRadius,innerRadius,fill);
+            RectF inner=new RectF(0f,0f,w,h);
+            mc.drawRoundRect(inner,correctedRadius,correctedRadius,fill);
             int[] pixels=new int[w*h];base.getPixels(pixels,0,w,0,0,w,h);
             int[] edgePixels=new int[w*h],glowPixels=new int[w*h];
             int width=Math.max(1,Math.min(5,highlightWidth));
@@ -409,7 +407,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             return result;
         } catch(Throwable t) {
-            if(folderFusionLogs++<12)log("BLUR_INSET_MASK_FAILED reason="+t.getClass().getSimpleName());
+            if(folderFusionLogs++<12)log("BLUR_CORNER_MASK_FAILED reason="+t.getClass().getSimpleName());
             return null;
         }
     }
@@ -514,7 +512,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 drawUnifiedMaterial(canvas,mask,edgeOnly);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " maskSource=inset-synthetic-mask insetPx="+BLUR_EDGE_SAFE_INSET_PX+" alphaMask=true");
+                    " maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
