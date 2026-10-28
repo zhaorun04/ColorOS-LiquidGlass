@@ -7,6 +7,8 @@ import android.graphics.RectF;
 import android.graphics.Rect;
 import android.graphics.Path;
 import android.graphics.Outline;
+import android.graphics.Matrix;
+import android.view.ViewGroup;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -131,6 +133,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static void applyNativeBackground(View v) {
         refresh(v);
+        traceViewHierarchy(v);
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
             if(preview==null)return;
@@ -159,6 +162,68 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final Set<Drawable> TRACKED_BACKGROUNDS = Collections.newSetFromMap(new WeakHashMap<Drawable, Boolean>());
     private static int geometryLogs = 0;
     private static int nativeDrawLogs = 0;
+    private static int contourTraceLogs = 0;
+    private static int hierarchyTraceLogs = 0;
+    // Trace only; do not mutate Launcher clipping or hidden blur state.
+    private static void traceCanvasContour(GradientDrawable drawable, Canvas canvas) {
+        if (!diagnostics || contourTraceLogs >= 24) return;
+        contourTraceLogs++;
+        try {
+            Matrix matrix = new Matrix();
+            canvas.getMatrix(matrix);
+            float[] values = new float[9];
+            matrix.getValues(values);
+            Rect clip = canvas.getClipBounds();
+            Rect bounds = drawable.getBounds();
+            RectF mapped = new RectF(bounds);
+            matrix.mapRect(mapped);
+            Outline outline = new Outline();
+            drawable.getOutline(outline);
+            Rect outlineRect = new Rect();
+            boolean hasOutlineRect = outline.getRect(outlineRect);
+            log("CONTOUR_CANVAS_TRACE bounds=" + bounds.toShortString()
+                + " clip=" + (clip == null ? "null" : clip.toShortString())
+                + " matrix=" + java.util.Arrays.toString(values)
+                + " mappedBounds=" + mapped.toShortString()
+                + " outlineRect=" + (hasOutlineRect ? outlineRect.toShortString() : "non-rect")
+                + " outlineRadius=" + outline.getRadius()
+                + " outlineCanClip=" + outline.canClip());
+        } catch (Throwable t) {
+            log("CONTOUR_CANVAS_TRACE_FAILED reason=" + t.getClass().getSimpleName());
+        }
+    }
+    private static void traceViewHierarchy(View view) {
+        if (!diagnostics || hierarchyTraceLogs >= 12) return;
+        hierarchyTraceLogs++;
+        try {
+            View node = view;
+            for (int depth = 0; node != null && depth < 4; depth++) {
+                Outline outline = new Outline();
+                boolean hasOutline = false;
+                try {
+                    android.view.ViewOutlineProvider provider = node.getOutlineProvider();
+                    if (provider != null) { provider.getOutline(node, outline); hasOutline = true; }
+                } catch (Throwable ignored) {}
+                Rect r = new Rect();
+                boolean hasRect = hasOutline && outline.getRect(r);
+                log("CONTOUR_VIEW_TRACE depth=" + depth
+                    + " class=" + node.getClass().getName()
+                    + " size=" + node.getWidth() + "x" + node.getHeight()
+                    + " left=" + node.getLeft() + " top=" + node.getTop()
+                    + " scroll=" + node.getScrollX() + "," + node.getScrollY()
+                    + " translation=" + node.getTranslationX() + "," + node.getTranslationY()
+                    + " scale=" + node.getScaleX() + "," + node.getScaleY()
+                    + " clipToOutline=" + node.getClipToOutline()
+                    + " outline=" + (hasRect ? r.toShortString() : "unavailable")
+                    + " outlineRadius=" + (hasOutline ? outline.getRadius() : -1)
+                    + (node instanceof ViewGroup ? " clipChildren=" + ((ViewGroup)node).getClipChildren() + " clipToPadding=" + ((ViewGroup)node).getClipToPadding() : ""));
+                android.view.ViewParent parent = node.getParent();
+                node = parent instanceof View ? (View) parent : null;
+            }
+        } catch (Throwable t) {
+            log("CONTOUR_VIEW_TRACE_FAILED reason=" + t.getClass().getSimpleName());
+        }
+    }
     // V1.9.5: inspect Outline as a second source of geometry. The drawable may
     // use a custom internal outline; never assume Outline equals the final mask.
     private static final class ShapeGeometry {
@@ -278,7 +343,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     synchronized (TRACKED_BACKGROUNDS) {
                         if (!TRACKED_BACKGROUNDS.contains(drawable)) return;
                     }
-                    try { drawMaterialOnNativeCanvas((GradientDrawable)drawable, (Canvas)param.args[0]); }
+                    try { traceCanvasContour((GradientDrawable)drawable, (Canvas)param.args[0]);
+                        drawMaterialOnNativeCanvas((GradientDrawable)drawable, (Canvas)param.args[0]); }
                     catch (Throwable t) {
                         if (geometryLogs++ < 8) log("HIGHLIGHT_NATIVE_ERROR reason=" + t.getClass().getSimpleName());
                     }
@@ -356,7 +422,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.4 MATERIAL_CONTROL_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.6 NATIVE_CONTOUR_TRACE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -367,6 +433,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9.4 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.6 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }

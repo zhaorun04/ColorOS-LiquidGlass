@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 15
-        versionName '1.9.5-corner-geometry-probe'
+        versionCode 16
+        versionName '1.9.6-native-contour-trace'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
