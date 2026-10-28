@@ -1,81 +1,105 @@
 package top.liquidglass.vector;
 
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
 import android.util.Log;
-import java.lang.reflect.Constructor;
+import android.view.View;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
-import java.lang.reflect.Modifier;
+import java.util.Collections;
+import java.util.Set;
+import java.util.WeakHashMap;
 import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
-/** Read-only view discovery. Does not install hooks or mutate UI. */
 public final class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "ColorOSLiquidGlass";
-    private static void report(String message) {
-        Log.i(TAG, message);
-        de.robv.android.xposed.XposedBridge.log(TAG + ": " + message);
+    // Safe default: diagnostics only. Set true and rebuild for folder glass experiment.
+    private static final boolean ENABLE_FOLDER_GLASS_EXPERIMENT = false;
+    private static final Set<Object> SEEN = Collections.newSetFromMap(new WeakHashMap<Object,Boolean>());
+    private static void report(String s) {
+        Log.i(TAG, s);
+        XposedBridge.log(TAG + ": " + s);
     }
-    private static boolean relevant(String name) {
-        String s = name.toLowerCase(java.util.Locale.ROOT);
-        return s.contains("draw") || s.contains("background") || s.contains("blur")
-            || s.contains("corner") || s.contains("radius") || s.contains("tint")
-            || s.contains("color") || s.contains("attach") || s.contains("inflate")
-            || s.contains("bind") || s.contains("tile") || s.contains("folder")
-            || s.contains("update") || s.contains("layout") || s.contains("view");
+    private static Class<?> lookup(String name, ClassLoader loader) {
+        try { return Class.forName(name, false, loader); }
+        catch (Throwable t) { report("CLASS_UNAVAILABLE name="+name+" loader="+loader); return null; }
     }
-    private static void inspect(Class<?> cls) {
-        report("CLASS_FOUND name=" + cls.getName() + " superclass="
-            + (cls.getSuperclass() == null ? "none" : cls.getSuperclass().getName()));
-        int count = 0;
+    private static String bg(View v) {
+        try { Drawable d=v.getBackground(); return d==null ? "null" : d.getClass().getName(); }
+        catch (Throwable t) { return "error:"+t.getClass().getSimpleName(); }
+    }
+    private static void inspectView(String label, Object o) {
+        if (!(o instanceof View)) return;
+        View v=(View)o;
+        synchronized(SEEN) { if (!SEEN.add(o)) return; }
+        report("INSTANCE label="+label+" class="+v.getClass().getName()+" id="+v.getId()+" size="+v.getWidth()+"x"+v.getHeight()+" background="+bg(v));
+        if (label.equals("Folder")) {
+            try {
+                Field f=v.getClass().getDeclaredField("mBackground"); f.setAccessible(true);
+                Object d=f.get(v); report("FOLDER_FIELD mBackground="+(d==null?"null":d.getClass().getName()));
+            } catch(Throwable t) { report("FOLDER_FIELD_ERROR "+t.getClass().getSimpleName()); }
+        }
+        if (label.equals("FolderIcon")) {
+            try {
+                Field f=v.getClass().getDeclaredField("mIsSupportNewBlurLocal"); f.setAccessible(true);
+                report("FOLDER_BLUR_FLAG value="+f.getBoolean(v));
+            } catch(Throwable t) { report("FOLDER_BLUR_FLAG_ERROR "+t.getClass().getSimpleName()); }
+        }
+    }
+    private static void folderGlass(View v) {
+        if (!ENABLE_FOLDER_GLASS_EXPERIMENT) return;
         try {
-            for (Constructor<?> c : cls.getDeclaredConstructors()) {
-                if (count++ >= 8) break;
-                report("CTOR class=" + cls.getName() + " signature=" + c.toGenericString());
-            }
-        } catch (Throwable t) { report("CTOR_ERROR class=" + cls.getName() + " error=" + t.getClass().getSimpleName()); }
-        count = 0;
+            // Only the expanded folder's background, never SystemUI or individual app icons.
+            GradientDrawable glass = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0x66FFFFFF,0x28FFFFFF,0x40D9F2FF});
+            glass.setCornerRadius(34f * v.getResources().getDisplayMetrics().density);
+            glass.setStroke(Math.max(1,(int)(v.getResources().getDisplayMetrics().density)),0x88FFFFFF);
+            v.setBackground(glass);
+            report("FOLDER_GLASS_APPLIED class="+v.getClass().getName());
+        } catch(Throwable t) { report("FOLDER_GLASS_ERROR "+t.getClass().getName()); }
+    }
+    private static void hookMethod(Class<?> c, String method, final String label, final boolean apply) {
+        if (c==null) return;
         try {
-            for (Method m : cls.getDeclaredMethods()) {
-                if (!relevant(m.getName())) continue;
-                if (count++ >= 24) { report("METHOD_LIMIT class=" + cls.getName()); break; }
-                report("METHOD class=" + cls.getName() + " signature=" + m.toGenericString());
-            }
-        } catch (Throwable t) { report("METHOD_ERROR class=" + cls.getName() + " error=" + t.getClass().getSimpleName()); }
-        count = 0;
+            Method m=c.getDeclaredMethod(method);
+            XposedBridge.hookMethod(m, new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    try {
+                        inspectView(label,p.thisObject);
+                        if(apply && p.thisObject instanceof View) folderGlass((View)p.thisObject);
+                    } catch(Throwable t) { report("PROBE_ERROR label="+label+" error="+t.getClass().getSimpleName()); }
+                }
+            });
+            report("HOOK_INSTALLED class="+c.getName()+" method="+method);
+        } catch(Throwable t) { report("HOOK_FAILED class="+c.getName()+" method="+method+" error="+t.getClass().getSimpleName()); }
+    }
+    private static void hookLayout(Class<?> c, final String label) {
+        if(c==null) return;
         try {
-            for (Field f : cls.getDeclaredFields()) {
-                if (!relevant(f.getName()) && !relevant(f.getType().getSimpleName())) continue;
-                if (count++ >= 20) { report("FIELD_LIMIT class=" + cls.getName()); break; }
-                report("FIELD class=" + cls.getName() + " signature=" + f.toGenericString());
-            }
-        } catch (Throwable t) { report("FIELD_ERROR class=" + cls.getName() + " error=" + t.getClass().getSimpleName()); }
+            Method m=c.getDeclaredMethod("onLayout",boolean.class,int.class,int.class,int.class,int.class);
+            XposedBridge.hookMethod(m,new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    try { inspectView(label,p.thisObject); }
+                    catch(Throwable t) { report("LAYOUT_PROBE_ERROR "+t.getClass().getSimpleName()); }
+                }
+            });
+            report("HOOK_INSTALLED class="+c.getName()+" method=onLayout");
+        } catch(Throwable t) { report("HOOK_FAILED class="+c.getName()+" method=onLayout error="+t.getClass().getSimpleName()); }
     }
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
-        String pkg = p.packageName;
-        if (!"com.android.systemui".equals(pkg) && !"com.android.launcher".equals(pkg)
-                && !"com.oplus.systemui.plugins".equals(pkg)) return;
-        report("V1.2 VIEW_DISCOVERY_LOADED package=" + pkg + " process=" + p.processName);
-        String[] candidates = "com.android.systemui".equals(pkg) ? new String[] {
-            "com.android.systemui.qs.tileimpl.QSTileViewImpl",
-            "com.android.systemui.qs.tileimpl.QSIconViewImpl",
-            "com.android.systemui.qs.QSPanel",
-            "com.android.systemui.qs.QuickQSPanel",
-            "com.android.systemui.qs.QSContainerImpl",
-            "com.android.systemui.statusbar.notification.row.ExpandableNotificationRow"
-        } : "com.android.launcher".equals(pkg) ? new String[] {
-            "com.android.launcher3.folder.Folder",
-            "com.android.launcher3.folder.FolderIcon",
-            "com.android.launcher3.folder.FolderPagedView",
-            "com.android.launcher3.Launcher"
-        } : new String[] {
-            "com.oplus.systemui.plugins.OplusSystemUIPlugin",
-            "com.oplus.systemui.plugins.SystemUIPlugin"
-        };
-        for (String name : candidates) {
-            try { inspect(Class.forName(name, false, p.classLoader)); }
-            catch (ClassNotFoundException e) { report("CLASS_MISSING package=" + pkg + " name=" + name); }
-            catch (Throwable t) { report("CLASS_CHECK_ERROR name=" + name + " error=" + t.getClass().getSimpleName()); }
+        String pkg=p.packageName;
+        if(!"com.android.systemui".equals(pkg) && !"com.android.launcher".equals(pkg)) return;
+        report("V1.3 RUNTIME_PROBE_LOADED package="+pkg+" process="+p.processName+" loader="+p.classLoader);
+        if("com.android.launcher".equals(pkg)) {
+            hookMethod(lookup("com.android.launcher3.folder.Folder",p.classLoader),"onAttachedToWindow","Folder",true);
+            hookMethod(lookup("com.android.launcher3.folder.FolderIcon",p.classLoader),"onAttachedToWindow","FolderIcon",false);
+        } else {
+            hookLayout(lookup("com.android.systemui.qs.tileimpl.QSTileViewImpl",p.classLoader),"QSTileViewImpl");
+            hookLayout(lookup("com.android.systemui.qs.QSPanel",p.classLoader),"QSPanel");
         }
-        report("V1.2 DISCOVERY_DONE package=" + pkg);
+        report("V1.3 PROBE_READY package="+pkg);
     }
 }
