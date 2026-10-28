@@ -5,7 +5,8 @@ import android.graphics.Paint;
 import android.graphics.Color;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
-import android.provider.Settings;
+import android.database.Cursor;
+import android.net.Uri;
 import android.util.Log;
 import android.view.View;
 import java.lang.reflect.Field;
@@ -21,7 +22,12 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public final class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "ColorOSLiquidGlass";
-    private static final String SWITCH = "coloros_liquidglass_folder_glass";
+    private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
+    private static volatile long lastRead = 0;
+    private static volatile boolean glassEnabled = false;
+    private static volatile int glassAlpha = 210;
+    private static volatile boolean diagnostics = true;
+    private static int alphaLogs = 0;
     private static final Set<Object> SEEN = Collections.newSetFromMap(new WeakHashMap<Object, Boolean>());
     private static int installed, failed, drawCount;
     private static int backgroundCalls, drawableCalls, blurCalls, switchLogs;
@@ -79,27 +85,33 @@ public final class HookEntry implements IXposedHookLoadPackage {
             } catch (Throwable t) { log("FOLDER_BACKGROUND_ERROR=" + t.getClass().getSimpleName()); }
         }
     }
-    private static boolean enabled(View v) {
-        try { return Settings.Global.getInt(v.getContext().getContentResolver(), SWITCH, 0) == 1; }
-        catch (Throwable ignored) { return false; }
+    private static void refresh(View v) {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (now-lastRead < 1500) return;
+        lastRead=now;
+        try (Cursor c = v.getContext().getContentResolver().query(CONFIG,null,null,null,null)) {
+            if(c!=null && c.moveToFirst()) {
+                glassEnabled=c.getInt(0)==1;
+                glassAlpha=Math.max(40,Math.min(255,c.getInt(1)));
+                diagnostics=c.getInt(2)==1;
+            }
+        } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
     }
-    private static void logSwitch(View v) {
-        if (switchLogs++ < 5) log("GLASS_SWITCH enabled=" + enabled(v) + " view=" + v.getClass().getName());
-    }
-    // Visual test only: translucent white overlay + stroke, not true backdrop blur.
-    private static void drawHighlight(View v, Canvas canvas) {
-        if (v.getWidth() < 30 || v.getHeight() < 30) return;
-        float density = v.getResources().getDisplayMetrics().density;
-        float inset = 3f * density;
-        float radius = 20f * density;
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(Color.argb(75, 255, 255, 255));
-        paint.setStyle(Paint.Style.FILL);
-        canvas.drawRoundRect(new RectF(inset, inset, v.getWidth() - inset, v.getHeight() - inset), radius, radius, paint);
-        paint.setColor(Color.argb(190, 255, 255, 255));
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1.5f * density);
-        canvas.drawRoundRect(new RectF(inset, inset, v.getWidth() - inset, v.getHeight() - inset), radius, radius, paint);
+    private static void applyNativeBackground(View v) {
+        refresh(v);
+        if(!glassEnabled) return;
+        try {
+            Object preview=field(v.getClass(),"mBackground").get(v);
+            if(preview==null) return;
+            Method m=preview.getClass().getDeclaredMethod("getBgDrawable");
+            m.setAccessible(true);
+            Object result=m.invoke(preview);
+            if(result instanceof Drawable) {
+                Drawable d=(Drawable)result;
+                d.setAlpha(glassAlpha);
+                if(alphaLogs++<8) log("NATIVE_ALPHA_APPLIED drawable="+d.getClass().getName()+" alpha="+glassAlpha);
+            } else if(alphaLogs++<8) log("NATIVE_ALPHA_SKIPPED drawable=null");
+        } catch(Throwable t) { if(alphaLogs++<8) log("NATIVE_ALPHA_FAILED reason="+t.getClass().getSimpleName()); }
     }
     private static void hook(Class<?> c, String methodName, Class<?>[] args, final String label, final boolean draw) {
         if (c == null) return;
@@ -112,11 +124,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         inspect(label, param.thisObject);
                         if (draw && param.thisObject instanceof View && param.args != null && param.args.length > 0 && param.args[0] instanceof Canvas) {
                             View v = (View) param.thisObject;
-                            logSwitch(v);
-                            if (enabled(v)) {
-                                drawHighlight(v, (Canvas) param.args[0]);
-                                if (drawCount++ < 3) log("GLASS_EXPERIMENT_DRAWN class=" + v.getClass().getName());
-                            }
+                            applyNativeBackground(v);
                         }
                     } catch (Throwable t) { log("PROBE_ERROR label=" + label + " reason=" + t.getClass().getSimpleName()); }
                 }
@@ -167,7 +175,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.6 BACKGROUND_RUNTIME_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.7 APP_CONTROLS_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -177,6 +185,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.6 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.7 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
