@@ -1574,6 +1574,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         android.graphics.BitmapShader shader;
         android.graphics.RuntimeShader continuousShader;
         boolean continuousUnavailable;
+        boolean shaderStatusLogged;
         android.graphics.Shader rimGradient;
         android.graphics.Bitmap source;
         float lastX=Float.NaN,lastY=Float.NaN;
@@ -1665,36 +1666,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.shaderMatrix.setTranslate(-left,-top);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
-                    state.continuousShader.setFloatUniform("origin",left,top);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
                     state.continuousShader.setFloatUniform("strength",6.0f);
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,radius,radius,state.samplePaint);
                     continuousDrawn=true;
+                    if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
                 }catch(Throwable t){
                     state.continuousUnavailable=true;
-                    if(REFRACTION_LOGS++<12)log("REFRACTION_CONTINUOUS_UNAVAILABLE reason="+t.getClass().getSimpleName());
+                    if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=SHADER_FAILED reason="+t.getClass().getName()+" detail="+String.valueOf(t.getMessage()));}
                 }
             }
             if(!continuousDrawn){
-                // Safe low-cost fallback; not the preferred visual-quality path.
-                final int bands=12;
-                final float band=rect.width()/bands;
-                for(int i=0;i<bands;i++){
-                    final float x0=rect.left+i*band;
-                    final float x1=(i==bands-1?rect.right:Math.min(rect.right,x0+band+0.5f));
-                    final float nx=(i+0.5f)/bands;
-                    final float edge=1f-2f*Math.min(nx,1f-nx);
-                    final float envelope=edge*edge*(3f-2f*edge);
-                    final float dx=(nx<0.5f?1f:-1f)*envelope*6.0f;
-                    state.shaderMatrix.reset();
-                    state.shaderMatrix.setTranslate(-left+dx,-top);
-                    state.shader.setLocalMatrix(state.shaderMatrix);
-                    state.samplePaint.setShader(state.shader);
-                    state.samplePaint.setAlpha(Math.round(112f*envelope));
-                    canvas.drawRect(x0,rect.top,x1,rect.bottom,state.samplePaint);
-                }
+                // No banded fallback: the former 12-strip implementation caused
+                // visible vertical seams. Keep the native folder blur intact.
+                if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
             }
             state.samplePaint.setShader(null);
             state.rimPaint.setStyle(Paint.Style.STROKE);
@@ -1708,7 +1695,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 Math.max(0f,radius-inset),Math.max(0f,radius-inset),state.rimPaint);
             state.rimPaint.setShader(null);
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
-                " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"fallback12")+" frameReady=true");
+                " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
     }
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
