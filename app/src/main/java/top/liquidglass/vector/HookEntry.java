@@ -518,7 +518,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static void inspectWallpaperReferenceFeasibility(View folder) {
         if (!diagnostics || !WALLPAPER_REFERENCE_ONCE.compareAndSet(false, true)) return;
-        log("REFRACTION_REFERENCE_PROBE version=1.9.58 mode=READ_ONLY captureAttempted=false");
+        log("REFRACTION_REFERENCE_PROBE version=1.9.59 mode=READ_ONLY captureAttempted=false");
         try {
             android.content.Context ctx=folder.getContext();
             android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(ctx);
@@ -560,10 +560,59 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch(Throwable t) {
             log("REFRACTION_REFERENCE_PROBE status=UNAVAILABLE reason="+t.getClass().getSimpleName());
         }
+        inspectWallpaperLayerAccessibility(folder);
         log("REFRACTION_REFERENCE_FEASIBILITY status=NO_INDEPENDENT_WALLPAPER_FRAME"
             +" screenshotAttempted=false screenCaptureAttempted=false"
             +" wallpaperServiceHookAttempted=false compositorCrop=UNKNOWN compositorScale=UNKNOWN"
             +" modelVerified=false refractionEnabled=false");
+    }
+    // V1.9.59: bounded, read-only Launcher view-tree feasibility check.
+    // A matching view name is not proof of a wallpaper Surface or rendered pixels.
+    private static void inspectWallpaperLayerAccessibility(View folder) {
+        try {
+            View root=folder.getRootView();
+            java.util.ArrayDeque<View> pending=new java.util.ArrayDeque<View>();
+            pending.add(root);
+            int inspected=0, wallpaperNames=0, surfaceViews=0, textureViews=0;
+            StringBuilder matches=new StringBuilder();
+            while(!pending.isEmpty() && inspected<300) {
+                View v=pending.removeFirst();
+                inspected++;
+                String type=v.getClass().getName();
+                String lower=type.toLowerCase(java.util.Locale.ROOT);
+                boolean named=lower.contains("wallpaper") || lower.contains("backdrop");
+                if(named) wallpaperNames++;
+                if(v instanceof android.view.SurfaceView) surfaceViews++;
+                if(v instanceof android.view.TextureView) textureViews++;
+                if(named && matches.length()<480) {
+                    if(matches.length()>0) matches.append(';');
+                    matches.append(type.replace(' ', '_')).append('(')
+                        .append(v.getWidth()).append('x').append(v.getHeight()).append(')');
+                }
+                if(v instanceof ViewGroup) {
+                    ViewGroup group=(ViewGroup)v;
+                    for(int i=0;i<group.getChildCount() && pending.size()<400;i++) {
+                        View child=group.getChildAt(i);
+                        if(child!=null) pending.addLast(child);
+                    }
+                }
+            }
+            log("REFRACTION_LAYER_VIEW_TREE mode=READ_ONLY inspected="+inspected
+                +" truncated="+(!pending.isEmpty())+" wallpaperNamed="+wallpaperNames
+                +" surfaceViews="+surfaceViews+" textureViews="+textureViews
+                +" candidates="+(matches.length()==0?"NONE":matches.toString())
+                +" independentWallpaperPixels=false");
+            boolean token=root.getWindowToken()!=null;
+            log("REFRACTION_LAYER_ACCESSIBILITY launcherWindowTokenPresent="+token
+                +" viewTreeIsLauncherOnly=true wallpaperWindowEnumerated=false"
+                +" surfaceControlCaptured=false compositorLayersRead=false"
+                +" actualWallpaperCrop=UNKNOWN actualWallpaperScale=UNKNOWN");
+        } catch(Throwable t) {
+            log("REFRACTION_LAYER_ACCESSIBILITY status=UNAVAILABLE reason="+t.getClass().getSimpleName());
+        }
+        log("REFRACTION_LAYER_NEXT_STEP independentWallpaperFrame=UNAVAILABLE"
+            +" adbDumpsysMayProvideMetadata=true requiresExternalUserAction=true"
+            +" screenshotAttempted=false screenCaptureAttempted=false verified=false");
     }
     // V1.9.48: hypothetical screen->source mappings. These are NOT compositor measurements.
     // Center-crop assumes a static source image scaled uniformly to fill the display.
