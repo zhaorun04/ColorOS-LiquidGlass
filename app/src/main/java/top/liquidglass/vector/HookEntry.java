@@ -49,7 +49,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.Map<View, VisualPatch> VISUAL_PATCHES = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, VisualPatch>());
     private static int visualProbeLogs = 0;
     private static final class VisualPatch {
-        long time; int revision; android.graphics.Bitmap cover, desired; float cx, cy, dx, dy;
+        long time; long revision; android.graphics.Bitmap cover, desired; float cx, cy, dx, dy;
         void dispose() { if(cover!=null)cover.recycle(); if(desired!=null)desired.recycle(); }
     }
     private static volatile int probeMode = 0;
@@ -524,7 +524,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             +" "+mappingHypothesis("DESIRED_WIDTH",desiredScale,offset,sx,sy,iw,ih,dw,dh)
             +" compositorCrop=UNKNOWN compositorScale=UNKNOWN verified=false pixelsRead=false rendering=false");
     }
-    // V1.9.50: opt-in, read-only source-image comparison. No wallpaper is stored.
+    // V1.9.50.1: opt-in, read-only source-image comparison. No wallpaper is stored.
     // The two tiny patches are HYPOTHETICAL; neither proves compositor crop.
     private static void drawWallpaperVisualComparison(View folder, Canvas canvas) {
         if (!wallpaperCompare || !diagnostics || !glassEnabled || canvas==null ||
