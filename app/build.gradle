@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 18
-        versionName '1.9.9-native-alpha-mask'
+        versionCode 19
+        versionName '1.9.10-dual-glow-directional'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

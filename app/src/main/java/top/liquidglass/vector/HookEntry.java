@@ -35,6 +35,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile int glassAlpha = 210, tintMode = 0, tintStrength = 30;
     private static volatile boolean highlightEnabled = false;
     private static volatile int highlightStrength = 25;
+    private static volatile int highlightWidth = 2;
+    private static volatile boolean directionalLight = true;
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
@@ -128,8 +130,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 highlightEnabled=c.getInt(4)==1;
                 diagnostics=c.getInt(5)==1;
                 highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
+                highlightWidth=Math.max(1,Math.min(5,c.getInt(8)));
+                directionalLight=c.getInt(9)==1;
                 probeMode=Math.max(0,Math.min(3,c.getInt(7)));
-                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" probeMode="+probeMode;
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -303,10 +307,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.Map<Drawable, MaskCache> MASKS =
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable, MaskCache>());
     private static final class MaskCache {
-        final int w, h, alpha, radiusHash;
-        final android.graphics.Bitmap mask, edge;
-        MaskCache(int w,int h,int a,int rh,android.graphics.Bitmap m,android.graphics.Bitmap e){
-            this.w=w;this.h=h;this.alpha=a;this.radiusHash=rh;this.mask=m;this.edge=e;
+        final int w, h, alpha, radiusHash, width;
+        final android.graphics.Bitmap mask, edge, glow;
+        MaskCache(int w,int h,int a,int rh,int width,android.graphics.Bitmap m,android.graphics.Bitmap e,android.graphics.Bitmap g){
+            this.w=w;this.h=h;this.alpha=a;this.radiusHash=rh;this.width=width;this.mask=m;this.edge=e;this.glow=g;
         }
     }
     private static MaskCache nativeMask(GradientDrawable d) {
@@ -315,8 +319,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(w<4||h<4||w>1400||h>1400)return null;
         int rh=Float.floatToIntBits(d.getCornerRadius()) ^ java.util.Arrays.hashCode(d.getCornerRadii());
         MaskCache old=MASKS.get(d);
-        if(old!=null && old.w==w && old.h==h && old.alpha==d.getAlpha() && old.radiusHash==rh)return old;
-        android.graphics.Bitmap bitmap=null, edge=null;
+        if(old!=null && old.w==w && old.h==h && old.alpha==d.getAlpha() && old.radiusHash==rh && old.width==highlightWidth)return old;
+        android.graphics.Bitmap bitmap=null, edge=null, glow=null;
         Rect original=new Rect(b);
         try {
             bitmap=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
@@ -327,26 +331,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
             d.setBounds(original);
             MASK_RENDERING.remove();
             int[] pixels=new int[w*h];bitmap.getPixels(pixels,0,w,0,0,w,h);
-            // Native alpha is the only shape authority. A 1-2 pixel inner edge
-            // follows all four corners including OEM antialiasing and clipping.
+            // Two inward-facing layers, both derived from the OEM drawable alpha.
+            // Out-of-bitmap samples are transparent. Avoid drawing any new round rect.
             int[] edgePixels=new int[w*h];
-            // Include all outermost pixels. Off-bitmap neighbours are transparent.
-            // The previous 1..w-2 / 1..h-2 loop dropped straight sides entirely
-            // when the native shape reached the drawable bounds.
+            int[] glowPixels=new int[w*h];
+            int width=Math.max(1,Math.min(5,highlightWidth));
             for(int y=0;y<h;y++)for(int x=0;x<w;x++){
                 int i=y*w+x, center=pixels[i]>>>24;
                 if(center<8)continue;
-                int left = x==0 ? 0 : pixels[i-1]>>>24;
-                int right = x==w-1 ? 0 : pixels[i+1]>>>24;
-                int top = y==0 ? 0 : pixels[i-w]>>>24;
-                int bottom = y==h-1 ? 0 : pixels[i+w]>>>24;
-                int min=Math.min(Math.min(left,right),Math.min(top,bottom));
-                int a=Math.max(0,Math.min(center,(center-min)*2));
-                edgePixels[i]=(a<<24)|0x00ffffff;
+                int near=255, far=255;
+                for(int dy=-width;dy<=width;dy++)for(int dx=-width;dx<=width;dx++){
+                    int dist=Math.max(Math.abs(dx),Math.abs(dy));
+                    if(dist==0)continue;
+                    int xx=x+dx, yy=y+dy;
+                    int sample=(xx<0||xx>=w||yy<0||yy>=h)?0:(pixels[yy*w+xx]>>>24);
+                    if(dist==1 && sample<near)near=sample;
+                    if(sample<far)far=sample;
+                }
+                int sharp=Math.max(0,Math.min(center,(center-near)*2));
+                int soft=Math.max(0,Math.min(center,(center-far)));
+                // The core is thin and sharp; the inner layer adds adjustable body.
+                edgePixels[i]=(sharp<<24)|0x00ffffff;
+                glowPixels[i]=(soft<<24)|0x00ffffff;
             }
             edge=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
             edge.setPixels(edgePixels,0,w,0,0,w,h);
-            MaskCache result=new MaskCache(w,h,d.getAlpha(),rh,bitmap,edge);
+            glow=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            glow.setPixels(glowPixels,0,w,0,0,w,h);
+            MaskCache result=new MaskCache(w,h,d.getAlpha(),rh,width,bitmap,edge,glow);
             MASKS.put(d,result);
             if(nativeDrawLogs++<20)log("NATIVE_ALPHA_MASK_READY size="+w+"x"+h+" radiusHash="+rh);
             return result;
@@ -379,11 +391,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(nativeDrawLogs++<24)log("MASK_TINT_APPLIED strength="+tintStrength+" alpha="+a);
         }
         if(shine){
+            // Gradient is applied to both alpha-derived layers; no geometric outline.
+            float strength=probeMode==2?1f:highlightStrength/100f;
             Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-            p.setAlpha(probeMode==2?220:Math.round(110f*highlightStrength/100f));
-            if(probeMode==2)p.setColorFilter(new android.graphics.PorterDuffColorFilter(Color.RED,android.graphics.PorterDuff.Mode.SRC_IN));
-            canvas.drawBitmap(cache.edge,0,0,p);
-            if(nativeDrawLogs++<24)log("MASK_EDGE_APPLIED strength="+highlightStrength+" probe="+probeMode);
+            if(probeMode==2){
+                p.setAlpha(205);
+                p.setColorFilter(new android.graphics.PorterDuffColorFilter(Color.RED,android.graphics.PorterDuff.Mode.SRC_IN));
+                canvas.drawBitmap(cache.glow,0,0,p);
+                canvas.drawBitmap(cache.edge,0,0,p);
+            }else{
+                // Draw the two native-alpha bitmaps first, then multiply by a
+                // directional gradient with DST_IN. Bitmap contours remain authoritative.
+                int layer=canvas.saveLayer(0,0,cache.w,cache.h,null);
+                p.setAlpha(Math.round(100*strength));
+                canvas.drawBitmap(cache.glow,0,0,p);
+                p.setAlpha(Math.round(190*strength));
+                canvas.drawBitmap(cache.edge,0,0,p);
+                Paint light=new Paint(Paint.ANTI_ALIAS_FLAG);
+                light.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+                if(directionalLight){
+                    light.setShader(new android.graphics.LinearGradient(0,0,cache.w,cache.h,
+                        new int[]{0xEEFFFFFF,0x99E8F4FF,0x44C7DFEC},null,
+                        android.graphics.Shader.TileMode.CLAMP));
+                }else light.setColor(0xCCFFFFFF);
+                canvas.drawRect(0,0,cache.w,cache.h,light);
+                light.setXfermode(null);
+                canvas.restoreToCount(layer);
+            }
+            if(nativeDrawLogs++<24)log("MASK_DUAL_GLOW_APPLIED strength="+highlightStrength+" width="+highlightWidth+" directional="+directionalLight);
         }
         canvas.restore();
     }
