@@ -280,6 +280,29 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // Do not call getDrawable/getWallpaperFile: wallpaper alone does not include icons,
                 // widgets or live scene layers, and accessing wallpaper pixels may be restricted.
             } catch (Throwable t) { log("REFRACTION_WALLPAPER_SERVICE_ERROR " + t.getClass().getSimpleName()); }
+            // V1.9.42: classify backdrop candidates without reading any pixels.
+            // Wallpaper-only images cannot reproduce launcher icons/widgets; do not mistake
+            // a wallpaper drawable for a complete pre-folder composited backdrop.
+            try {
+                android.app.WallpaperManager wallpaper = android.app.WallpaperManager.getInstance(folder.getContext());
+                android.app.WallpaperInfo info = wallpaper == null ? null : wallpaper.getWallpaperInfo();
+                log("REFRACTION_WALLPAPER_KIND " + (info == null ? "STATIC_OR_UNREPORTED" : "LIVE")
+                    + " fullScene=false pixelsRead=false");
+            } catch (Throwable t) {
+                log("REFRACTION_WALLPAPER_KIND_ERROR " + t.getClass().getSimpleName());
+            }
+            try {
+                View parent = folder.getParent() instanceof View ? (View) folder.getParent() : null;
+                int siblings = parent instanceof ViewGroup ? ((ViewGroup) parent).getChildCount() : -1;
+                int index = parent instanceof ViewGroup ? ((ViewGroup) parent).indexOfChild(folder) : -1;
+                log("REFRACTION_LAYER_CONTEXT parent=" + (parent == null ? "null" : parent.getClass().getName())
+                    + " siblingCount=" + siblings + " folderIndex=" + index
+                    + " preFolderFrameAvailable=false");
+            } catch (Throwable t) {
+                log("REFRACTION_LAYER_CONTEXT_ERROR " + t.getClass().getSimpleName());
+            }
+            log("REFRACTION_SAMPLING_DECISION source=NONE captureAttempted=false"
+                + " reason=requires_verified_pre_folder_backdrop");
             log("REFRACTION_FEASIBILITY status=BACKDROP_UNAVAILABLE"
                 + " reason=need_pre_folder_composited_frame_not_root_screenshot");
         } catch (Throwable t) { log("REFRACTION_FEASIBILITY_ERROR " + t.getClass().getSimpleName()); }
