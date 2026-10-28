@@ -358,10 +358,60 @@ public final class HookEntry implements IXposedHookLoadPackage {
             wallpaperOffsetWallpaperId = id;
         } catch (Throwable ignored) { /* not all launchers can read wallpaper ID */ }
     }
+    // V1.9.60: diagnostic-only state transitions; does not change wallpaper requests.
+    private static final java.util.concurrent.atomic.AtomicInteger OFFSET_TRACK_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    private static final java.util.concurrent.atomic.AtomicInteger FOLDER_TRACK_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    private static volatile String lastFolderPhase = "UNKNOWN";
+    private static void trackFolderPhase(View folder, String phase) {
+        if (!diagnostics || folder == null || FOLDER_TRACK_LOGS.get() >= 72) return;
+        try {
+            int[] xy = new int[2]; folder.getLocationOnScreen(xy);
+            long now = android.os.SystemClock.uptimeMillis();
+            String state = wallpaperRequestState(now);
+            String key = phase + ":" + Integer.toHexString(System.identityHashCode(folder))
+                + ":" + wallpaperOffsetRevision + ":" + xy[0] + ":" + xy[1];
+            if (key.equals(lastFolderPhase)) return;
+            lastFolderPhase = key;
+            if (FOLDER_TRACK_LOGS.incrementAndGet() > 72) return;
+            log("REFRACTION_DYNAMIC_FOLDER phase=" + phase
+                + " id=" + Integer.toHexString(System.identityHashCode(folder))
+                + " screen=[" + xy[0] + "," + xy[1] + "]"
+                + " size=" + folder.getWidth() + "x" + folder.getHeight()
+                + " request=[" + wallpaperRequestedX + "," + wallpaperRequestedY + "]"
+                + " offsetState=" + state + " revision=" + wallpaperOffsetRevision
+                + " requestAgeMs=" + (wallpaperOffsetTime == 0 ? -1 : now - wallpaperOffsetTime)
+                + " mappingVerified=false pixelsAvailable=false");
+        } catch (Throwable t) {
+            if (FOLDER_TRACK_LOGS.incrementAndGet() <= 72)
+                log("REFRACTION_DYNAMIC_FOLDER_ERROR " + t.getClass().getSimpleName());
+        }
+    }
     private static int wallpaperOffsetLogs = 0;
     private static final java.util.Map<View, long[]> REFRACTION_MOTION =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, long[]>());
     private static int refractionMotionLogs = 0;
+    private static void hookDynamicFolderLifecycle(Class<?> folderClass) {
+        if (folderClass == null) return;
+        for (String name : new String[]{"onAttachedToWindow", "onDetachedFromWindow"}) {
+            try {
+                Method m = folderClass.getDeclaredMethod(name);
+                m.setAccessible(true);
+                final String phase = name.equals("onAttachedToWindow") ? "ATTACHED" : "DETACHING";
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        if (p.thisObject instanceof View) trackFolderPhase((View)p.thisObject, phase);
+                    }
+                });
+                installed++;
+                log("REFRACTION_DYNAMIC_LIFECYCLE_HOOK method=" + name + " installed=true");
+            } catch (Throwable t) {
+                log("REFRACTION_DYNAMIC_LIFECYCLE_HOOK method=" + name
+                    + " installed=false reason=" + t.getClass().getSimpleName());
+            }
+        }
+    }
     private static void hookWallpaperOffsetRequests() {
         try {
             for (Method m : android.app.WallpaperManager.class.getDeclaredMethods()) {
@@ -379,6 +429,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         wallpaperOffsetTime=now;
                         if (changed) { wallpaperLastMotionTime=now; wallpaperOffsetRevision++; }
                         wallpaperOffsetMoving=changed;
+                        if (diagnostics && changed && OFFSET_TRACK_LOGS.incrementAndGet() <= 96)
+                            log("REFRACTION_DYNAMIC_OFFSET event=REQUEST_CHANGED x=" + x + " y=" + y
+                                + " revision=" + wallpaperOffsetRevision + " uptimeMs=" + now
+                                + " source=Launcher.WallpaperManager.setWallpaperOffsets"
+                                + " verifiedCompositorCrop=false");
                         if (diagnostics && wallpaperOffsetLogs++ < 40)
                             log("REFRACTION_WALLPAPER_OFFSET_REQUEST x="+x+" y="+y
                                 +" timestamp="+wallpaperOffsetTime+" source=WallpaperManager.setWallpaperOffsets");
@@ -518,7 +573,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static void inspectWallpaperReferenceFeasibility(View folder) {
         if (!diagnostics || !WALLPAPER_REFERENCE_ONCE.compareAndSet(false, true)) return;
-        log("REFRACTION_REFERENCE_PROBE version=1.9.59 mode=READ_ONLY captureAttempted=false");
+        log("REFRACTION_REFERENCE_PROBE version=1.9.60 mode=READ_ONLY captureAttempted=false");
         try {
             android.content.Context ctx=folder.getContext();
             android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(ctx);
@@ -841,6 +896,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         inspectWallpaperGeometry(v);
         inspectWallpaperReferenceFeasibility(v);
         inspectScrollCoordinates(v);
+        trackFolderPhase(v, "DRAW");
         traceViewHierarchy(v);
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
@@ -2039,7 +2095,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookWallpaperOffsetRequests();
             hookNativeDrawableDraw();
             // V1.9.18: render from the confirmed preview drawBackground entry, not a nonexistent LayerBlurDrawable.draw override.
-            hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
+            Class<?> folderClass = find("com.android.launcher3.folder.Folder", p.classLoader);
+            hook(folderClass, "onAttachedToWindow", new Class<?>[0], "Folder", false);
+            hookDynamicFolderLifecycle(folderClass);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookFolderIconCanvasFusion(p.classLoader);
             hookPreview(p.classLoader);

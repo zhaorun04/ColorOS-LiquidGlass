@@ -69,7 +69,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(18,28,18,18);
         root.setBackgroundColor(0x11000000);
-        TextView heading=new TextView(this);heading.setText("V1.9.59 · 参照有效性与双点校验（实验）");
+        TextView heading=new TextView(this);heading.setText("V1.9.60 · 参照有效性与双点校验（实验）");
         heading.setTextColor(Color.WHITE);heading.setTextSize(18);heading.setShadowLayer(3,1,1,Color.BLACK);root.addView(heading);
         info=new TextView(this);info.setTextColor(Color.WHITE);info.setTextSize(12);info.setShadowLayer(3,1,1,Color.BLACK);root.addView(info);
         TextView state=new TextView(this);state.setTextColor(0xFFFFD78C);state.setTextSize(13);
@@ -127,7 +127,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         frame.addView(hit,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(12,8,12,8);controls.setBackgroundColor(0xB8000000);
-        TextView help=new TextView(this);help.setText("V1.9.59 · 选点模式：直接点击壁纸特征，黄色十字为屏幕绝对坐标。此模式不显示采样图。");
+        TextView help=new TextView(this);help.setText("V1.9.60 · 选点模式：直接点击壁纸特征，黄色十字为屏幕绝对坐标。此模式不显示采样图。");
         help.setTextColor(Color.WHITE);help.setTextSize(13);controls.addView(help);
         Button done=new Button(this);done.setText("第二步：锁定位置并查看对照结果");
         done.setOnClickListener(v->showResults());controls.addView(done);

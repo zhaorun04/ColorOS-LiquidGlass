@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1959
-        versionName '1.9.59-wallpaper-layer-accessibility'
+        versionCode 1960
+        versionName '1.9.60-dynamic-wallpaper-offset-tracking'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
