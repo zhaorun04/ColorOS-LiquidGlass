@@ -18,6 +18,14 @@ public final class GlassConfigProvider extends ContentProvider {
             || "com.android.launcher3".equals(name) || "com.oplus.launcher".equals(name)) return true;
         return false;
     }
+    @Override public android.os.ParcelFileDescriptor openFile(Uri uri,String mode) throws java.io.FileNotFoundException {
+        if(!"/wallpaper_reference".equals(uri.getPath()) || !"r".equals(mode) || !callerIsLauncher())
+            throw new java.io.FileNotFoundException("Not authorized");
+        java.io.File f=new java.io.File(getContext().getFilesDir(),"wallpaper_reference.jpg");
+        if(!f.isFile() || f.length()<1024 || f.length()>12000000)
+            throw new java.io.FileNotFoundException("No valid staged wallpaper reference");
+        return android.os.ParcelFileDescriptor.open(f,android.os.ParcelFileDescriptor.MODE_READ_ONLY);
+    }
     @Override public android.os.Bundle call(String method,String arg,android.os.Bundle extras) {
         android.os.Bundle result=new android.os.Bundle();
         if("publishCalibrationPreview".equals(method)) {
@@ -69,10 +77,10 @@ public final class GlassConfigProvider extends ContentProvider {
     @Override public Cursor query(Uri uri,String[] projection,String selection,String[] selectionArgs,String sortOrder){
         if(!URI.equals(uri))return null;
         android.content.SharedPreferences p=getContext().getSharedPreferences("glass",0);
-        MatrixCursor c=new MatrixCursor(new String[]{"enabled","alpha","tint","tint_strength","highlight","diagnostics","highlight_strength","probe_mode","highlight_width","directional_light","native_blur_experiment","blur_radius_percent","native_alpha_probe","wallpaper_compare"});
+        MatrixCursor c=new MatrixCursor(new String[]{"enabled","alpha","tint","tint_strength","highlight","diagnostics","highlight_strength","probe_mode","highlight_width","directional_light","native_blur_experiment","blur_radius_percent","native_alpha_probe","wallpaper_compare","real_refraction"});
         int old=p.getInt("alpha",210);
         c.addRow(new Object[]{p.getBoolean("enabled",false)?1:0,p.getInt("alpha",p.getInt("alpha_normal",old)),
-            p.getInt("tint",0),p.getInt("tint_strength",30),p.getBoolean("highlight",false)?1:0,p.getBoolean("diagnostics",false)?1:0,p.getInt("highlight_strength",25),p.getInt("probe_mode",0),p.getInt("highlight_width",2),p.getBoolean("directional_light",true)?1:0,p.getInt("native_blur_experiment",0),p.getInt("blur_radius_percent",100),p.getBoolean("native_alpha_probe",true)?1:0,p.getBoolean("wallpaper_compare",false)?1:0});
+            p.getInt("tint",0),p.getInt("tint_strength",30),p.getBoolean("highlight",false)?1:0,p.getBoolean("diagnostics",false)?1:0,p.getInt("highlight_strength",25),p.getInt("probe_mode",0),p.getInt("highlight_width",2),p.getBoolean("directional_light",true)?1:0,p.getInt("native_blur_experiment",0),p.getInt("blur_radius_percent",100),p.getBoolean("native_alpha_probe",true)?1:0,p.getBoolean("wallpaper_compare",false)?1:0,p.getBoolean("real_refraction",false)?1:0});
         return c;
     }
     @Override public String getType(Uri uri){return "vnd.android.cursor.item/vnd.liquidglass.settings";}

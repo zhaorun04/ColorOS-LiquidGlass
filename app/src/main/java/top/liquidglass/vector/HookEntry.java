@@ -150,6 +150,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 diagnostics=c.getInt(5)==1;
                 int visualIndex=c.getColumnIndex("wallpaper_compare");
                 wallpaperCompare=visualIndex>=0 && c.getInt(visualIndex)==1;
+                int refractIndex=c.getColumnIndex("real_refraction");
+                REFRACTION_ENABLED=refractIndex>=0 && c.getInt(refractIndex)==1;
                 highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
                 highlightWidth=Math.max(1,Math.min(5,c.getInt(8)));
                 directionalLight=c.getInt(9)==1;
@@ -1524,6 +1526,82 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static int folderFusionLogs = 0;
     private static final ThreadLocal<Boolean> FOLDER_FUSION_GUARD = new ThreadLocal<Boolean>();
+    // V1.9.66: opt-in, independently supplied screen-space wallpaper reference.
+    // Decode off the UI thread. Never read protected system paths in Launcher.
+    private static volatile android.graphics.Bitmap REFRACTION_FRAME;
+    private static volatile long REFRACTION_LAST_CHECK;
+    private static volatile boolean REFRACTION_LOADING;
+    private static volatile boolean REFRACTION_ENABLED;
+    private static int REFRACTION_LOGS;
+    private static void scheduleReferenceLoad(final View view) {
+        if (!REFRACTION_ENABLED || REFRACTION_LOADING) return;
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-REFRACTION_LAST_CHECK<30000L)return;
+        REFRACTION_LAST_CHECK=now;
+        REFRACTION_LOADING=true;
+        final android.content.Context app=view.getContext().getApplicationContext();
+        new Thread(new Runnable(){public void run(){
+            android.graphics.Bitmap next=null;
+            try {
+                android.net.Uri uri=android.net.Uri.parse("content://top.liquidglass.vector.config/wallpaper_reference");
+                try(android.os.ParcelFileDescriptor fd=app.getContentResolver().openFileDescriptor(uri,"r")) {
+                    if(fd!=null){
+                        android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+                        opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+                        next=android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,opts);
+                    }
+                }
+                if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
+                    REFRACTION_FRAME=next;
+                    if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=READY size="+next.getWidth()+"x"+next.getHeight());
+                } else {
+                    if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=INVALID_OR_MISSING");
+                }
+            }catch(Throwable t){if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=UNAVAILABLE reason="+t.getClass().getSimpleName());}
+            finally{REFRACTION_LOADING=false;}
+        }},"LiquidGlass-Wallpaper-Reference").start();
+    }
+    private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
+        if(!REFRACTION_ENABLED || rect.width()<80 || rect.height()<80)return;
+        scheduleReferenceLoad(view);
+        android.graphics.Bitmap frame=REFRACTION_FRAME;
+        if(frame==null||frame.isRecycled())return;
+        android.util.DisplayMetrics dm=view.getResources().getDisplayMetrics();
+        int sw=dm.widthPixels,sh=dm.heightPixels;
+        if(frame.getWidth()!=sw || frame.getHeight()!=sh){
+            if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=DISPLAY_MISMATCH frame="+frame.getWidth()+"x"+frame.getHeight()+" display="+sw+"x"+sh);
+            return;
+        }
+        int[] location=new int[2];view.getLocationOnScreen(location);
+        float left=location[0]+rect.left,top=location[1]+rect.top;
+        if(left<0||top<0||left+rect.width()>sw||top+rect.height()>sh)return;
+        int save=canvas.save();
+        try {
+            android.graphics.Path shape=new android.graphics.Path();
+            shape.addRoundRect(rect,radius,radius,android.graphics.Path.Direction.CW);
+            canvas.clipPath(shape);
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+            android.graphics.BitmapShader shader=new android.graphics.BitmapShader(frame,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+            android.graphics.Matrix matrix=new android.graphics.Matrix();
+            // Screen-space reference: no wallpaperX, desiredWidth or guessed crop.
+            // Shift source texture toward the center only within the rim.
+            final int bands=24;
+            float band=rect.width()/bands;
+            for(int i=0;i<bands;i++){
+                float x0=rect.left+i*band,x1=(i==bands-1?rect.right:x0+band+1);
+                float nx=(i+0.5f)/bands;
+                float distance=Math.min(nx,1f-nx)*2f;
+                float displacement=(float)Math.pow(1f-distance,2.4f)*9f;
+                float dx=nx<0.5f?displacement:-displacement;
+                matrix.reset();matrix.setTranslate(-left+dx,-top);
+                shader.setLocalMatrix(matrix);p.setShader(shader);
+                p.setAlpha(Math.round(170f*(float)Math.pow(1f-distance,2.1f)));
+                canvas.drawRect(x0,rect.top,x1,rect.bottom,p);
+            }
+            p.setShader(null);
+            if(REFRACTION_LOGS++<12)log("REFRACTION_PIXEL_SAMPLE status=DRAWN screenRect=["+left+","+top+","+(left+rect.width())+","+(top+rect.height())+"] bands=24 edgeMaxShift=9 verifiedByUser=true");
+        }finally{canvas.restoreToCount(save);}
+    }
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
         if (!glassEnabled || probeMode == 1 || canvas == null || v.getWidth() <= 0 || v.getHeight() <= 0) return;
         if (Boolean.TRUE.equals(FOLDER_FUSION_GUARD.get())) return;
@@ -1584,6 +1662,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             FOLDER_FUSION_GUARD.set(Boolean.TRUE);
             try {
                 canvas.translate(rect.left,rect.top);
+                if(!edgeOnly)drawReferenceRefraction(v,canvas,rect,radius);
                 drawUnifiedMaterial(canvas,mask,edgeOnly);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+

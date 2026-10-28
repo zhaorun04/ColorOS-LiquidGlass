@@ -140,13 +140,14 @@ public final class MainActivity extends Activity {
         label("实验仅修改 Launcher 内部一个已确认的布尔访问器，不修改其他模糊条件。出现闪退或显示异常时关闭此开关并重启桌面。",13);
         Switch diag=toggle("详细诊断日志（排查时开启）","diagnostics",false);
         toggle("旧版文件夹内对照图（建议关闭）","wallpaper_compare",false);
+        toggle("V1.9.66 实际壁纸像素边缘折射（需先用 Root 导入参考帧）","real_refraction",false);
         label("V1.9.63 建议关闭旧版对照，使用独立校准页面；不会遮挡桌面文件夹图标。",13);
         Button calibrate=new Button(this);calibrate.setText("打开独立壁纸坐标校准页面（实验）");root.addView(calibrate);
         calibrate.setOnClickListener(v->startActivity(new android.content.Intent(this,WallpaperCalibrationActivity.class)));
         label("校准页面在壁纸前显示透明背景和两个原图采样块，可调整采样屏幕位置、壁纸偏移与候选模型。系统可能对独立 Activity 使用不同的壁纸偏移；因此只能目视比较，不能自动验证 Launcher 实际变换。",13);
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
         reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
-            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).putBoolean("native_alpha_probe",false).putBoolean("wallpaper_compare",false).apply();
+            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).putBoolean("native_alpha_probe",false).putBoolean("wallpaper_compare",false).putBoolean("real_refraction",false).apply();
             nativeExp.setChecked(false);nativeAlpha.setChecked(false);enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(35);highlightWidth.setProgress(1);directional.setChecked(true);probe.setSelection(0);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
         label("提示：色调现在使用原生背景 Alpha 遮罩；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。开启诊断日志后，返回桌面观察文件夹并导出 Vector 日志，搜索 BLUR_PROBE 与 NATIVE_BLUR_CALL。探测不会主动启用模糊。",13);
