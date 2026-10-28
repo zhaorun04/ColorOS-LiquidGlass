@@ -24,6 +24,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final String SWITCH = "coloros_liquidglass_folder_glass";
     private static final Set<Object> SEEN = Collections.newSetFromMap(new WeakHashMap<Object, Boolean>());
     private static int installed, failed, drawCount;
+    private static int backgroundCalls, drawableCalls, blurCalls, switchLogs;
     private static void log(String s) {
         Log.i(TAG, s);
         try { XposedBridge.log(TAG + ": " + s); } catch (Throwable ignored) {}
@@ -82,14 +83,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try { return Settings.Global.getInt(v.getContext().getContentResolver(), SWITCH, 0) == 1; }
         catch (Throwable ignored) { return false; }
     }
-    // Visual experiment: a subtle highlight border only. No fake claim of backdrop blur.
+    private static void logSwitch(View v) {
+        if (switchLogs++ < 5) log("GLASS_SWITCH enabled=" + enabled(v) + " view=" + v.getClass().getName());
+    }
+    // Visual test only: translucent white overlay + stroke, not true backdrop blur.
     private static void drawHighlight(View v, Canvas canvas) {
         if (v.getWidth() < 30 || v.getHeight() < 30) return;
         float density = v.getResources().getDisplayMetrics().density;
         float inset = 3f * density;
         float radius = 20f * density;
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(Color.argb(110, 255, 255, 255));
+        paint.setColor(Color.argb(75, 255, 255, 255));
+        paint.setStyle(Paint.Style.FILL);
+        canvas.drawRoundRect(new RectF(inset, inset, v.getWidth() - inset, v.getHeight() - inset), radius, radius, paint);
+        paint.setColor(Color.argb(190, 255, 255, 255));
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(1.5f * density);
         canvas.drawRoundRect(new RectF(inset, inset, v.getWidth() - inset, v.getHeight() - inset), radius, radius, paint);
@@ -105,6 +112,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         inspect(label, param.thisObject);
                         if (draw && param.thisObject instanceof View && param.args != null && param.args.length > 0 && param.args[0] instanceof Canvas) {
                             View v = (View) param.thisObject;
+                            logSwitch(v);
                             if (enabled(v)) {
                                 drawHighlight(v, (Canvas) param.args[0]);
                                 if (drawCount++ < 3) log("GLASS_EXPERIMENT_DRAWN class=" + v.getClass().getName());
@@ -120,10 +128,46 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("HOOK_FAILED class=" + c.getName() + " method=" + methodName + " reason=" + t.getClass().getName() + " message=" + t.getMessage());
         }
     }
+    private static void hookPreview(ClassLoader loader) {
+        Class<?> c = find("com.android.launcher3.folder.OplusPreviewBackground", loader);
+        if (c == null) return;
+        for (Method m : c.getDeclaredMethods()) {
+            String name = m.getName();
+            boolean target = ("drawBackground".equals(name) && m.getParameterTypes().length == 2)
+                    || ("getBgDrawable".equals(name) && m.getParameterTypes().length == 0)
+                    || ("getBlurProp".equals(name) && m.getParameterTypes().length == 0);
+            if (!target) continue;
+            try {
+                m.setAccessible(true);
+                final String methodName = name;
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        try {
+                            if ("drawBackground".equals(methodName)) {
+                                if (backgroundCalls++ < 12) log("BG_DRAW_RUNTIME signature=" + ((Method)param.method).toGenericString()
+                                        + " arg1=" + (param.args[1] == null ? "null" : param.args[1].getClass().getName()));
+                            } else if ("getBgDrawable".equals(methodName)) {
+                                if (drawableCalls++ < 12) {
+                                    Object result = param.getResult();
+                                    log("BG_DRAWABLE_RUNTIME result=" + (result == null ? "null" : result.getClass().getName())
+                                            + (result instanceof Drawable ? " alpha=" + ((Drawable)result).getAlpha() : ""));
+                                }
+                            } else if (blurCalls++ < 12) {
+                                Object result = param.getResult();
+                                log("BG_BLUR_PROP_RUNTIME result=" + (result == null ? "null" : result.getClass().getName()));
+                            }
+                        } catch (Throwable t) { log("BG_RUNTIME_ERROR=" + t.getClass().getSimpleName()); }
+                    }
+                });
+                installed++;
+                log("HOOK_INSTALLED class=" + c.getName() + " method=" + m.toGenericString());
+            } catch (Throwable t) { failed++; log("HOOK_FAILED class=" + c.getName() + " method=" + m.toGenericString() + " error=" + t); }
+        }
+    }
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.5 FOLDER_GLASS_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.6 BACKGROUND_RUNTIME_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -131,7 +175,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } else {
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
+            hookPreview(p.classLoader);
         }
-        log("V1.5 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.6 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
