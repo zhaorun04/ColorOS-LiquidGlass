@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1985
-        versionName '1.9.85-static-refraction-boot-reference'
+        versionCode 1986
+        versionName '1.9.86-background-layer-refraction'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

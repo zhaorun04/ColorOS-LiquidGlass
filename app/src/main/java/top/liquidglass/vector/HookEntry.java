@@ -1850,6 +1850,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
         }
     }
+    // Keep the surface pass directly after the OEM preview background, before icons.
+    // The edge pass remains after dispatchDraw, preserving V1.9.74 corner geometry.
+    private static final ThreadLocal<View> ACTIVE_FOLDER_ICON = new ThreadLocal<View>();
+    private static final ThreadLocal<Boolean> PREVIEW_SURFACE_DRAWN = new ThreadLocal<Boolean>();
+    private static int surfaceOrderLogs = 0;
     private static void hookFolderIconCanvasFusion(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
         if (c == null) return;
@@ -1861,12 +1866,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                         View v=(View)p.thisObject;
                         refresh(v);
-                        drawFolderIconFusion(v,(Canvas)p.args[0],false);
+                        ACTIVE_FOLDER_ICON.set(v);
+                        PREVIEW_SURFACE_DRAWN.set(Boolean.FALSE);
                     }
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
-                    if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas)
-                        drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
+                    try {
+                        if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
+                            // Do not draw the surface here: it would cover app icons.
+                            drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
+                            if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER previewSurface="+Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()));
+                        }
+                    } finally {
+                        ACTIVE_FOLDER_ICON.remove();
+                        PREVIEW_SURFACE_DRAWN.remove();
+                    }
                 }
             });
             installed++;
@@ -2258,6 +2272,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 Canvas targetCanvas=null;
                                 if (param.args!=null) for(Object arg:param.args) {
                                     if (arg instanceof Canvas) { targetCanvas=(Canvas)arg; break; }
+                                }
+                                // V1.9.86: draw the refractive surface after OEM blur/background
+                                // and before FolderIcon's children. Motion must not toggle the pass.
+                                View activeIcon=ACTIVE_FOLDER_ICON.get();
+                                if(targetCanvas!=null && activeIcon!=null &&
+                                        !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
+                                    PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
+                                    drawFolderIconFusion(activeIcon,targetCanvas,false);
                                 }
                                 if (false && targetCanvas!=null && glassEnabled && probeMode!=1) { // V1.9.25: legacy overlay disabled
                                     Object bg=null;
