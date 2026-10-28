@@ -138,10 +138,40 @@ public final class HookEntry implements IXposedHookLoadPackage {
             } catch (Throwable t) { log("FOLDER_BACKGROUND_ERROR=" + t.getClass().getSimpleName()); }
         }
     }
+    // Root service publishes a last-known-good settings snapshot into Settings.Global.
+    // This avoids launching our ContentProvider from ColorOS Launcher at boot,
+    // which OplusAppStartupManager blocks on affected devices.
+    private static final String BOOT_SNAPSHOT_KEY = "liquidglass_boot_snapshot_v1";
+    private static volatile String lastBootSnapshot = "";
+    private static boolean restoreBootSnapshot(android.content.Context context) {
+        try {
+            String raw=android.provider.Settings.Global.getString(context.getContentResolver(),BOOT_SNAPSHOT_KEY);
+            if(raw==null || !raw.startsWith("LG1|"))return false;
+            String[] v=raw.split("\\|",-1);
+            if(v.length!=16)return false;
+            // Parse all fields first: never partially apply a corrupt snapshot.
+            int[] x=new int[15];
+            for(int i=0;i<x.length;i++)x[i]=Integer.parseInt(v[i+1]);
+            if(x[1]<40||x[1]>255||x[6]<0||x[6]>100||x[8]<1||x[8]>5)return false;
+            glassEnabled=x[0]==1;glassAlpha=x[1];tintMode=x[2];tintStrength=x[3];
+            highlightEnabled=x[4]==1;diagnostics=x[5]==1;highlightStrength=x[6];
+            probeMode=x[7];highlightWidth=x[8];directionalLight=x[9]==1;
+            nativeBlurExperiment=glassEnabled?1:0;blurRadiusPercent=x[11];
+            nativeAlphaProbe=x[12]==1;wallpaperCompare=x[13]==1;REFRACTION_ENABLED=x[14]==1;
+            configEverLoaded=true;
+            if(!raw.equals(lastBootSnapshot)){
+                lastBootSnapshot=raw;
+                log("BOOT_SNAPSHOT_APPLIED enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
+                return true;
+            }
+            return false;
+        }catch(Throwable t){log("BOOT_SNAPSHOT_FAILED reason="+t.getClass().getSimpleName());return false;}
+    }
     private static void refresh(View v) { refreshFromContext(v.getContext()); }
     private static void refreshFromContext(android.content.Context context) {
         long now = android.os.SystemClock.uptimeMillis();
         if (now-lastRead < 1500) return;
+        lastRead=now;
         try (Cursor c = context.getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 lastRead=now;
@@ -171,17 +201,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<8) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
+        if(!configEverLoaded)restoreBootSnapshot(context);
     }
     private static void refreshConfigFromContext(android.content.Context ctx) {
         long now=android.os.SystemClock.uptimeMillis();
         if(now-lastExperimentRead<1500)return;
-        try (Cursor c=ctx.getContentResolver().query(CONFIG,null,null,null,null)) {
-            if(c!=null && c.moveToFirst()) {
-                int i=c.getColumnIndex("native_blur_experiment");
-                nativeBlurExperiment=glassEnabled?1:0;
-                lastExperimentRead=now;
-            }
-        } catch(Throwable ignored) { /* keep default off on read failure */ }
+        nativeBlurExperiment=glassEnabled?1:0;
+        lastExperimentRead=now;
     }
     private static int tintColor() {
         if(tintMode==1)return Color.rgb(225,240,255);
@@ -2525,6 +2551,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         @Override public void run(){
                             new Thread(()->{
                                 boolean wasLoaded=configEverLoaded;
+                                boolean snapshotChanged=restoreBootSnapshot(app);
                                 refreshFromContext(app);
                                 log("BOOT_CONFIG_RESTORE loaded="+configEverLoaded+" enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
                                 if(configEverLoaded)handler.post(()->invalidateGlassViews());

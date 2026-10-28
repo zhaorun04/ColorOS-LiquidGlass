@@ -29,6 +29,30 @@ if command -v inotifyd >/dev/null 2>&1; then
   inotifyd /data/adb/service.d/99-liquidglass-wallpaper-notify.sh /data/system/users/0:cmw >/dev/null 2>&1 &
   WATCHER_PID=$!
 fi
+# Persist a minimal non-secret configuration snapshot independent of the app provider.
+PREF=/data/user/0/$PKG/shared_prefs/glass.xml
+SNAPKEY=liquidglass_boot_snapshot_v1
+LASTSNAP=""
+xml_value() {
+  line=$(grep -F "name=\"$1\"" "$PREF" 2>/dev/null | head -n 1)
+  case "$line" in *'value="true"'*) echo 1;; *'value="false"'*) echo 0;;
+    *) echo "$line" | sed -n 's/.*value="\([-0-9]*\)".*/\1/p';; esac
+}
+config_value() { v=$(xml_value "$1"); case "$v" in ''|*[!0-9-]*) echo "$2";; *) echo "$v";; esac; }
+sync_config() {
+  [ -f "$PREF" ] || return
+  # The first item is the schema marker; the remaining 15 match provider columns.
+  SNAP="LG1"
+  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:0'; do
+    key=${entry%%:*}; fallback=${entry#*:}
+    SNAP="$SNAP|$(config_value "$key" "$fallback")"
+  done
+  [ "$SNAP" = "$LASTSNAP" ] && return
+  if settings put global "$SNAPKEY" "$SNAP" 2>/dev/null; then
+    LASTSNAP="$SNAP"
+    echo "$(date) config snapshot published" >> "$LOG"
+  fi
+}
 sync_once() {
   [ -f "$SRC" ] && [ -d "$DSTDIR" ] || return
   UIDNUM=$(stat -c %u "/data/user/0/$PKG" 2>/dev/null)
@@ -58,12 +82,14 @@ sync_once() {
   fi
   rm -f "$TMP"
 }
+sync_config
 sync_once
 # Check the event marker every 5s (cheap stat); full source metadata every 300s.
 # No wallpaper image reads unless metadata changed.
 TICKS=0
 while true; do
   sleep 5
+  sync_config
   TICKS=$((TICKS + 1))
   if [ -e "$TRIGGER" ]; then
     rm -f "$TRIGGER"
