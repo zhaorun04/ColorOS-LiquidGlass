@@ -188,6 +188,23 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Object params = getter.invoke(child);
             if (params == null) { log("BLUR_PARAMS null"); return; }
             log("BLUR_PARAMS_CLASS " + params.getClass().getName());
+            // V1.9.38: inspect construction/copy options only. No mutation or setter calls.
+            try {
+                java.lang.reflect.Constructor<?>[] constructors = params.getClass().getDeclaredConstructors();
+                log("BLUR_COPY_SAFETY constructors=" + constructors.length + " class=" + params.getClass().getName());
+                int shown = 0;
+                for (java.lang.reflect.Constructor<?> constructor : constructors) {
+                    if (shown++ >= 8) break;
+                    log("BLUR_COPY_CONSTRUCTOR " + constructor.toGenericString());
+                }
+                int finals = 0, mutable = 0;
+                for (Field f : params.getClass().getDeclaredFields()) {
+                    if (Modifier.isStatic(f.getModifiers())) continue;
+                    if (Modifier.isFinal(f.getModifiers())) finals++; else mutable++;
+                }
+                log("BLUR_COPY_SAFETY mutableFields=" + mutable + " finalFields=" + finals
+                    + " action=READ_ONLY no_setBlurParams");
+            } catch (Throwable t) { log("BLUR_COPY_SAFETY_ERROR " + t.getClass().getSimpleName()); }
             // V1.9.37: log geometry as coordinates, not merely a Rect class name.
             // Read-only: no setters, no field mutation, no draw calls.
             for (Method candidate : child.getClass().getMethods()) {
@@ -228,18 +245,44 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static final java.util.concurrent.atomic.AtomicBoolean SAMPLE_FEASIBILITY_LOGGED =
             new java.util.concurrent.atomic.AtomicBoolean(false);
-    // V1.9.37: strictly read-only feasibility check. No wallpaper capture, no pixel reads.
+    // V1.9.38: inspect backdrop acquisition conditions, without screenshots or pixel reads.
+    // Launcher root captures include the folder itself and are NOT valid backdrop sources.
     private static void inspectSamplingFeasibility(View folder) {
         if (!diagnostics || !SAMPLE_FEASIBILITY_LOGGED.compareAndSet(false, true)) return;
         try {
             View root = folder.getRootView();
+            int[] folderLocation = new int[2];
+            int[] rootLocation = new int[2];
+            folder.getLocationOnScreen(folderLocation);
+            if (root != null) root.getLocationOnScreen(rootLocation);
             log("REFRACTION_FEASIBILITY root=" + (root == null ? "null" : root.getClass().getName())
                 + " folder=" + folder.getWidth() + "x" + folder.getHeight()
                 + " attached=" + folder.isAttachedToWindow());
-            log("REFRACTION_FEASIBILITY status=NOT_IMPLEMENTED reason=requires_safe_backdrop_pixels");
-        } catch (Throwable t) {
-            log("REFRACTION_FEASIBILITY_ERROR " + t.getClass().getSimpleName());
-        }
+            log("REFRACTION_COORDS folderScreen=[" + folderLocation[0] + "," + folderLocation[1] + "]"
+                + " rootScreen=[" + rootLocation[0] + "," + rootLocation[1] + "]"
+                + " rootSize=" + (root == null ? "null" : root.getWidth() + "x" + root.getHeight()));
+            if (root != null) {
+                Drawable bg = root.getBackground();
+                log("REFRACTION_ROOT_BACKGROUND " + (bg == null ? "null" : bg.getClass().getName()));
+                android.view.ViewGroup.LayoutParams lp = root.getLayoutParams();
+                if (lp instanceof android.view.WindowManager.LayoutParams) {
+                    android.view.WindowManager.LayoutParams wlp = (android.view.WindowManager.LayoutParams) lp;
+                    boolean showsWallpaper = (wlp.flags & android.view.WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER) != 0;
+                    log("REFRACTION_WINDOW showWallpaperFlag=" + showsWallpaper + " type=" + wlp.type);
+                } else {
+                    log("REFRACTION_WINDOW layoutParams=" + (lp == null ? "null" : lp.getClass().getName()));
+                }
+            }
+            try {
+                android.app.WallpaperManager wm = android.app.WallpaperManager.getInstance(folder.getContext());
+                log("REFRACTION_WALLPAPER_SERVICE available=" + (wm != null)
+                    + " supported=" + (wm != null && wm.isWallpaperSupported()));
+                // Do not call getDrawable/getWallpaperFile: wallpaper alone does not include icons,
+                // widgets or live scene layers, and accessing wallpaper pixels may be restricted.
+            } catch (Throwable t) { log("REFRACTION_WALLPAPER_SERVICE_ERROR " + t.getClass().getSimpleName()); }
+            log("REFRACTION_FEASIBILITY status=BACKDROP_UNAVAILABLE"
+                + " reason=need_pre_folder_composited_frame_not_root_screenshot");
+        } catch (Throwable t) { log("REFRACTION_FEASIBILITY_ERROR " + t.getClass().getSimpleName()); }
     }
     private static void applyNativeBackground(View v) {
         refresh(v);
