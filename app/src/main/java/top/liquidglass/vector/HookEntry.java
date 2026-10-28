@@ -646,7 +646,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 });
                 installed++;
                 log("BLUR_CONDITION_HOOK_INSTALLED "+signature);
-            } catch(Throwable e){failed++;log("BLUR_CONDITION_HOOK_FAILED "+signature+" "+e.getClass().getSimpleName());}
+            } catch(Throwable e){failed++;log("BLUR_CONDITION_HOOK_FAILED "+m.toGenericString()+" "+e.getClass().getSimpleName());}
         }
     }
     private static void traceBlurMethods(ClassLoader loader) {
