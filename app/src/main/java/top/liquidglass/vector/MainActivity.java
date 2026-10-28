@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.3",23);
-        label("原生 Drawable 同画布描边实验版。所有桌面文件夹统一材质；不再估算视图偏移，继续被动诊断原生模糊。",14);
+        label("ColorOS Liquid Glass V1.9.4",23);
+        label("原生圆角贴合、可调色调叠层与高光强度。所有文件夹共用一套参数；真实背景模糊仍处于诊断阶段。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
         SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
@@ -40,19 +40,21 @@ public final class MainActivity extends Activity {
         String[] options={"原生（推荐）","冷白","浅灰","深色"};
         Spinner tint=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,options);
         tint.setAdapter(adapter);tint.setSelection(Math.max(0,Math.min(3,prefs.getInt("tint",0))));root.addView(tint);
+        SeekBar tintStrength=slider("色调强度","tint_strength",30,0,90);
+        tintStrength.setEnabled(prefs.getInt("tint",0)!=0);
         tint.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("tint",pos).apply();}
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("tint",pos).apply();tintStrength.setEnabled(pos!=0);}
             public void onNothingSelected(android.widget.AdapterView<?> p){}
         });
-        SeekBar tintStrength=slider("色调强度","tint_strength",30,0,90);
         Switch highlight=toggle("柔和高光描边（默认关闭）","highlight",false);
+        SeekBar highlightStrength=slider("柔和高光强度","highlight_strength",25,0,100);
         Switch diag=toggle("保留诊断日志","diagnostics",true);
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
         reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
-            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).apply();
-            enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);
+            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",25).apply();
+            enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(25);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
-        label("提示：色调使用 Drawable 颜色滤镜，部分主题可能不兼容。关闭实验后若外观未立即恢复，可重启桌面。新增被动诊断原生模糊初始化与调用；不会强制启用 ColorOS 隐藏模糊功能。",13);
+        label("提示：色调现在使用原生背景绘制后的叠色层；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。新增被动诊断原生模糊初始化与调用；不会强制启用 ColorOS 隐藏模糊功能。",13);
         setContentView(scroll);
     }
 }

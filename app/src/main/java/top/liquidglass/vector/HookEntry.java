@@ -5,6 +5,8 @@ import android.graphics.Paint;
 import android.graphics.Color;
 import android.graphics.RectF;
 import android.graphics.Rect;
+import android.graphics.Path;
+import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.database.Cursor;
@@ -29,6 +31,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile boolean glassEnabled = false;
     private static volatile int glassAlpha = 210, tintMode = 0, tintStrength = 30;
     private static volatile boolean highlightEnabled = false;
+    private static volatile int highlightStrength = 25;
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
@@ -114,7 +117,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 tintStrength=Math.max(0,Math.min(90,c.getInt(3)));
                 highlightEnabled=c.getInt(4)==1;
                 diagnostics=c.getInt(5)==1;
-                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" highlight="+highlightEnabled;
+                highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -141,14 +145,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             int requested=glassAlpha;
             int alpha=glassEnabled?requested:original;
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
-            if(glassEnabled && tintMode!=0 && tintStrength>0){
-                int rgb=tintColor();
-                int overlay=Color.argb((int)(255*tintStrength/100f),Color.red(rgb),Color.green(rgb),Color.blue(rgb));
-                d.setColorFilter(overlay,android.graphics.PorterDuff.Mode.SRC_ATOP);
-                synchronized(TINTED){TINTED.add(d);}
-            } else {
-                synchronized(TINTED){if(TINTED.remove(d))d.clearColorFilter();}
-            }
+            // V1.9.4 tint is painted directly on the native Canvas after background.draw.
+            // Clear any legacy color filter previously applied by V1.9.3.
+            synchronized(TINTED){if(TINTED.remove(d))d.clearColorFilter();}
             if(alphaLogs++<16)log("MATERIAL_APPLIED enabled="+glassEnabled+" size="+v.getWidth()+"x"+v.getHeight()+
                 " alpha="+alpha+" tint="+tintMode+" drawable="+d.getClass().getSimpleName());
         }catch(Throwable t){if(alphaLogs++<12)log("MATERIAL_FAILED reason="+t.getClass().getSimpleName());}
@@ -159,24 +158,60 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final Set<Drawable> TRACKED_BACKGROUNDS = Collections.newSetFromMap(new WeakHashMap<Drawable, Boolean>());
     private static int geometryLogs = 0;
     private static int nativeDrawLogs = 0;
-    private static void drawHighlightOnNativeCanvas(Drawable drawable, Canvas canvas) {
-        if (!glassEnabled || !highlightEnabled) return;
+    // The path is built from the actual GradientDrawable corner data rather than
+    // an arbitrary percentage of the rectangle. The native drawable owns the Canvas matrix.
+    private static Path nativeShape(GradientDrawable d, RectF r) {
+        Path path = new Path();
+        float[] corners = d.getCornerRadii();
+        if (corners != null && corners.length == 8) {
+            path.addRoundRect(r, corners, Path.Direction.CW);
+        } else {
+            float radius = Math.max(0f, d.getCornerRadius());
+            path.addRoundRect(r, radius, radius, Path.Direction.CW);
+        }
+        return path;
+    }
+    private static void drawMaterialOnNativeCanvas(GradientDrawable drawable, Canvas canvas) {
+        if (!glassEnabled) return;
+        boolean tint = tintMode != 0 && tintStrength > 0;
+        boolean shine = highlightEnabled && highlightStrength > 0;
+        if (!tint && !shine) return;
         Rect bounds = drawable.getBounds();
         if (bounds == null || bounds.isEmpty()) return;
-        float density = android.content.res.Resources.getSystem().getDisplayMetrics().density;
-        float stroke = Math.max(0.7f, density * 0.55f);
-        float inset = stroke * 0.5f;
-        RectF rect = new RectF(bounds.left + inset, bounds.top + inset,
-                bounds.right - inset, bounds.bottom - inset);
-        if (rect.width() < 4 || rect.height() < 4) return;
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(stroke);
-        paint.setColor(Color.argb(22, 255, 255, 255));
-        float radius = Math.min(rect.width(), rect.height()) * 0.18f;
-        canvas.drawRoundRect(rect, radius, radius, paint);
-        if (nativeDrawLogs++ < 24) log("HIGHLIGHT_NATIVE_CANVAS bounds=" + bounds.toShortString() +
-                " finalRect=" + rect.toShortString() + " matrix=" + canvas.getMatrix().toShortString());
+        RectF base = new RectF(bounds);
+        if (base.width() < 4 || base.height() < 4) return;
+        Path path = nativeShape(drawable, base);
+        if (tint) {
+            Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+            fill.setStyle(Paint.Style.FILL);
+            int c = tintColor();
+            // Overlay opacity is deliberately tied to the slider; no SRC_ATOP filter.
+            int opacity = Math.round(160f * tintStrength / 90f);
+            fill.setColor(Color.argb(opacity,Color.red(c),Color.green(c),Color.blue(c)));
+            canvas.drawPath(path, fill);
+            if (nativeDrawLogs++ < 32) log("GLASS_TINT_APPLIED mode="+tintMode+" strength="+tintStrength+" overlayAlpha="+opacity);
+        }
+        if (shine) {
+            float density = drawable.getCallback() instanceof View ?
+                    ((View)drawable.getCallback()).getResources().getDisplayMetrics().density :
+                    android.content.res.Resources.getSystem().getDisplayMetrics().density;
+            float stroke = Math.max(0.7f, density * 0.55f);
+            float inset = stroke / 2f;
+            RectF strokeRect = new RectF(base.left+inset,base.top+inset,base.right-inset,base.bottom-inset);
+            if(strokeRect.width() > 4 && strokeRect.height() > 4){
+                Path strokePath = nativeShape(drawable, strokeRect);
+                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(stroke);
+                int opacity = Math.round(72f * (highlightStrength / 100f) * (highlightStrength / 100f));
+                paint.setColor(Color.argb(opacity,255,255,255));
+                canvas.drawPath(strokePath, paint);
+                if (nativeDrawLogs++ < 32) log("GLASS_HIGHLIGHT_STRENGTH value="+highlightStrength+" alpha="+opacity+
+                    " GLASS_CORNER_RADIUS="+drawable.getCornerRadius()+
+                    " GLASS_CORNER_RADII="+java.util.Arrays.toString(drawable.getCornerRadii())+
+                    " bounds="+bounds.toShortString());
+            }
+        }
     }
     private static void hookNativeDrawableDraw() {
         try {
@@ -189,7 +224,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     synchronized (TRACKED_BACKGROUNDS) {
                         if (!TRACKED_BACKGROUNDS.contains(drawable)) return;
                     }
-                    try { drawHighlightOnNativeCanvas(drawable, (Canvas)param.args[0]); }
+                    try { drawMaterialOnNativeCanvas((GradientDrawable)drawable, (Canvas)param.args[0]); }
                     catch (Throwable t) {
                         if (geometryLogs++ < 8) log("HIGHLIGHT_NATIVE_ERROR reason=" + t.getClass().getSimpleName());
                     }
@@ -267,7 +302,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.3 DRAWABLE_CANVAS_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.4 MATERIAL_CONTROL_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -278,6 +313,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9.3 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.4 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
