@@ -6,6 +6,7 @@ import android.graphics.Color;
 import android.graphics.RectF;
 import android.graphics.Rect;
 import android.graphics.Path;
+import android.graphics.Outline;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -158,17 +159,68 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final Set<Drawable> TRACKED_BACKGROUNDS = Collections.newSetFromMap(new WeakHashMap<Drawable, Boolean>());
     private static int geometryLogs = 0;
     private static int nativeDrawLogs = 0;
-    // The path is built from the actual GradientDrawable corner data rather than
-    // an arbitrary percentage of the rectangle. The native drawable owns the Canvas matrix.
-    private static Path nativeShape(GradientDrawable d, RectF r) {
-        Path path = new Path();
-        float[] corners = d.getCornerRadii();
-        if (corners != null && corners.length == 8) {
-            path.addRoundRect(r, corners, Path.Direction.CW);
-        } else {
-            float radius = Math.max(0f, d.getCornerRadius());
-            path.addRoundRect(r, radius, radius, Path.Direction.CW);
+    // V1.9.5: inspect Outline as a second source of geometry. The drawable may
+    // use a custom internal outline; never assume Outline equals the final mask.
+    private static final class ShapeGeometry {
+        final RectF rect;
+        final float[] radii;
+        final String source;
+        ShapeGeometry(RectF rect, float[] radii, String source) {
+            this.rect = rect; this.radii = radii; this.source = source;
         }
+    }
+    private static float[] uniformRadii(float radius) {
+        float[] a = new float[8];
+        java.util.Arrays.fill(a, Math.max(0f, radius));
+        return a;
+    }
+    private static ShapeGeometry getShapeGeometry(GradientDrawable d, Rect bounds) {
+        RectF rect = new RectF(bounds);
+        float[] radii = d.getCornerRadii();
+        if (radii != null && radii.length == 8) radii = radii.clone();
+        else radii = uniformRadii(d.getCornerRadius());
+        String source = "drawable";
+        try {
+            Outline outline = new Outline();
+            d.getOutline(outline);
+            Rect outlineRect = new Rect();
+            if (outline.getRect(outlineRect) && !outlineRect.isEmpty()) {
+                // An Outline can describe the drawable's actual outer contour.
+                // Prefer it only if it is close to drawable bounds, avoiding
+                // unrelated clipping rectangles on vendor implementations.
+                if (Math.abs(outlineRect.left-bounds.left)<=2 &&
+                    Math.abs(outlineRect.top-bounds.top)<=2 &&
+                    Math.abs(outlineRect.right-bounds.right)<=2 &&
+                    Math.abs(outlineRect.bottom-bounds.bottom)<=2) {
+                    float outlineRadius = outline.getRadius();
+                    if (outlineRadius > 0f) {
+                        rect = new RectF(outlineRect);
+                        radii = uniformRadii(outlineRadius);
+                        source = "outline-roundrect";
+                    }
+                }
+            }
+            if (geometryLogs++ < 16) {
+                log("GLASS_OUTLINE_PROBE bounds="+bounds.toShortString()+
+                    " outlineRect="+(outline.getRect(outlineRect)?outlineRect.toShortString():"non-rect")+
+                    " outlineRadius="+outline.getRadius()+
+                    " drawableRadius="+d.getCornerRadius()+
+                    " drawableRadii="+java.util.Arrays.toString(d.getCornerRadii())+
+                    " source="+source);
+            }
+        } catch (Throwable t) {
+            if (geometryLogs++ < 16) log("GLASS_OUTLINE_PROBE_FAILED reason="+t.getClass().getSimpleName());
+        }
+        return new ShapeGeometry(rect,radii,source);
+    }
+    private static Path shapePath(ShapeGeometry g, float inset) {
+        RectF r = new RectF(g.rect);
+        r.inset(inset,inset);
+        Path path = new Path();
+        if (r.width() <= 0 || r.height() <= 0) return path;
+        float[] adjusted = new float[8];
+        for (int i=0;i<8;i++) adjusted[i] = Math.max(0f,g.radii[i]-inset);
+        path.addRoundRect(r, adjusted, Path.Direction.CW);
         return path;
     }
     private static void drawMaterialOnNativeCanvas(GradientDrawable drawable, Canvas canvas) {
@@ -180,7 +232,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (bounds == null || bounds.isEmpty()) return;
         RectF base = new RectF(bounds);
         if (base.width() < 4 || base.height() < 4) return;
-        Path path = nativeShape(drawable, base);
+        ShapeGeometry geometry = getShapeGeometry(drawable, bounds);
+        Path path = shapePath(geometry, 0f);
         if (tint) {
             Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
             fill.setStyle(Paint.Style.FILL);
@@ -197,9 +250,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     android.content.res.Resources.getSystem().getDisplayMetrics().density;
             float stroke = Math.max(0.7f, density * 0.55f);
             float inset = stroke / 2f;
-            RectF strokeRect = new RectF(base.left+inset,base.top+inset,base.right-inset,base.bottom-inset);
+            RectF strokeRect = new RectF(geometry.rect);
+            strokeRect.inset(inset,inset);
             if(strokeRect.width() > 4 && strokeRect.height() > 4){
-                Path strokePath = nativeShape(drawable, strokeRect);
+                Path strokePath = shapePath(geometry, inset);
                 Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
                 paint.setStyle(Paint.Style.STROKE);
                 paint.setStrokeWidth(stroke);
@@ -209,7 +263,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if (nativeDrawLogs++ < 32) log("GLASS_HIGHLIGHT_STRENGTH value="+highlightStrength+" alpha="+opacity+
                     " GLASS_CORNER_RADIUS="+drawable.getCornerRadius()+
                     " GLASS_CORNER_RADII="+java.util.Arrays.toString(drawable.getCornerRadii())+
-                    " bounds="+bounds.toShortString());
+                    " bounds="+bounds.toShortString()+" geometrySource="+geometry.source+" inset="+inset+" adjustedRadius="+Math.max(0f,geometry.radii[0]-inset));
             }
         }
     }
