@@ -4,6 +4,7 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Color;
 import android.graphics.RectF;
+import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.database.Cursor;
 import android.net.Uri;
@@ -148,14 +149,43 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 " alpha="+alpha+" tint="+tintMode+" drawable="+d.getClass().getSimpleName());
         }catch(Throwable t){if(alphaLogs++<12)log("MATERIAL_FAILED reason="+t.getClass().getSimpleName());}
     }
-    private static void drawHighlight(View v,Canvas canvas) {
-        if(!glassEnabled||!highlightEnabled||v.getWidth()<2||v.getHeight()<2)return;
-        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(v.getResources().getDisplayMetrics().density*0.7f);
-        p.setColor(Color.argb(45,255,255,255));
-        float inset=p.getStrokeWidth()*2;
-        float r=Math.min(v.getWidth(),v.getHeight())*0.15f;
-        canvas.drawRoundRect(new RectF(inset,inset,v.getWidth()-inset,v.getHeight()-inset),r,r,p);
+    private static int geometryLogs = 0;
+    private static void drawHighlight(View v, Canvas canvas) {
+        if (!glassEnabled || !highlightEnabled || v.getWidth() < 2 || v.getHeight() < 2) return;
+        try {
+            Object preview = field(v.getClass(), "mBackground").get(v);
+            if (preview == null) return;
+            Method getter = preview.getClass().getDeclaredMethod("getBgDrawable");
+            getter.setAccessible(true);
+            Object result = getter.invoke(preview);
+            if (!(result instanceof Drawable)) return;
+            Drawable drawable = (Drawable) result;
+            Rect bounds = drawable.getBounds();
+            // Only draw when the drawable supplies a valid, view-local rectangle.
+            // Never fall back to the full FolderIcon bounds: those include label/padding.
+            if (bounds.isEmpty() || bounds.left < 0 || bounds.top < 0 ||
+                bounds.right > v.getWidth() || bounds.bottom > v.getHeight()) {
+                if (geometryLogs++ < 12) log("HIGHLIGHT_SKIPPED invalid_drawable_bounds=" + bounds.toShortString() +
+                    " view=" + v.getWidth() + "x" + v.getHeight());
+                return;
+            }
+            float density = v.getResources().getDisplayMetrics().density;
+            float stroke = Math.max(0.7f, density * 0.55f);
+            float inset = stroke / 2f;
+            RectF rect = new RectF(bounds.left + inset, bounds.top + inset,
+                                   bounds.right - inset, bounds.bottom - inset);
+            if (rect.width() < 4 || rect.height() < 4) return;
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(stroke);
+            p.setColor(Color.argb(22, 255, 255, 255));
+            float radius = Math.min(rect.width(), rect.height()) * 0.18f;
+            canvas.drawRoundRect(rect, radius, radius, p);
+            if (geometryLogs++ < 12) log("HIGHLIGHT_ALIGNED bounds=" + bounds.toShortString() +
+                " view=" + v.getWidth() + "x" + v.getHeight());
+        } catch (Throwable t) {
+            if (geometryLogs++ < 12) log("HIGHLIGHT_SKIPPED reason=" + t.getClass().getSimpleName());
+        }
     }
     private static void hook(Class<?> c, String methodName, Class<?>[] args, final String label, final boolean draw) {
         if (c == null) return;
@@ -222,7 +252,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9 NATIVE_BLUR_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.1 HIGHLIGHT_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -232,6 +262,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.1 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
