@@ -679,14 +679,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // but not a full-width dark horizontal strip.
         final float reach = 10f + 4f * x + 4f * y + 8f * x * y;
         final float gain = 1f + 0.18f * x + 0.15f * y + 0.02f * x * y;
-        final float opacity = Math.min(1f, strength * gain);
+        // Large square folders were too dark over a broad lower-right area.
+        // Reduce both coverage and intensity smoothly with size, preserving
+        // the small 162x162 reference and non-square folders.
+        final float largeSquare = x * y;
+        final float opacity = Math.min(1f, strength * gain * (1f - 0.15f * largeSquare));
         final int coreAlpha = Math.min(112, Math.round(90f * opacity));
         if (coreAlpha <= 0) return;
-        final float cx = w * 0.98f, cy = h * 0.98f;
+        // Shift the focus slightly outside the lower-right corner on large squares.
+        final float cx = w * (0.98f + 0.055f * largeSquare);
+        final float cy = h * (0.98f + 0.055f * largeSquare);
         // Elliptical radial gradient: scales with each axis independently,
         // so horizontal and vertical folders keep a consistent light direction.
-        final float rx = Math.max(reach * 2.8f, w * (0.39f + 0.09f * x));
-        final float ry = Math.max(reach * 2.8f, h * (0.39f + 0.09f * y));
+        final float rx = Math.max(reach * 2.8f, w * (0.39f + 0.09f * x)) * (1f - 0.20f * largeSquare);
+        final float ry = Math.max(reach * 2.8f, h * (0.39f + 0.09f * y)) * (1f - 0.20f * largeSquare);
         final float radius = Math.max(rx, ry);
         android.graphics.RadialGradient gradient = new android.graphics.RadialGradient(
             cx, cy, radius,
