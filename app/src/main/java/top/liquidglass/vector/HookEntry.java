@@ -1323,7 +1323,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.LinkedHashMap<String, MaskCache>();
     // V1.9.28: preserve all four straight edges; correct only the corner curve.
     // This is a geometry experiment, not an exact OEM LayerBlurDrawable alpha mask.
-    private static final float BLUR_CORNER_RADIUS_DELTA_PX = 6f;
+    private static final float BLUR_CORNER_RADIUS_DELTA_PX = 0f;
     private static MaskCache blurShapeMask(int w,int h,float radius) {
         String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth+"/cornerDelta"+BLUR_CORNER_RADIUS_DELTA_PX;
         synchronized(BLUR_SHAPE_MASKS) {
@@ -1561,7 +1561,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 for(View trackedView:DYNAMIC_REFRACTION.keySet())
                                     if(trackedView!=null && trackedView.isAttachedToWindow())trackedView.invalidate();
                             }
-                            if(view.isAttachedToWindow())view.invalidate();
+                            if(view.isAttachedToWindow()){
+                                view.invalidate();
+                                // Parent render-node caches may not redraw the child until scroll.
+                                View parentRoot=view.getRootView();
+                                if(parentRoot!=null)parentRoot.invalidate();
+                                view.postInvalidateDelayed(120L);
+                                view.postInvalidateDelayed(420L);
+                            }
                         }
                     });
                     if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=READY size="+next.getWidth()+"x"+next.getHeight());
