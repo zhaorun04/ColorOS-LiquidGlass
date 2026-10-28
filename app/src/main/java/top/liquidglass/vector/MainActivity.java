@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.14",23);
+        label("ColorOS Liquid Glass V1.9.15",23);
         label("保留 V1.9.10 外观；新增 ColorOS 原生模糊被动探测，不会强制开启隐藏模糊或模糊应用图标。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);

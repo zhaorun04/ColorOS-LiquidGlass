@@ -782,10 +782,70 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
         }
     }
+
+    // V1.9.15: read-only, targeted native blur condition tracing. No return-value changes.
+    private static final java.util.Set<String> CONDITION_ONCE =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    private static void hookNativeBlurConditions(ClassLoader loader) {
+        String[] owners = {
+            "com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties",
+            "com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties$Companion",
+            "com.android.launcher3.folder.BaseFolderIconType",
+            "com.android.launcher3.folder.PreviewBackground",
+            "com.android.launcher3.folder.FolderIcon",
+            "com.android.launcher3.folder.OplusPreviewBackground",
+            "com.android.launcher3.LauncherAnimConfig",
+            "com.android.launcher3.util.LauncherAnimConfig",
+            "com.android.launcher3.util.AppFeatureUtils"
+        };
+        String[] names = {
+            "isSupportNewBlur", "isSupportNewBlurLocal", "isBgSupportNewBlur",
+            "enableFolderIconBlur", "getSysMaterialBlurSwitchEnable",
+            "isBlurServiceInstalled", "isLevelAOrAPlus", "isUpgradeMaterialBlur",
+            "isMaterialBlurJumpSupported", "getBlurServiceInstalled",
+            "access$getMSysMaterialBlurSwitchEnable$cp",
+            "access$getBlurServiceInstalled$cp",
+            "access$getSBlurIsPaused$cp",
+            "access$getSBlurIsPausedByTimeoutCheck$cp"
+        };
+        for (String ownerName : owners) {
+            Class<?> owner;
+            try { owner=Class.forName(ownerName,false,loader); }
+            catch(Throwable ignored) { continue; }
+            for (final Method method : owner.getDeclaredMethods()) {
+                boolean matched=false;
+                for(String name:names) if(method.getName().equals(name)) { matched=true;break; }
+                if(!matched) continue;
+                try {
+                    method.setAccessible(true);
+                    final String signature=method.toGenericString();
+                    XposedBridge.hookMethod(method,new XC_MethodHook(){
+                        @Override protected void afterHookedMethod(MethodHookParam p) {
+                            try {
+                                Object value=p.getResult();
+                                String key=signature+"="+safeValue(value);
+                                if(CONDITION_ONCE.size()>=64 || !CONDITION_ONCE.add(key))return;
+                                log("NATIVE_BLUR_CONDITION method="+signature
+                                    +" args="+decisionArgs(p.args)
+                                    +" result="+safeValue(value)
+                                    );
+                            } catch(Throwable t) { log("NATIVE_BLUR_CONDITION_LOG_ERROR "+t.getClass().getSimpleName()); }
+                        }
+                    });
+                    installed++;
+                    log("NATIVE_BLUR_HOOK_INSTALLED "+signature);
+                } catch(Throwable t) {
+                    failed++;
+                    log("NATIVE_BLUR_HOOK_FAILED "+signature+" reason="+t.getClass().getSimpleName());
+                }
+            }
+        }
+    }
+
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.14 OPTICAL_GLASS_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.15 NATIVE_BLUR_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -798,7 +858,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             traceBlurMethods(p.classLoader);
             hookFolderConditions(p.classLoader);
             hookDecisionChain(p.classLoader);
+            hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.14 OPTICAL_GLASS_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.15 NATIVE_BLUR_PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
