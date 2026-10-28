@@ -353,28 +353,64 @@ public final class HookEntry implements IXposedHookLoadPackage {
         synchronized (EDGE_MASK_CACHE) { EDGE_MASK_CACHE.put(key,mask); }
         return mask;
     }
-    private static void drawFeatheredMaterial(Canvas canvas, RectF rect, float radius, float opacity) {
-        int width=Math.round(rect.width()), height=Math.round(rect.height());
-        float feather=Math.max(5f,Math.min(12f,Math.min(rect.width(),rect.height())*0.055f));
-        android.graphics.Bitmap mask=materialEdgeMask(width,height,radius,feather);
-        if (mask == null) return;
-        int layer=canvas.saveLayer(rect,null);
-        try {
-            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
-            p.setColor(Color.argb(Math.round(34f*opacity),245,250,255));
-            canvas.drawRect(rect,p);
-            if (tintMode != 0 && tintStrength > 0 && probeMode != 2) {
-                p.setColor(tintColor());
-                p.setAlpha(Math.min(255,Math.round(tintStrength*opacity*1.5f)));
-                canvas.drawRect(rect,p);
+    // V1.9.26: both modes use the same native-alpha-mask material renderer.
+    // The blur mode constructs a contour source from the OEM outline; it does
+    // NOT claim to capture the internal LayerBlurDrawable alpha pixels.
+    private static final java.util.Map<String, MaskCache> BLUR_SHAPE_MASKS =
+        new java.util.LinkedHashMap<String, MaskCache>();
+    private static MaskCache blurShapeMask(int w,int h,float radius) {
+        String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth;
+        synchronized(BLUR_SHAPE_MASKS) {
+            MaskCache cached=BLUR_SHAPE_MASKS.get(key);
+            if(cached!=null)return cached;
+        }
+        GradientDrawable shape=new GradientDrawable();
+        shape.setShape(GradientDrawable.RECTANGLE);
+        shape.setColor(Color.WHITE);
+        shape.setCornerRadius(radius);
+        shape.setBounds(0,0,w,h);
+        MaskCache cache=nativeMask(shape);
+        if(cache!=null) synchronized(BLUR_SHAPE_MASKS) {
+            if(BLUR_SHAPE_MASKS.size()>12)BLUR_SHAPE_MASKS.clear();
+            BLUR_SHAPE_MASKS.put(key,cache);
+        }
+        return cache;
+    }
+    private static void drawUnifiedMaterial(Canvas canvas, MaskCache cache, boolean edgeOnly) {
+        if(cache==null)return;
+        boolean tint=tintMode!=0 && tintStrength>0 && probeMode!=2;
+        boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
+        if(!edgeOnly) {
+            if(probeMode==0)drawOpticalGlass(canvas,cache);
+            if(tint){
+                Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                int c=tintColor();
+                p.setColorFilter(new android.graphics.PorterDuffColorFilter(
+                    Color.rgb(Color.red(c),Color.green(c),Color.blue(c)),android.graphics.PorterDuff.Mode.SRC_IN));
+                p.setAlpha(Math.round(160f*tintStrength/90f));
+                canvas.drawBitmap(cache.mask,0,0,p);
             }
-            p.reset();
-            p.setAntiAlias(true);
-            p.setFilterBitmap(true);
-            p.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN));
-            canvas.drawBitmap(mask,null,rect,p);
-            p.setXfermode(null);
-        } finally { canvas.restoreToCount(layer); }
+        } else if(shine) {
+            float strength=probeMode==2?1f:highlightStrength/100f;
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+            if(probeMode==2){
+                p.setAlpha(205);
+                p.setColorFilter(new android.graphics.PorterDuffColorFilter(Color.RED,android.graphics.PorterDuff.Mode.SRC_IN));
+                canvas.drawBitmap(cache.glow,0,0,p);
+                canvas.drawBitmap(cache.edge,0,0,p);
+            }else{
+                int layer=canvas.saveLayer(0,0,cache.w,cache.h,null);
+                p.setAlpha(Math.round(100*strength));canvas.drawBitmap(cache.glow,0,0,p);
+                p.setAlpha(Math.round(190*strength));canvas.drawBitmap(cache.edge,0,0,p);
+                Paint light=new Paint(Paint.ANTI_ALIAS_FLAG);
+                light.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+                if(directionalLight)light.setShader(new android.graphics.LinearGradient(0,0,cache.w,cache.h,
+                    new int[]{0xEEFFFFFF,0x99E8F4FF,0x44C7DFEC},null,android.graphics.Shader.TileMode.CLAMP));
+                else light.setColor(0xCCFFFFFF);
+                canvas.drawRect(0,0,cache.w,cache.h,light);
+                light.setXfermode(null);canvas.restoreToCount(layer);
+            }
+        }
     }
     private static int folderFusionLogs = 0;
     private static final ThreadLocal<Boolean> FOLDER_FUSION_GUARD = new ThreadLocal<Boolean>();
@@ -432,32 +468,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             float w = rect.width(), h = rect.height();
             radius = Math.min(radius, Math.min(w,h)*0.5f);
-            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-            int save = canvas.save();
+            MaskCache mask=blurShapeMask(Math.round(w),Math.round(h),radius);
+            if(mask==null)return;
+            int save=canvas.save();
             FOLDER_FUSION_GUARD.set(Boolean.TRUE);
             try {
-                if (!edgeOnly) {
-                    // No hard rounded-rect fill edge: fade to transparent before
-                    // reaching the OEM contour. Do not clip the Canvas here.
-                    drawFeatheredMaterial(canvas,rect,radius,glassAlpha/255f);
-                } else if (highlightEnabled && highlightStrength > 0 && probeMode != 3) {
-                    float stroke = Math.max(1f,highlightWidth);
-                    float inset = stroke * 0.5f;
-                    RectF inner = new RectF(rect); inner.inset(inset,inset);
-                    paint.setStyle(Paint.Style.STROKE);
-                    paint.setStrokeWidth(stroke);
-                    paint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
-                        directionalLight ? new int[]{0xDDFFFFFF,0x66DDEFFF,0x18FFFFFF} : new int[]{0x99FFFFFF,0x99FFFFFF},
-                        null,android.graphics.Shader.TileMode.CLAMP));
-                    paint.setAlpha(Math.round(255f*highlightStrength/100f));
-                    Path contour = new Path();
-                    contour.addRoundRect(rect,radius,radius,Path.Direction.CW);
-                    canvas.clipPath(contour);
-                    canvas.drawRoundRect(inner,Math.max(0f,radius-inset),Math.max(0f,radius-inset),paint);
-                }
-                if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_DRAW phase="+(edgeOnly?"edge":"surface")+
+                canvas.translate(rect.left,rect.top);
+                drawUnifiedMaterial(canvas,mask,edgeOnly);
+                if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " tint="+tintMode+" highlight="+highlightEnabled+" stroke="+highlightWidth+" OEM_RADIUS_UNCHANGED MATERIAL_EDGE_FEATHERED");
+                    " maskSource=outline-synthesized-gradient alphaMask=true");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
@@ -732,47 +752,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         Rect b=drawable.getBounds();
         canvas.save();
         canvas.translate(b.left,b.top);
-        if(optical)drawOpticalGlass(canvas,cache);
-        if(tint){
-            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-            int c=tintColor();
-            int a=Math.round(160f*tintStrength/90f);
-            p.setColorFilter(new android.graphics.PorterDuffColorFilter(
-                Color.rgb(Color.red(c),Color.green(c),Color.blue(c)),android.graphics.PorterDuff.Mode.SRC_IN));
-            p.setAlpha(a);
-            canvas.drawBitmap(cache.mask,0,0,p);
-            if(nativeDrawLogs++<24)log("MASK_TINT_APPLIED strength="+tintStrength+" alpha="+a);
-        }
-        if(shine){
-            // Gradient is applied to both alpha-derived layers; no geometric outline.
-            float strength=probeMode==2?1f:highlightStrength/100f;
-            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-            if(probeMode==2){
-                p.setAlpha(205);
-                p.setColorFilter(new android.graphics.PorterDuffColorFilter(Color.RED,android.graphics.PorterDuff.Mode.SRC_IN));
-                canvas.drawBitmap(cache.glow,0,0,p);
-                canvas.drawBitmap(cache.edge,0,0,p);
-            }else{
-                // Draw the two native-alpha bitmaps first, then multiply by a
-                // directional gradient with DST_IN. Bitmap contours remain authoritative.
-                int layer=canvas.saveLayer(0,0,cache.w,cache.h,null);
-                p.setAlpha(Math.round(100*strength));
-                canvas.drawBitmap(cache.glow,0,0,p);
-                p.setAlpha(Math.round(190*strength));
-                canvas.drawBitmap(cache.edge,0,0,p);
-                Paint light=new Paint(Paint.ANTI_ALIAS_FLAG);
-                light.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
-                if(directionalLight){
-                    light.setShader(new android.graphics.LinearGradient(0,0,cache.w,cache.h,
-                        new int[]{0xEEFFFFFF,0x99E8F4FF,0x44C7DFEC},null,
-                        android.graphics.Shader.TileMode.CLAMP));
-                }else light.setColor(0xCCFFFFFF);
-                canvas.drawRect(0,0,cache.w,cache.h,light);
-                light.setXfermode(null);
-                canvas.restoreToCount(layer);
-            }
-            if(nativeDrawLogs++<24)log("MASK_DUAL_GLOW_APPLIED strength="+highlightStrength+" width="+highlightWidth+" directional="+directionalLight);
-        }
+        drawUnifiedMaterial(canvas,cache,false);
+        drawUnifiedMaterial(canvas,cache,true);
         canvas.restore();
     }
     private static void hookNativeDrawableDraw() {
