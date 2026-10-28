@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1986
-        versionName '1.9.86-background-layer-refraction'
+        versionCode 1987
+        versionName '1.9.87-refraction-draw-rollback'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

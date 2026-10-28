@@ -1868,6 +1868,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         refresh(v);
                         ACTIVE_FOLDER_ICON.set(v);
                         PREVIEW_SURFACE_DRAWN.set(Boolean.FALSE);
+                        // V1.9.87: restore the known-working surface entry point.
+                        // The OEM preview hook is not guaranteed to run inside dispatchDraw.
+                        if (p.args[0] instanceof Canvas) {
+                            drawFolderIconFusion(v, (Canvas)p.args[0], false);
+                            if (surfaceOrderLogs++ < 12) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE");
+                        }
                     }
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -1875,7 +1881,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                             // Do not draw the surface here: it would cover app icons.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
-                            if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER previewSurface="+Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()));
+                            if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER mode=DISPATCH_AFTER_EDGE previewCallback="+Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()));
                         }
                     } finally {
                         ACTIVE_FOLDER_ICON.remove();
@@ -2279,7 +2285,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 if(targetCanvas!=null && activeIcon!=null &&
                                         !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
                                     PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
-                                    drawFolderIconFusion(activeIcon,targetCanvas,false);
+                                    // V1.9.87: diagnostic only. The surface was drawn at dispatchDraw entry.
+                                    // Do not draw a second pass over the OEM preview.
                                 }
                                 if (false && targetCanvas!=null && glassEnabled && probeMode!=1) { // V1.9.25: legacy overlay disabled
                                     Object bg=null;
