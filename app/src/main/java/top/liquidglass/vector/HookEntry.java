@@ -1677,11 +1677,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // just transparent refraction (the OEM blur underneath can be white).
         // Continuous luminance response prevents abrupt changes while swiping.
         " float bright=smoothstep(0.60,0.94,luminance);\n"+
+        // A persistent low-opacity refracted sample across the entire glass,
+        // plus a stronger but bounded optical edge. Never depend on motion.
         " float edgeWeight=envelope*envelope;\n"+
-        " float refractOpacity=0.105*edgeWeight*(1.0-bright);\n"+
-        " float neutralOpacity=0.19*bright;\n"+
-        " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(bright));\n"+
-        " color.a=half(clamp(refractOpacity+neutralOpacity,0.0,0.19));\n"+
+        " float midOpacity=0.065*(1.0-0.65*bright);\n"+
+        " float edgeOpacity=0.075*edgeWeight*(1.0-0.85*bright);\n"+
+        " float neutralOpacity=0.10*bright;\n"+
+        " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
+        " color.a=half(clamp(midOpacity+edgeOpacity+neutralOpacity,0.0,0.16));\n"+
         " return color;\n"+
         "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
@@ -2543,6 +2546,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if (!"com.android.launcher".equals(context.getPackageName())) return;
                     final android.content.Context app=context.getApplicationContext()==null?context:context.getApplicationContext();
                     launcherContext=app;
+                    // Settings.Global is local to system_server and does not need
+                    // the ColorOS-blocked third-party ContentProvider to start.
+                    restoreBootSnapshot(app);
                     final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
                     // Direct-boot/credential storage can make the config provider
                     // unavailable when Launcher starts. Retry after unlock without
