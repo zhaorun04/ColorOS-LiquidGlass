@@ -358,23 +358,60 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // NOT claim to capture the internal LayerBlurDrawable alpha pixels.
     private static final java.util.Map<String, MaskCache> BLUR_SHAPE_MASKS =
         new java.util.LinkedHashMap<String, MaskCache>();
+    // V1.9.27: a conservative INWARD mask for LayerBlurDrawable only.
+    // OEM Outline is not guaranteed to match the visible blur edge. Keep a
+    // safety margin instead of allowing synthetic highlight pixels outside it.
+    private static final int BLUR_EDGE_SAFE_INSET_PX = 3;
     private static MaskCache blurShapeMask(int w,int h,float radius) {
-        String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth;
+        String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth+"/inset"+BLUR_EDGE_SAFE_INSET_PX;
         synchronized(BLUR_SHAPE_MASKS) {
             MaskCache cached=BLUR_SHAPE_MASKS.get(key);
             if(cached!=null)return cached;
         }
-        GradientDrawable shape=new GradientDrawable();
-        shape.setShape(GradientDrawable.RECTANGLE);
-        shape.setColor(Color.WHITE);
-        shape.setCornerRadius(radius);
-        shape.setBounds(0,0,w,h);
-        MaskCache cache=nativeMask(shape);
-        if(cache!=null) synchronized(BLUR_SHAPE_MASKS) {
-            if(BLUR_SHAPE_MASKS.size()>12)BLUR_SHAPE_MASKS.clear();
-            BLUR_SHAPE_MASKS.put(key,cache);
+        if(w<8||h<8||w>1400||h>1400)return null;
+        try {
+            final int inset=BLUR_EDGE_SAFE_INSET_PX;
+            android.graphics.Bitmap base=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            Canvas mc=new Canvas(base);
+            Paint fill=new Paint(Paint.ANTI_ALIAS_FLAG);
+            fill.setColor(Color.WHITE);
+            RectF inner=new RectF(inset,inset,w-inset,h-inset);
+            float innerRadius=Math.max(0f,radius-inset);
+            mc.drawRoundRect(inner,innerRadius,innerRadius,fill);
+            int[] pixels=new int[w*h];base.getPixels(pixels,0,w,0,0,w,h);
+            int[] edgePixels=new int[w*h],glowPixels=new int[w*h];
+            int width=Math.max(1,Math.min(5,highlightWidth));
+            for(int y=0;y<h;y++)for(int x=0;x<w;x++) {
+                int i=y*w+x,center=pixels[i]>>>24;
+                if(center<8)continue;
+                int near=255,far=255;
+                for(int dy=-width;dy<=width;dy++)for(int dx=-width;dx<=width;dx++) {
+                    int dist=Math.max(Math.abs(dx),Math.abs(dy));
+                    if(dist==0)continue;
+                    int xx=x+dx, yy=y+dy;
+                    int sample=(xx<0||xx>=w||yy<0||yy>=h)?0:(pixels[yy*w+xx]>>>24);
+                    if(dist==1 && sample<near)near=sample;
+                    if(sample<far)far=sample;
+                }
+                int sharp=Math.max(0,Math.min(center,(center-near)*2));
+                int soft=Math.max(0,Math.min(center,center-far));
+                edgePixels[i]=(sharp<<24)|0x00FFFFFF;
+                glowPixels[i]=(soft<<24)|0x00FFFFFF;
+            }
+            android.graphics.Bitmap edge=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Bitmap glow=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            edge.setPixels(edgePixels,0,w,0,0,w,h);
+            glow.setPixels(glowPixels,0,w,0,0,w,h);
+            MaskCache result=new MaskCache(w,h,255,Float.floatToIntBits(radius),width,base,edge,glow);
+            synchronized(BLUR_SHAPE_MASKS) {
+                if(BLUR_SHAPE_MASKS.size()>12)BLUR_SHAPE_MASKS.clear();
+                BLUR_SHAPE_MASKS.put(key,result);
+            }
+            return result;
+        } catch(Throwable t) {
+            if(folderFusionLogs++<12)log("BLUR_INSET_MASK_FAILED reason="+t.getClass().getSimpleName());
+            return null;
         }
-        return cache;
     }
     private static void drawUnifiedMaterial(Canvas canvas, MaskCache cache, boolean edgeOnly) {
         if(cache==null)return;
@@ -477,7 +514,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 drawUnifiedMaterial(canvas,mask,edgeOnly);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " maskSource=outline-synthesized-gradient alphaMask=true");
+                    " maskSource=inset-synthetic-mask insetPx="+BLUR_EDGE_SAFE_INSET_PX+" alphaMask=true");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());

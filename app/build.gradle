@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1923
-        versionName '1.9.25-single-fusion-path-probe'
+        versionCode 1927
+        versionName '1.9.27-inward-blur-edge'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
