@@ -322,22 +322,48 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Object value = getter.invoke(preview);
             if (!(value instanceof Drawable) || !value.getClass().getName().endsWith(".LayerBlurDrawable")) return;
             if (!edgeOnly) inspectFusionGeometry(v,preview,(Drawable)value);
-            // Canvas belongs to FolderIcon, so use View-local coordinates, not the
-            // LayerBlurDrawable bounds (often empty or in another coordinate system).
-            float w = v.getWidth(), h = v.getHeight();
-            float radius = Math.min(w,h) * 0.21f; // conservative fallback, NOT OEM geometry
-            boolean nativeOutline = false;
+            // V1.9.21: native blur bounds are in preview-local coordinates; the
+            // preview offsets translate them into FolderIcon's Canvas coordinates.
+            // Never use FolderIcon's full dimensions (they include the label).
+            Drawable blur = (Drawable)value;
+            Rect nativeBounds = blur.getBounds();
+            if (nativeBounds == null || nativeBounds.isEmpty()) {
+                if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=empty_blur_bounds");
+                return;
+            }
+            float offsetX, offsetY;
+            float radius;
             try {
-                Outline outline = new Outline();
-                if (v.getOutlineProvider() != null) {
-                    v.getOutlineProvider().getOutline(v, outline);
-                    Rect r = new Rect();
-                    if (outline.getRect(r) && !r.isEmpty() && outline.getRadius() > 0f) {
-                        radius = outline.getRadius(); nativeOutline = true;
-                    }
-                }
-            } catch (Throwable ignored) {}
-            RectF rect = new RectF(0,0,w,h);
+                offsetX = ((Number)field(preview.getClass(), "basePreviewOffsetX").get(preview)).floatValue();
+                offsetY = ((Number)field(preview.getClass(), "basePreviewOffsetY").get(preview)).floatValue();
+            } catch (Throwable missingOffset) {
+                if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=offset_unavailable");
+                return;
+            }
+            Outline nativeShape = new Outline();
+            blur.getOutline(nativeShape);
+            Rect outlineBounds = new Rect();
+            boolean nativeOutline = nativeShape.getRect(outlineBounds) && !outlineBounds.isEmpty();
+            Rect sourceBounds = nativeOutline ? outlineBounds : nativeBounds;
+            try {
+                radius = ((Number)field(preview.getClass(), "mRadius").get(preview)).floatValue();
+            } catch (Throwable ignored) {
+                radius = nativeOutline ? nativeShape.getRadius() : 0f;
+            }
+            if (nativeOutline && nativeShape.getRadius() > 0f) radius = nativeShape.getRadius();
+            if (radius <= 0f) {
+                if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=radius_unavailable");
+                return;
+            }
+            RectF rect = new RectF(offsetX + sourceBounds.left, offsetY + sourceBounds.top,
+                offsetX + sourceBounds.right, offsetY + sourceBounds.bottom);
+            if (rect.isEmpty() || rect.left < -1f || rect.top < -1f ||
+                rect.right > v.getWidth()+1f || rect.bottom > v.getHeight()+1f) {
+                if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=out_of_view rect="+rect);
+                return;
+            }
+            float w = rect.width(), h = rect.height();
+            radius = Math.min(radius, Math.min(w,h)*0.5f);
             Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
             int save = canvas.save();
             FOLDER_FUSION_GUARD.set(Boolean.TRUE);
@@ -360,14 +386,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     RectF inner = new RectF(rect); inner.inset(inset,inset);
                     paint.setStyle(Paint.Style.STROKE);
                     paint.setStrokeWidth(stroke);
-                    paint.setShader(new android.graphics.LinearGradient(0,0,w,h,
+                    paint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
                         directionalLight ? new int[]{0xDDFFFFFF,0x66DDEFFF,0x18FFFFFF} : new int[]{0x99FFFFFF,0x99FFFFFF},
                         null,android.graphics.Shader.TileMode.CLAMP));
                     paint.setAlpha(Math.round(255f*highlightStrength/100f));
                     canvas.drawRoundRect(inner,Math.max(0f,radius-inset),Math.max(0f,radius-inset),paint);
                 }
                 if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_DRAW phase="+(edgeOnly?"edge":"surface")+
-                    " size="+(int)w+"x"+(int)h+" radius="+radius+" nativeOutline="+nativeOutline+
+                    " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
                     " tint="+tintMode+" highlight="+highlightEnabled);
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
@@ -1108,7 +1134,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.20 GEOMETRY_BLUR_API_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -1125,6 +1151,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.20 GEOMETRY_BLUR_API_PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
