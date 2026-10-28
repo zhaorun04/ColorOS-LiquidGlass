@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1961
-        versionName '1.9.62-wallpaper-pixel-mapping-preparation'
+        versionCode 1963
+        versionName '1.9.63-independent-reference-validation'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

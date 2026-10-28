@@ -455,6 +455,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         + " mappingVerified=false samplingAllowed=false");
                 }
             }
+            if (metadataReady) inspectIndependentReferenceCandidates(folder, left, top, w, h, sw, sh, phase);
             if (GATE_LOGS.incrementAndGet() > 120) return;
             log("REFRACTION_SAMPLING_GATE phase=" + phase
                 + " id=" + Integer.toHexString(System.identityHashCode(folder))
@@ -469,6 +470,42 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch (Throwable t) {
             if (GATE_LOGS.incrementAndGet() <= 120)
                 log("REFRACTION_SAMPLING_GATE_ERROR " + t.getClass().getSimpleName());
+        }
+    }
+    // V1.9.63: deterministic, bounded candidate coordinates for independent image comparison.
+    // A candidate coordinate is never treated as a verified compositor transform.
+    private static final java.util.Map<View, String> REFERENCE_CANDIDATE_LAST =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
+    private static final java.util.concurrent.atomic.AtomicInteger REFERENCE_CANDIDATE_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    private static void inspectIndependentReferenceCandidates(View folder, long left, long top,
+            int w, int h, int sw, int sh, String phase) {
+        if (!diagnostics || REFERENCE_CANDIDATE_LOGS.get() >= 36 ||
+                wallpaperImageW <= 0 || wallpaperImageH <= 0 ||
+                !Float.isFinite(wallpaperRequestedX) || !Float.isFinite(wallpaperRequestedY)) return;
+        String key = left + ":" + top + ":" + w + ":" + h + ":" + wallpaperOffsetRevision;
+        synchronized (REFERENCE_CANDIDATE_LAST) {
+            if (key.equals(REFERENCE_CANDIDATE_LAST.get(folder))) return;
+            REFERENCE_CANDIDATE_LAST.put(folder, key);
+        }
+        if (REFERENCE_CANDIDATE_LOGS.incrementAndGet() > 36) return;
+        float cover = Math.max((float)sw / wallpaperImageW, (float)sh / wallpaperImageH);
+        float desired = wallpaperDesiredW > 0
+            ? Math.max(cover, (float)wallpaperDesiredW / wallpaperImageW) : Float.NaN;
+        float[][] pts = {{.25f,.25f},{.5f,.5f},{.75f,.75f}};
+        for (int i=0; i<pts.length; i++) {
+            float px = left + w*pts[i][0], py = top + h*pts[i][1];
+            log("REFRACTION_REFERENCE_CANDIDATE phase=" + phase
+                + " folder=" + Integer.toHexString(System.identityHashCode(folder))
+                + " point=" + (i+1) + " screen=[" + fmt(px) + "," + fmt(py) + "]"
+                + " request=[" + fmt(wallpaperRequestedX) + "," + fmt(wallpaperRequestedY) + "]"
+                + " source=" + wallpaperImageW + "x" + wallpaperImageH
+                + " viewport=" + sw + "x" + sh + " revision=" + wallpaperOffsetRevision
+                + " " + mappingHypothesis("COVER",cover,wallpaperRequestedX,px,py,
+                    wallpaperImageW,wallpaperImageH,sw,sh)
+                + " " + mappingHypothesis("DESIRED",desired,wallpaperRequestedX,px,py,
+                    wallpaperImageW,wallpaperImageH,sw,sh)
+                + " independentReference=UNAVAILABLE modelVerified=false samplingAllowed=false");
         }
     }
     private static int wallpaperOffsetLogs = 0;
@@ -659,7 +696,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static void inspectWallpaperReferenceFeasibility(View folder) {
         if (!diagnostics || !WALLPAPER_REFERENCE_ONCE.compareAndSet(false, true)) return;
-        log("REFRACTION_REFERENCE_PROBE version=1.9.60 mode=READ_ONLY captureAttempted=false");
+        log("REFRACTION_REFERENCE_PROBE version=1.9.63 mode=READ_ONLY captureAttempted=false");
         try {
             android.content.Context ctx=folder.getContext();
             android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(ctx);
