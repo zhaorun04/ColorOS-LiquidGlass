@@ -20,6 +20,10 @@ public final class WallpaperCalibrationActivity extends Activity {
     private final float[] savedX={Float.NaN,Float.NaN},savedY={Float.NaN,Float.NaN};
     private final float[] savedShift={0f,0f},savedScale={1f,1f};
     private int activePoint=0;
+    private TextView validation;
+    private static final float MIN_ANCHOR_DISTANCE_PX=100f;
+    private float referenceX=Float.NaN,referenceY=Float.NaN;
+    private String referenceStatus="UNAVAILABLE: 没有独立屏幕背景像素；禁止自动判定模型正确";
     private TextView anchors;
     private LinearLayout resultsRoot;
     private FrameLayout selectionRoot;
@@ -65,7 +69,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(18,28,18,18);
         root.setBackgroundColor(0x11000000);
-        TextView heading=new TextView(this);heading.setText("V1.9.56 · 无遮挡选点与结果对照（实验）");
+        TextView heading=new TextView(this);heading.setText("V1.9.57 · 参照有效性与双点校验（实验）");
         heading.setTextColor(Color.WHITE);heading.setTextSize(18);heading.setShadowLayer(3,1,1,Color.BLACK);root.addView(heading);
         info=new TextView(this);info.setTextColor(Color.WHITE);info.setTextSize(12);info.setShadowLayer(3,1,1,Color.BLACK);root.addView(info);
         TextView state=new TextView(this);state.setTextColor(0xFFFFD78C);state.setTextSize(13);
@@ -79,6 +83,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         Button saveB=new Button(this);saveB.setText("记录点 B");saveB.setOnClickListener(v->savePoint(1));buttons.addView(saveB,new LinearLayout.LayoutParams(0,-2,1));
         root.addView(buttons);
         anchors=new TextView(this);anchors.setTextColor(Color.WHITE);anchors.setTextSize(11);root.addView(anchors);
+        validation=new TextView(this);validation.setTextColor(0xFFFFD78C);validation.setTextSize(12);root.addView(validation);
         // Geometry comes from the actual activity window, not assumed status-bar dimensions.
         root.setOnApplyWindowInsetsListener((v,insets)->{
             insetTop=insets.getSystemWindowInsetTop();insetBottom=insets.getSystemWindowInsetBottom();
@@ -89,7 +94,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         addSlider(root,"假设的壁纸水平偏移",50,v->offsetX=v/100f);
         addSlider(root,"原图垂直平移（-400 至 +400 像素）",50,v->verticalShiftPx=(v-50)*8f);
         addSlider(root,"模型缩放修正（0.75 至 1.25 倍）",50,v->scaleCorrection=.75f+v*.005f);
-        TextView warning=new TextView(this);warning.setText("注意：候选图中央十字严格对应标出的原图采样坐标（包括靠近边缘时）；黄色屏幕十字只是页面定位提示。点 A/B 保存的是当前手动校准参数，不能自动证明映射正确。独立 Activity 与 Launcher 裁切可能不同。未启用折射或录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
+        TextView warning=new TextView(this);warning.setText("注意：本版不会把壁纸原图自身当成独立参照，也不会虚构自动匹配置信度。候选图中央十字严格对应标出的原图采样坐标（包括靠近边缘时）；黄色屏幕十字只是页面定位提示。点 A/B 保存的是当前手动校准参数，不能自动证明映射正确。独立 Activity 与 Launcher 裁切可能不同。未启用折射或录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
         resultsRoot=root;
         setContentView(root);root.post(this::update);update();
     }
@@ -122,7 +127,7 @@ public final class WallpaperCalibrationActivity extends Activity {
         frame.addView(hit,new FrameLayout.LayoutParams(-1,-1));
         LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.VERTICAL);
         controls.setPadding(12,8,12,8);controls.setBackgroundColor(0xB8000000);
-        TextView help=new TextView(this);help.setText("V1.9.56 · 选点模式：直接点击壁纸特征，黄色十字为屏幕绝对坐标。此模式不显示采样图。");
+        TextView help=new TextView(this);help.setText("V1.9.57 · 选点模式：直接点击壁纸特征，黄色十字为屏幕绝对坐标。此模式不显示采样图。");
         help.setTextColor(Color.WHITE);help.setTextSize(13);controls.addView(help);
         Button done=new Button(this);done.setText("第二步：锁定位置并查看对照结果");
         done.setOnClickListener(v->showResults());controls.addView(done);
@@ -148,7 +153,14 @@ public final class WallpaperCalibrationActivity extends Activity {
         });
     }
     private void savePoint(int which){
-        savedX[which]=pointX*screenW;savedY[which]=pointY*screenH;
+        float sx=pointX*screenW,sy=pointY*screenH;
+        int other=1-which;
+        if(!Float.isNaN(savedX[other]) && Math.hypot(sx-savedX[other],sy-savedY[other])<MIN_ANCHOR_DISTANCE_PX){
+            android.widget.Toast.makeText(this,"点 A/B 距离不足 100px，请选择不同高度的特征点",android.widget.Toast.LENGTH_LONG).show();
+            referenceStatus="INVALID_ANCHORS: A/B 位置过近，不能用于缩放分析";
+            update();return;
+        }
+        savedX[which]=sx;savedY[which]=sy;
         savedShift[which]=verticalShiftPx;savedScale[which]=scaleCorrection;
         activePoint=which;update();
     }
@@ -162,9 +174,23 @@ public final class WallpaperCalibrationActivity extends Activity {
             String diff="";
             if(!Float.isNaN(savedX[0])&&!Float.isNaN(savedX[1])){
                 float dy=savedY[1]-savedY[0];float ds=savedShift[1]-savedShift[0];
-                diff=String.format(java.util.Locale.US,"\n双点差: 屏幕ΔY=%.0f, 所需平移ΔY=%+.0f。若不同高度需要不同补偿，优先排查缩放。",dy,ds);
+                float distance=(float)Math.hypot(savedX[1]-savedX[0],dy);
+                if(distance<MIN_ANCHOR_DISTANCE_PX)diff="\n双点无效：两点距离不足 100px";
+                else diff=String.format(java.util.Locale.US,"\n双点距离 %.0fpx，屏幕ΔY=%+.0f，手动平移ΔY=%+.0f。仅描述手动参数，不是自动匹配误差。",distance,dy,ds);
             }
             anchors.setText(pointSummary(0)+"\n"+pointSummary(1)+diff);
+        }
+        if(validation!=null){
+            String model="";
+            if(source!=null && imageW>0 && imageH>0){
+                float cover=Math.max((float)screenW/imageW,(float)screenH/imageH)*scaleCorrection;
+                float desired=Math.max(Math.max((float)screenW/imageW,(float)screenH/imageH),(float)desiredW/imageW)*scaleCorrection;
+                float px=pointX*screenW,py=pointY*screenH;
+                float coverY=(py+verticalShiftPx+Math.max(0,imageH*cover-screenH)*.5f)/cover;
+                float desiredY=(py+verticalShiftPx+Math.max(0,imageH*desired-screenH)*.5f)/desired;
+                model=String.format(java.util.Locale.US,"\n候选原图 Y：COVER=%.1f / DESIRED=%.1f（差 %.1fpx）",coverY,desiredY,Math.abs(coverY-desiredY));
+            }
+            validation.setText("参照来源：WALLPAPER_ORIGINAL_ONLY\n自动匹配：不可用（缺少独立的实际屏幕壁纸像素）\n"+referenceStatus+model);
         }
         if(info!=null)info.setText("原图 "+imageW+"×"+imageH+" · 屏幕 "+screenW+"×"+screenH+" · 期望宽度 "+desiredW
             +"\n采样屏幕坐标 ("+(int)(pointX*screenW)+","+(int)(pointY*screenH)+") 偏移 "+String.format(java.util.Locale.US,"%.2f",offsetX)
