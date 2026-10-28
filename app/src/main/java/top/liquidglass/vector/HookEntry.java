@@ -1553,6 +1553,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
                     REFRACTION_FRAME=next;
+                    // The first reference frame arrives off-thread. Force one draw even
+                    // when the icon is stationary and hardware-render-node cached.
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable(){
+                        @Override public void run(){
+                            synchronized(DYNAMIC_REFRACTION){
+                                for(View trackedView:DYNAMIC_REFRACTION.keySet())
+                                    if(trackedView!=null && trackedView.isAttachedToWindow())trackedView.invalidate();
+                            }
+                            if(view.isAttachedToWindow())view.invalidate();
+                        }
+                    });
                     if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=READY size="+next.getWidth()+"x"+next.getHeight());
                 } else {
                     if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=INVALID_OR_MISSING");
@@ -1652,7 +1663,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         int save=canvas.save();
         try {
-            state.clip.reset();state.clip.addRoundRect(rect,radius,radius,Path.Direction.CW);
+            // Match the V1.9.28 material/highlight mask: +6px CORNER radius,
+            // without shrinking the straight edges.
+            float contourRadius=Math.min(Math.min(rect.width(),rect.height())*0.5f,radius+BLUR_CORNER_RADIUS_DELTA_PX);
+            state.clip.reset();state.clip.addRoundRect(rect,contourRadius,contourRadius,Path.Direction.CW);
             canvas.clipPath(state.clip);
             // V1.9.70: one hardware-accelerated draw with continuous per-pixel
             // displacement. No per-strip matrix mutation or 48 draw commands.
@@ -1670,7 +1684,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("strength",6.0f);
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
-                    canvas.drawRoundRect(rect,radius,radius,state.samplePaint);
+                    canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
                 }catch(Throwable t){
@@ -1692,7 +1706,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.rimPaint.setShader(state.rimGradient);
             float inset=state.rimPaint.getStrokeWidth()*0.5f+0.5f;
             canvas.drawRoundRect(rect.left+inset,rect.top+inset,rect.right-inset,rect.bottom-inset,
-                Math.max(0f,radius-inset),Math.max(0f,radius-inset),state.rimPaint);
+                Math.max(0f,contourRadius-inset),Math.max(0f,contourRadius-inset),state.rimPaint);
             state.rimPaint.setShader(null);
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
                 " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
