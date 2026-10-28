@@ -524,24 +524,46 @@ public final class HookEntry implements IXposedHookLoadPackage {
             +" "+mappingHypothesis("DESIRED_WIDTH",desiredScale,offset,sx,sy,iw,ih,dw,dh)
             +" compositorCrop=UNKNOWN compositorScale=UNKNOWN verified=false pixelsRead=false rendering=false");
     }
-    // V1.9.50.1: opt-in, read-only source-image comparison. No wallpaper is stored.
-    // The two tiny patches are HYPOTHETICAL; neither proves compositor crop.
+    // V1.9.51: keep the optional comparison inside the actual OEM blur preview,
+    // not the FolderIcon view (which includes labels and other child content).
+    private static RectF visualPreviewRect(View folder) {
+        try {
+            Object preview=field(folder.getClass(),"mBackground").get(folder);
+            if(preview==null)return null;
+            Method getter=preview.getClass().getDeclaredMethod("getBgDrawable");
+            getter.setAccessible(true);
+            Object value=getter.invoke(preview);
+            if(!(value instanceof Drawable))return null;
+            Rect bounds=((Drawable)value).getBounds();
+            if(bounds==null||bounds.isEmpty())return null;
+            float ox=((Number)field(preview.getClass(),"basePreviewOffsetX").get(preview)).floatValue();
+            float oy=((Number)field(preview.getClass(),"basePreviewOffsetY").get(preview)).floatValue();
+            RectF r=new RectF(ox+bounds.left,oy+bounds.top,ox+bounds.right,oy+bounds.bottom);
+            if(r.left<0||r.top<0||r.right>folder.getWidth()+1||r.bottom>folder.getHeight()+1)return null;
+            return r;
+        }catch(Throwable ignored){return null;}
+    }
+    // This is a source-pixel experiment, NOT a validated wallpaper-to-screen transform.
     private static void drawWallpaperVisualComparison(View folder, Canvas canvas) {
         if (!wallpaperCompare || !diagnostics || !glassEnabled || canvas==null ||
             wallpaperImageW<=0 || wallpaperImageH<=0 || wallpaperDisplayW<=0 || wallpaperDisplayH<=0 ||
             "UNKNOWN".equals(wallpaperRequestState(android.os.SystemClock.uptimeMillis()))) return;
+        RectF preview=visualPreviewRect(folder);
+        // Only the large square folder: prevent repeated overlays on every desktop folder.
+        if(preview==null || preview.width()<360f || preview.height()<360f ||
+            Math.abs(preview.width()-preview.height())>preview.width()*0.12f)return;
         int[] pos=new int[2]; folder.getLocationOnScreen(pos);
-        int w=folder.getWidth(),h=folder.getHeight();
-        if(w<100||h<100||pos[0]<0||pos[1]<0||pos[0]+w>wallpaperDisplayW||pos[1]+h>wallpaperDisplayH)return;
+        float screenLeft=pos[0]+preview.left, screenTop=pos[1]+preview.top;
+        if(screenLeft<0||screenTop<0||screenLeft+preview.width()>wallpaperDisplayW||
+            screenTop+preview.height()>wallpaperDisplayH)return;
         long now=android.os.SystemClock.uptimeMillis();
         VisualPatch patch;
         synchronized(VISUAL_PATCHES){patch=VISUAL_PATCHES.get(folder);}
         if(patch==null || (now-patch.time>4500L && patch.revision!=wallpaperOffsetRevision)) {
-            // Decode only 2 small bounded regions at most once every 4.5 seconds per folder.
             VisualPatch next=new VisualPatch(); next.time=now; next.revision=wallpaperOffsetRevision;
             android.os.ParcelFileDescriptor fd=null; android.graphics.BitmapRegionDecoder decoder=null;
             try {
-                float sx=pos[0]+w*0.5f, sy=pos[1]+h*0.5f;
+                float sx=screenLeft+preview.width()*0.5f, sy=screenTop+preview.height()*0.5f;
                 float cover=Math.max((float)wallpaperDisplayW/wallpaperImageW,(float)wallpaperDisplayH/wallpaperImageH);
                 float desired=wallpaperDesiredW>0?Math.max(cover,(float)wallpaperDesiredW/wallpaperImageW):cover;
                 float[] scales={cover,desired};
@@ -562,26 +584,49 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 synchronized(VISUAL_PATCHES){VisualPatch old=VISUAL_PATCHES.put(folder,next);if(old!=null)old.dispose();}
                 patch=next;
-                if(visualProbeLogs++<16)log("REFRACTION_VISUAL_COMPARE status=PATCH_READY offset="+fmt(wallpaperRequestedX)
+                if(visualProbeLogs++<16)log("REFRACTION_VISUAL_COMPARE status=PATCH_READY layout=PREVIEW_CLIPPED offset="+fmt(wallpaperRequestedX)
                     +" cover=["+fmt(next.cx)+","+fmt(next.cy)+"] desired=["+fmt(next.dx)+","+fmt(next.dy)
                     +"] verified=false pixelsRendered=PATCH_ONLY");
             } catch(Throwable t){if(visualProbeLogs++<16)log("REFRACTION_VISUAL_COMPARE status=UNAVAILABLE reason="+t.getClass().getSimpleName());return;}
             finally{if(decoder!=null)try{decoder.recycle();}catch(Throwable ignored){} if(fd!=null)try{fd.close();}catch(Throwable ignored){}}
         }
         if(patch==null)return;
-        canvas.save();
+        float density=folder.getResources().getDisplayMetrics().density;
+        // Width is strictly bounded by preview, including labels, padding and spacing.
+        float inset=12f, gap=8f;
+        float panelWidth=Math.min(preview.width()-2f*inset,260f);
+        float tile=(panelWidth-gap)/2f;
+        float header=17f, panelHeight=tile+header+10f;
+        float x=preview.left+(preview.width()-panelWidth)/2f;
+        float y=preview.bottom-inset-panelHeight;
+        if(tile<50f||y<preview.top+inset)return;
+        int save=canvas.save();
         try {
-            float density=folder.getResources().getDisplayMetrics().density;
-            float sz=Math.min(w*0.26f,Math.max(52f,56f*density));
-            float x=Math.max(6f,w-2f*sz-18f), y=Math.max(8f,h-sz-30f);
-            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setColor(0xDD111B2B);
-            canvas.drawRoundRect(new RectF(x-5,y-23,x+sz*2+15,y+sz+7),9,9,paint);
-            paint.setColor(Color.WHITE);paint.setTextSize(11f*density);
-            canvas.drawText("COVER",x,y-7,paint);canvas.drawText("DESIRED",x+sz+8,y-7,paint);
-            paint.setFilterBitmap(true);
-            if(patch.cover!=null)canvas.drawBitmap(patch.cover,null,new RectF(x,y,x+sz,y+sz),paint);
-            if(patch.desired!=null)canvas.drawBitmap(patch.desired,null,new RectF(x+sz+8,y,x+sz*2+8,y+sz),paint);
-        } finally {canvas.restore();}
+            android.graphics.Path path=new android.graphics.Path();
+            float corner=Math.min(34f,Math.min(preview.width(),preview.height())*0.09f);
+            path.addRoundRect(preview,corner,corner,android.graphics.Path.Direction.CW);
+            canvas.clipPath(path);
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setColor(0xD9182028);
+            canvas.drawRoundRect(new RectF(x-5f,y-5f,x+panelWidth+5f,y+panelHeight+5f),8f,8f,p);
+            p.setColor(Color.WHITE);p.setTextSize(Math.min(12f,10f*density));
+            canvas.drawText("COVER",x+3f,y+12f,p);
+            canvas.drawText("DESIRED",x+tile+gap+3f,y+12f,p);
+            p.setFilterBitmap(true);p.setColor(Color.WHITE);
+            RectF a=new RectF(x,y+header,x+tile,y+header+tile);
+            RectF b=new RectF(x+tile+gap,y+header,x+panelWidth,y+header+tile);
+            if(patch.cover!=null)canvas.drawBitmap(patch.cover,null,a,p);
+            if(patch.desired!=null)canvas.drawBitmap(patch.desired,null,b,p);
+            p.setColor(0xAAFFFFFF);p.setStyle(Paint.Style.STROKE);p.setStrokeWidth(1f);
+            canvas.drawRect(a,p);canvas.drawRect(b,p);
+            p.setStyle(Paint.Style.FILL);
+            p.setColor(0xFFFFE08A);p.setStrokeWidth(1.5f);
+            for(RectF r:new RectF[]{a,b}){
+                float cx=r.centerX(),cy=r.centerY();
+                canvas.drawLine(cx-5f,cy,cx+5f,cy,p);
+                canvas.drawLine(cx,cy-5f,cx,cy+5f,p);
+            }
+        }finally{canvas.restoreToCount(save);}
     }
     private static void inspectScrollCoordinates(View folder) {
         if (!diagnostics || refractionMotionLogs >= 48 || !folder.isAttachedToWindow()) return;
