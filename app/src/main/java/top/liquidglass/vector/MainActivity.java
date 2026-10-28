@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.46",23);
+        label("ColorOS Liquid Glass V1.9.47",23);
         label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
@@ -62,7 +62,7 @@ public final class MainActivity extends Activity {
         label("建议在模式 0 测试高光宽度 1～5 与方向性反射。模式 2 的红线是几何对照，不是正式外观。",13);
         label("V1.9.28 的圆角校正已保留；本版不改变圆角几何。",14);
         label("原生模糊强度暂不可调：旧滑块误修改圆角半径，已停用。",14);
-        label("V1.9.46：保留V1.9.45光学外观；新增壁纸原图尺寸、屏幕真实尺寸与动态坐标有效性诊断。仅读取尺寸元数据，不采样像素。",13);
+        label("V1.9.47：保留V1.9.45光学外观；保留动态映射诊断；详细诊断开启时仅一次尝试读取壁纸原图3个像素，验证读取能力；不绘制、不保存图像、不启用真实折射。",13);
         label("模糊可见度通过 Drawable Alpha 调节，不等于真正改变模糊半径。",13);
         label("原生模糊背景透明度",18);
         final Switch nativeAlpha=toggle("透明度滑块同时控制原生模糊背景","native_alpha_probe",true);

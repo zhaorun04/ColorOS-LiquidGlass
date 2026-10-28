@@ -343,11 +343,53 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("REFRACTION_WALLPAPER_OFFSET_HOOK installed=false reason="+t.getClass().getSimpleName());
         }
     }
-    // V1.9.46: metadata-only wallpaper geometry probe. No wallpaper bitmap is decoded.
+    // V1.9.47: one-shot metadata and optional tiny region pixel diagnostic; no rendering.
     private static final java.util.concurrent.atomic.AtomicBoolean WALLPAPER_GEOMETRY_ONCE =
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static volatile int wallpaperImageW = -1, wallpaperImageH = -1;
     private static volatile int wallpaperDisplayW = -1, wallpaperDisplayH = -1;
+    // V1.9.47: diagnostic-only, one-shot, tiny source-image region decode.
+    // The sampled points are in SOURCE IMAGE coordinates, not verified screen coordinates.
+    // This never draws sampled pixels and never retains the wallpaper bitmap.
+    private static void inspectWallpaperPixels(android.os.ParcelFileDescriptor fd, int iw, int ih) {
+        if (fd == null || iw <= 0 || ih <= 0) return;
+        android.graphics.BitmapRegionDecoder decoder = null;
+        try {
+            decoder = android.graphics.BitmapRegionDecoder.newInstance(fd.getFileDescriptor(), false);
+            if (decoder == null) {
+                log("REFRACTION_PIXEL_PROBE status=DECODER_NULL pixelsRead=false");
+                return;
+            }
+            int[][] points = {{iw / 4, ih / 4}, {iw / 2, ih / 2}, {iw * 3 / 4, ih * 3 / 4}};
+            int count = 0;
+            StringBuilder out = new StringBuilder();
+            for (int[] point : points) {
+                int x = Math.max(0, Math.min(iw - 1, point[0]));
+                int y = Math.max(0, Math.min(ih - 1, point[1]));
+                android.graphics.Bitmap sample = null;
+                try {
+                    android.graphics.BitmapFactory.Options opt = new android.graphics.BitmapFactory.Options();
+                    opt.inPreferredConfig = android.graphics.Bitmap.Config.ARGB_8888;
+                    sample = decoder.decodeRegion(new android.graphics.Rect(x, y, x + 1, y + 1), opt);
+                    if (sample != null && sample.getWidth() > 0 && sample.getHeight() > 0) {
+                        int c = sample.getPixel(0, 0);
+                        if (out.length() > 0) out.append(';');
+                        out.append('(').append(x).append(',').append(y).append(")=#")
+                           .append(String.format(java.util.Locale.US, "%08X", c));
+                        count++;
+                    }
+                } catch (Throwable e) {
+                    log("REFRACTION_PIXEL_POINT_ERROR x="+x+" y="+y+" reason="+e.getClass().getSimpleName());
+                } finally { if (sample != null) sample.recycle(); }
+            }
+            log("REFRACTION_PIXEL_PROBE status="+(count==3?"SUCCESS":"PARTIAL")
+                +" sourcePixelsRead="+count+"/3 sample="+out
+                +" sourceCoordinatesOnly=true screenMappingVerified=false rendering=false");
+        } catch (Throwable e) {
+            log("REFRACTION_PIXEL_PROBE status=UNAVAILABLE reason="+e.getClass().getSimpleName()
+                +" rendering=false");
+        } finally { if (decoder != null) try { decoder.recycle(); } catch (Throwable ignored) {} }
+    }
     private static void inspectWallpaperGeometry(View folder) {
         if (!diagnostics || !WALLPAPER_GEOMETRY_ONCE.compareAndSet(false, true)) return;
         try {
@@ -372,6 +414,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     wallpaperImageW=options.outWidth;wallpaperImageH=options.outHeight;
                     log("REFRACTION_WALLPAPER_FILE status=BOUNDS_ONLY image="+wallpaperImageW+"x"+wallpaperImageH
                         +" bitmapRead=false pixelsRead=false");
+                    // Explicit diagnostics opt-in only. Never use these pixels for the folder UI.
+                    inspectWallpaperPixels(fd, wallpaperImageW, wallpaperImageH);
                 }
             } catch (Throwable t) {
                 log("REFRACTION_WALLPAPER_FILE status=UNAVAILABLE reason="+t.getClass().getSimpleName()
