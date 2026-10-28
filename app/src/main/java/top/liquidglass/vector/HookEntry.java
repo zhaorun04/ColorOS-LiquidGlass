@@ -172,8 +172,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float density = v.getResources().getDisplayMetrics().density;
             float stroke = Math.max(0.7f, density * 0.55f);
             float inset = stroke / 2f;
-            RectF rect = new RectF(bounds.left + inset, bounds.top + inset,
-                                   bounds.right - inset, bounds.bottom - inset);
+            // Drawable bounds are local to the background and do not include its
+            // placement inside FolderIcon. Center the square in the icon area,
+            // not in the full view height (which includes the label region).
+            float dx = (v.getWidth() - bounds.width()) * 0.5f - bounds.left;
+            float iconAreaTop = Math.max(0f, (v.getHeight() - v.getWidth()) * 0.5f);
+            float dy = iconAreaTop - bounds.top;
+            RectF rect = new RectF(bounds.left + dx + inset, bounds.top + dy + inset,
+                                   bounds.right + dx - inset, bounds.bottom + dy - inset);
             if (rect.width() < 4 || rect.height() < 4) return;
             Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
             p.setStyle(Paint.Style.STROKE);
@@ -182,7 +188,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float radius = Math.min(rect.width(), rect.height()) * 0.18f;
             canvas.drawRoundRect(rect, radius, radius, p);
             if (geometryLogs++ < 12) log("HIGHLIGHT_ALIGNED bounds=" + bounds.toShortString() +
-                " view=" + v.getWidth() + "x" + v.getHeight());
+                " view=" + v.getWidth() + "x" + v.getHeight() +
+                " offsetX=" + dx + " offsetY=" + dy + " finalRect=" + rect.toShortString());
         } catch (Throwable t) {
             if (geometryLogs++ < 12) log("HIGHLIGHT_SKIPPED reason=" + t.getClass().getSimpleName());
         }
@@ -252,7 +259,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.1 HIGHLIGHT_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.2 HIGHLIGHT_OFFSET_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -262,6 +269,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9.1 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.2 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
