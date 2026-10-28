@@ -462,30 +462,49 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 p.setAlpha(Math.round(190*strength));canvas.drawBitmap(cache.edge,0,0,p);
                 Paint light=new Paint(Paint.ANTI_ALIAS_FLAG);
                 light.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
-                if(directionalLight)light.setShader(new android.graphics.LinearGradient(0,0,cache.w,cache.h,
-                    new int[]{0xEEFFFFFF,0x99E8F4FF,0x44C7DFEC},null,android.graphics.Shader.TileMode.CLAMP));
+                if(directionalLight)light.setShader(new android.graphics.LinearGradient(
+                    0f,0f,cache.w*0.88f,cache.h*0.95f,
+                    new int[]{0xFFFFFFFF,0xEAF4FCFF,0x75C8E3F5,0x30A3BCD1},
+                    new float[]{0f,0.22f,0.64f,1f},android.graphics.Shader.TileMode.CLAMP));
                 else light.setColor(0xCCFFFFFF);
                 canvas.drawRect(0,0,cache.w,cache.h,light);
                 light.setXfermode(null);canvas.restoreToCount(layer);
-                // V1.9.31: subtle inner-edge optical depth. Reuse the EXACT
-                // edge mask (including the blur-mode +6px corner correction).
-                // No extra stroke, rectangle inset, or radius calculation.
+                // V1.9.32: stronger optical rim, reusing the verified SAME
+                // OEM-aligned glow mask. No geometry changes or extra stroke.
+                // First pass: broad luminous rim on top/left, subdued on bottom.
                 if (probeMode==0) {
-                    Paint depth=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                    int rimLayer=canvas.saveLayer(0,0,cache.w,cache.h,null);
+                    try {
+                        Paint rim=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                        rim.setAlpha(Math.round(150f*strength));
+                        canvas.drawBitmap(cache.glow,0,0,rim);
+                        Paint shade=new Paint(Paint.ANTI_ALIAS_FLAG);
+                        shade.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+                        shade.setShader(new android.graphics.LinearGradient(
+                            0f,0f,cache.w*0.78f,cache.h,
+                            new int[]{0xEFFFFFFF,0xA6F0FAFF,0x40D2E5F2,0x005A748A},
+                            new float[]{0f,0.22f,0.65f,1f},
+                            android.graphics.Shader.TileMode.CLAMP));
+                        canvas.drawRect(0,0,cache.w,cache.h,shade);
+                        shade.setXfermode(null);
+                        shade.setShader(null);
+                    } finally { canvas.restoreToCount(rimLayer); }
+                    // Second pass: soft lower-edge depth; never draws outside mask.
                     int depthLayer=canvas.saveLayer(0,0,cache.w,cache.h,null);
                     try {
-                        depth.setAlpha(Math.round(38f*strength));
+                        Paint depth=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                        depth.setAlpha(Math.round(125f*strength));
                         canvas.drawBitmap(cache.glow,0,0,depth);
-                        depth.setAlpha(255);
-                        depth.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
-                        depth.setShader(new android.graphics.LinearGradient(
-                            0f,0f,cache.w*0.24f,cache.h,
-                            new int[]{0x00FFFFFF,0x007E94A0,0x80607788,0xB0485968},
-                            new float[]{0f,0.38f,0.78f,1f},
+                        Paint dark=new Paint(Paint.ANTI_ALIAS_FLAG);
+                        dark.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+                        dark.setShader(new android.graphics.LinearGradient(
+                            0f,cache.h*0.25f,0f,cache.h,
+                            new int[]{0x00000000,0x00243850,0x7034495C,0xA025384A},
+                            new float[]{0f,0.42f,0.8f,1f},
                             android.graphics.Shader.TileMode.CLAMP));
-                        canvas.drawRect(0,0,cache.w,cache.h,depth);
-                        depth.setShader(null);
-                        depth.setXfermode(null);
+                        canvas.drawRect(0,0,cache.w,cache.h,dark);
+                        dark.setXfermode(null);
+                        dark.setShader(null);
                     } finally { canvas.restoreToCount(depthLayer); }
                 }
             }
