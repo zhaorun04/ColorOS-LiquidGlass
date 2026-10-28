@@ -1572,6 +1572,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         final Paint rimPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         final Path clip=new Path();
         android.graphics.BitmapShader shader;
+        android.graphics.RuntimeShader continuousShader;
+        boolean continuousUnavailable;
+        android.graphics.Shader rimGradient;
         android.graphics.Bitmap source;
         float lastX=Float.NaN,lastY=Float.NaN;
         android.view.ViewTreeObserver.OnPreDrawListener listener;
@@ -1614,6 +1617,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
         state.points[1]+=state.screen[1]-state.window[1];
         return state.points;
     }
+    private static final String REFRACTION_AGSL =
+        "uniform shader wallpaper;\n"+
+        "uniform float4 bounds;\n"+
+        "uniform float strength;\n"+
+        "half4 main(float2 p) {\n"+
+        " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
+        " float edge=abs(2.0*u-1.0);\n"+
+        " float envelope=edge*edge*(3.0-2.0*edge);\n"+
+        " float direction=1.0-2.0*smoothstep(0.47,0.53,u);\n"+
+        " half4 color=wallpaper.eval(p+float2(direction*envelope*strength,0.0));\n"+
+        " color.a=half(0.4392157*envelope);\n"+
+        " return color;\n"+
+        "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(!REFRACTION_ENABLED || rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
@@ -1637,39 +1653,62 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try {
             state.clip.reset();state.clip.addRoundRect(rect,radius,radius,Path.Direction.CW);
             canvas.clipPath(state.clip);
-            // V1.9.69: smaller, overlapping sampling slices to reduce visible stair-step
-            // artifacts. A single cached BitmapShader is reused; no per-frame bitmap decode.
-            // This is a transitional approximation, not a continuous optical warp shader.
-            final int bands=48;
-            final float band=rect.width()/bands;
-            for(int i=0;i<bands;i++){
-                final float x0=rect.left+i*band;
-                final float x1=(i==bands-1?rect.right:Math.min(rect.right,x0+band+0.75f));
-                final float nx=(i+0.5f)/bands;
-                final float edge=1f-2f*Math.min(nx,1f-nx);
-                // Cubic ease-out avoids abrupt transitions in the central region.
-                final float envelope=edge*edge*(3f-2f*edge);
-                final float dx=(nx<0.5f?1f:-1f)*envelope*6.0f;
-                state.shaderMatrix.reset();
-                state.shaderMatrix.setTranslate(-left+dx,-top);
-                state.shader.setLocalMatrix(state.shaderMatrix);
-                state.samplePaint.setShader(state.shader);
-                // Reduce overdraw/striping: low-opacity edge refraction, transparent center.
-                state.samplePaint.setAlpha(Math.round(112f*envelope));
-                canvas.drawRect(x0,rect.top,x1,rect.bottom,state.samplePaint);
+            // V1.9.70: one hardware-accelerated draw with continuous per-pixel
+            // displacement. No per-strip matrix mutation or 48 draw commands.
+            boolean continuousDrawn=false;
+            if(canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+                try {
+                    if(state.continuousShader==null){
+                        state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
+                    }
+                    state.shaderMatrix.reset();
+                    state.shaderMatrix.setTranslate(-left,-top);
+                    state.shader.setLocalMatrix(state.shaderMatrix);
+                    state.continuousShader.setInputShader("wallpaper",state.shader);
+                    state.continuousShader.setFloatUniform("origin",left,top);
+                    state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
+                    state.continuousShader.setFloatUniform("strength",6.0f);
+                    state.samplePaint.setAlpha(255);
+                    state.samplePaint.setShader(state.continuousShader);
+                    canvas.drawRoundRect(rect,radius,radius,state.samplePaint);
+                    continuousDrawn=true;
+                }catch(Throwable t){
+                    state.continuousUnavailable=true;
+                    if(REFRACTION_LOGS++<12)log("REFRACTION_CONTINUOUS_UNAVAILABLE reason="+t.getClass().getSimpleName());
+                }
+            }
+            if(!continuousDrawn){
+                // Safe low-cost fallback; not the preferred visual-quality path.
+                final int bands=12;
+                final float band=rect.width()/bands;
+                for(int i=0;i<bands;i++){
+                    final float x0=rect.left+i*band;
+                    final float x1=(i==bands-1?rect.right:Math.min(rect.right,x0+band+0.5f));
+                    final float nx=(i+0.5f)/bands;
+                    final float edge=1f-2f*Math.min(nx,1f-nx);
+                    final float envelope=edge*edge*(3f-2f*edge);
+                    final float dx=(nx<0.5f?1f:-1f)*envelope*6.0f;
+                    state.shaderMatrix.reset();
+                    state.shaderMatrix.setTranslate(-left+dx,-top);
+                    state.shader.setLocalMatrix(state.shaderMatrix);
+                    state.samplePaint.setShader(state.shader);
+                    state.samplePaint.setAlpha(Math.round(112f*envelope));
+                    canvas.drawRect(x0,rect.top,x1,rect.bottom,state.samplePaint);
+                }
             }
             state.samplePaint.setShader(null);
             state.rimPaint.setStyle(Paint.Style.STROKE);
             state.rimPaint.setStrokeWidth(Math.max(1.2f,Math.min(2.4f,rect.width()*0.006f)));
-            state.rimPaint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,
+            if(state.rimGradient==null)state.rimGradient=new android.graphics.LinearGradient(rect.left,rect.top,
                 rect.right,rect.bottom,new int[]{0xA0FFFFFF,0x35FFFFFF,0x12FFFFFF,0x42DDE9FF},
-                new float[]{0f,0.30f,0.72f,1f},android.graphics.Shader.TileMode.CLAMP));
+                new float[]{0f,0.30f,0.72f,1f},android.graphics.Shader.TileMode.CLAMP);
+            state.rimPaint.setShader(state.rimGradient);
             float inset=state.rimPaint.getStrokeWidth()*0.5f+0.5f;
             canvas.drawRoundRect(rect.left+inset,rect.top+inset,rect.right-inset,rect.bottom-inset,
                 Math.max(0f,radius-inset),Math.max(0f,radius-inset),state.rimPaint);
             state.rimPaint.setShader(null);
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
-                " sampleX="+left+" sampleY="+top+" bands="+bands+" frameReady=true");
+                " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"fallback12")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
     }
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
