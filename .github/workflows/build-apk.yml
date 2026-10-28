@@ -24,7 +24,7 @@ jobs:
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - uses: actions/upload-artifact@v4
         with:
-          name: ColorOS-LiquidGlass-V1.9.54-APK
+          name: ColorOS-LiquidGlass-V1.9.56-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30

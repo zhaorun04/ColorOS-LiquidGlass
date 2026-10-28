@@ -21,6 +21,9 @@ public final class WallpaperCalibrationActivity extends Activity {
     private final float[] savedShift={0f,0f},savedScale={1f,1f};
     private int activePoint=0;
     private TextView anchors;
+    private LinearLayout resultsRoot;
+    private FrameLayout selectionRoot;
+    private boolean selecting=false;
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WALLPAPER);
@@ -62,12 +65,14 @@ public final class WallpaperCalibrationActivity extends Activity {
         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(18,28,18,18);
         root.setBackgroundColor(0x11000000);
-        TextView heading=new TextView(this);heading.setText("V1.9.55 · 采样中心与双点校准（实验）");
+        TextView heading=new TextView(this);heading.setText("V1.9.56 · 无遮挡选点与结果对照（实验）");
         heading.setTextColor(Color.WHITE);heading.setTextSize(18);heading.setShadowLayer(3,1,1,Color.BLACK);root.addView(heading);
         info=new TextView(this);info.setTextColor(Color.WHITE);info.setTextSize(12);info.setShadowLayer(3,1,1,Color.BLACK);root.addView(info);
         TextView state=new TextView(this);state.setTextColor(0xFFFFD78C);state.setTextSize(13);
         state.setText("校准样本："+statusText+("OK".equals(statusText)?"（来自 Launcher 私有缓存）":"\n请开启详细诊断、重启 Launcher、打开文件夹，再返回本页。"));
         root.addView(state);
+        Button choosePoint=new Button(this);choosePoint.setText("第一步：无遮挡选点（点击壁纸位置）");
+        choosePoint.setOnClickListener(v->showSelection());root.addView(choosePoint);
         preview=new CalibrationView(this);root.addView(preview,new LinearLayout.LayoutParams(-1,0,1f));
         LinearLayout buttons=new LinearLayout(this);buttons.setOrientation(LinearLayout.HORIZONTAL);
         Button saveA=new Button(this);saveA.setText("记录点 A");saveA.setOnClickListener(v->savePoint(0));buttons.addView(saveA,new LinearLayout.LayoutParams(0,-2,1));
@@ -85,7 +90,53 @@ public final class WallpaperCalibrationActivity extends Activity {
         addSlider(root,"原图垂直平移（-400 至 +400 像素）",50,v->verticalShiftPx=(v-50)*8f);
         addSlider(root,"模型缩放修正（0.75 至 1.25 倍）",50,v->scaleCorrection=.75f+v*.005f);
         TextView warning=new TextView(this);warning.setText("注意：候选图中央十字严格对应标出的原图采样坐标（包括靠近边缘时）；黄色屏幕十字只是页面定位提示。点 A/B 保存的是当前手动校准参数，不能自动证明映射正确。独立 Activity 与 Launcher 裁切可能不同。未启用折射或录屏。");warning.setTextSize(12);warning.setTextColor(Color.WHITE);warning.setBackgroundColor(0x99000000);warning.setPadding(10,8,10,8);root.addView(warning);
+        resultsRoot=root;
         setContentView(root);root.post(this::update);update();
+    }
+    /** Fullscreen wallpaper selection. The sample panels and sliders are not attached. */
+    private void showSelection(){
+        selecting=true;
+        FrameLayout frame=new FrameLayout(this);
+        frame.setBackgroundColor(0x00000000);
+        View hit=new View(this){
+            private final Paint marker=new Paint(3);
+            @Override public boolean onTouchEvent(android.view.MotionEvent event){
+                if(event.getAction()==android.view.MotionEvent.ACTION_DOWN || event.getAction()==android.view.MotionEvent.ACTION_MOVE){
+                    int[] loc=new int[2];getLocationOnScreen(loc);
+                    float absX=loc[0]+event.getX(),absY=loc[1]+event.getY();
+                    pointX=Math.max(0f,Math.min(1f,absX/screenW));
+                    pointY=Math.max(0f,Math.min(1f,absY/screenH));
+                    invalidate();return true;
+                }
+                return event.getAction()==android.view.MotionEvent.ACTION_UP;
+            }
+            @Override protected void onDraw(Canvas canvas){
+                super.onDraw(canvas);
+                int[] loc=new int[2];getLocationOnScreen(loc);
+                float x=pointX*screenW-loc[0],y=pointY*screenH-loc[1];
+                marker.setColor(0xFFFFD85E);marker.setStrokeWidth(2.5f);
+                canvas.drawCircle(x,y,10,marker);
+                canvas.drawLine(x-20,y,x+20,y,marker);canvas.drawLine(x,y-20,x,y+20,marker);
+            }
+        };
+        frame.addView(hit,new FrameLayout.LayoutParams(-1,-1));
+        LinearLayout controls=new LinearLayout(this);controls.setOrientation(LinearLayout.VERTICAL);
+        controls.setPadding(12,8,12,8);controls.setBackgroundColor(0xB8000000);
+        TextView help=new TextView(this);help.setText("V1.9.56 · 选点模式：直接点击壁纸特征，黄色十字为屏幕绝对坐标。此模式不显示采样图。");
+        help.setTextColor(Color.WHITE);help.setTextSize(13);controls.addView(help);
+        Button done=new Button(this);done.setText("第二步：锁定位置并查看对照结果");
+        done.setOnClickListener(v->showResults());controls.addView(done);
+        FrameLayout.LayoutParams lp=new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM);
+        frame.addView(controls,lp);
+        selectionRoot=frame;
+        setContentView(frame);
+    }
+    private void showResults(){
+        selecting=false;
+        if(resultsRoot!=null){
+            setContentView(resultsRoot);
+            resultsRoot.post(this::update);
+        }
     }
     interface Change {void apply(int v);}
     private void addSlider(LinearLayout root,String name,int initial,Change change){
