@@ -38,39 +38,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile int highlightStrength = 25;
     private static volatile int highlightWidth = 2;
     private static volatile boolean directionalLight = true;
-    // 100 = OEM blur radius; lower values are experimental radius multipliers.
-    private static volatile int blurRadiusPercent = 100;
-    private static final java.util.Map<Drawable,Float> ORIGINAL_BLUR_RADIUS =
-        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Float>());
-    private static final java.util.Map<Drawable,Integer> APPLIED_BLUR_PERCENT =
-        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
-    private static int blurRadiusLogs = 0;
-    private static void applyBlurRadius(Drawable drawable) {
-        if (nativeBlurExperiment != 1 || drawable == null) return;
-        try {
-            Float original = ORIGINAL_BLUR_RADIUS.get(drawable);
-            Method get = drawable.getClass().getMethod("getMRadius");
-            Method set = drawable.getClass().getMethod("setMRadius",float.class);
-            get.setAccessible(true); set.setAccessible(true);
-            if (original == null) {
-                Object result=get.invoke(drawable);
-                if (!(result instanceof Number)) return;
-                original=((Number)result).floatValue();
-                if (!Float.isFinite(original) || original <= 0f) return;
-                ORIGINAL_BLUR_RADIUS.put(drawable,original);
-            }
-            int percent=Math.max(10,Math.min(100,blurRadiusPercent));
-            Integer previous=APPLIED_BLUR_PERCENT.get(drawable);
-            if (previous != null && previous == percent) return;
-            float target=original*percent/100f;
-            set.invoke(drawable,target);
-            APPLIED_BLUR_PERCENT.put(drawable,percent);
-            drawable.invalidateSelf();
-            if (blurRadiusLogs++ < 16) log("BLUR_RADIUS_SET original="+original+" target="+target+" percent="+percent);
-        } catch (Throwable t) {
-            if (blurRadiusLogs++ < 8) log("BLUR_RADIUS_UNSUPPORTED reason="+t.getClass().getSimpleName());
-        }
-    }
+    // V1.9.23: Do not mutate LayerBlurDrawable.mRadius: it is also used as
+    // the background corner radius and is not a verified blur-strength API.
+    private static volatile int blurRadiusPercent = 100; // legacy config ignored
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
@@ -361,7 +331,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // preview offsets translate them into FolderIcon's Canvas coordinates.
             // Never use FolderIcon's full dimensions (they include the label).
             Drawable blur = (Drawable)value;
-            if (!edgeOnly) applyBlurRadius(blur);
+            // Preserve OEM geometry and blur parameters; no setMRadius calls.
             Rect nativeBounds = blur.getBounds();
             if (nativeBounds == null || nativeBounds.isEmpty()) {
                 if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=empty_blur_bounds");
@@ -433,7 +403,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " tint="+tintMode+" highlight="+highlightEnabled);
+                    " tint="+tintMode+" highlight="+highlightEnabled+" stroke="+highlightWidth+" OEM_RADIUS_UNCHANGED");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
