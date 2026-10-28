@@ -28,6 +28,15 @@ public final class GlassConfigProvider extends ContentProvider {
     }
     @Override public android.os.Bundle call(String method,String arg,android.os.Bundle extras) {
         android.os.Bundle result=new android.os.Bundle();
+        if("referenceInfo".equals(method)) {
+            if(!callerIsLauncher() && !callerIsSelf()) {result.putString("status","DENIED_CALLER");return result;}
+            java.io.File f=new java.io.File(getContext().getFilesDir(),"wallpaper_reference.jpg");
+            if(!f.isFile() || f.length()<1024 || f.length()>12000000) {result.putString("status","MISSING");return result;}
+            result.putString("status","OK");
+            result.putLong("modified",f.lastModified());
+            result.putLong("length",f.length());
+            return result;
+        }
         if("publishCalibrationPreview".equals(method)) {
             if(!callerIsLauncher()) {result.putString("status","DENIED_CALLER");return result;}
             if(extras==null) {result.putString("status","NO_DATA");return result;}

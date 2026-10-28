@@ -136,11 +136,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
             } catch (Throwable t) { log("FOLDER_BACKGROUND_ERROR=" + t.getClass().getSimpleName()); }
         }
     }
-    private static void refresh(View v) {
+    private static void refresh(View v) { refreshFromContext(v.getContext()); }
+    private static void refreshFromContext(android.content.Context context) {
         long now = android.os.SystemClock.uptimeMillis();
         if (now-lastRead < 1500) return;
         lastRead=now;
-        try (Cursor c = v.getContext().getContentResolver().query(CONFIG,null,null,null,null)) {
+        try (Cursor c = context.getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 glassEnabled=c.getInt(0)==1;
                 glassAlpha=Math.max(40,Math.min(255,c.getInt(1)));
@@ -163,6 +164,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 int alphaProbeIndex=c.getColumnIndex("native_alpha_probe");
                 nativeAlphaProbe=alphaProbeIndex>=0 && c.getInt(alphaProbeIndex)==1;
                 String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
+                summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -1513,6 +1515,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // Decode off the UI thread. Never read protected system paths in Launcher.
     private static volatile android.graphics.Bitmap REFRACTION_FRAME;
     private static volatile long REFRACTION_LAST_CHECK;
+    private static volatile long REFRACTION_FRAME_MODIFIED = -1L;
+    private static volatile long REFRACTION_FRAME_LENGTH = -1L;
     private static volatile boolean REFRACTION_LOADING;
     private static volatile boolean REFRACTION_ENABLED;
     private static int REFRACTION_LOGS;
@@ -1527,6 +1531,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             android.graphics.Bitmap next=null;
             try {
                 android.net.Uri uri=android.net.Uri.parse("content://top.liquidglass.vector.config/wallpaper_reference");
+                android.os.Bundle info=app.getContentResolver().call(uri,"referenceInfo",null,null);
+                if(info==null || !"OK".equals(info.getString("status")))return;
+                long modified=info.getLong("modified",-1L),length=info.getLong("length",-1L);
+                if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
                 try(android.os.ParcelFileDescriptor fd=app.getContentResolver().openFileDescriptor(uri,"r")) {
                     if(fd!=null){
                         android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
@@ -1536,6 +1544,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
                     REFRACTION_FRAME=next;
+                    REFRACTION_FRAME_MODIFIED=modified;
+                    REFRACTION_FRAME_LENGTH=length;
                     // The first reference frame arrives off-thread. Force one draw even
                     // when the icon is stationary and hardware-render-node cached.
                     new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable(){
@@ -1633,10 +1643,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // 0.439 edge alpha washed out both sides of the glass, especially on
         // bright wallpapers. Attenuate overlay opacity with sampled luminance.
         " float luminance=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
-        " float bright=smoothstep(0.52,0.92,luminance);\n"+
+        // V1.9.77: protect near-white wallpaper areas from additive washout.
+        // No extra white RGB boost; alpha fades completely for bright samples.
+        " float bright=smoothstep(0.38,0.86,luminance);\n"+
         " float edgeWeight=envelope*envelope;\n"+
-        " float opacity=0.14*edgeWeight*(1.0-0.78*bright);\n"+
-        " color.a=half(clamp(opacity,0.0,0.14));\n"+
+        " float opacity=0.105*edgeWeight*(1.0-bright);\n"+
+        " color.a=half(clamp(opacity,0.0,0.105));\n"+
         " return color;\n"+
         "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
@@ -1653,7 +1665,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         DynamicRefraction state=dynamicState(view);
         float[] xy=dynamicScreenPosition(view,state);
         float left=xy[0]+rect.left,top=xy[1]+rect.top;
-        if(left<0||top<0||left+rect.width()>sw||top+rect.height()>sh)return;
+        // V1.9.76: retain the refraction pass while ANY part of the folder
+        // intersects the display. Requiring the whole rectangle to fit made
+        // the highlight blink off as soon as a folder crossed a screen edge.
+        // The BitmapShader uses CLAMP, so partial off-screen sampling is safe.
+        float right=left+rect.width(), bottom=top+rect.height();
+        if(right<=0f || bottom<=0f || left>=sw || top>=sh)return;
         if(state.source!=frame){
             state.source=frame;
             state.shader=new android.graphics.BitmapShader(frame,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
@@ -2465,9 +2482,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    // Restore persisted settings as soon as the hooked process obtains a Context.
+    // This is not a background service: LSPosed installs it when Launcher starts.
+    private static void hookBootConfigRestore() {
+        try {
+            Method attach=android.app.Application.class.getDeclaredMethod("attach",android.content.Context.class);
+            attach.setAccessible(true);
+            XposedBridge.hookMethod(attach,new XC_MethodHook() {
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if(p.args.length==0 || !(p.args[0] instanceof android.content.Context))return;
+                    // Avoid blocking process startup; drawing will retry if provider isn't ready.
+                    final android.content.Context context=(android.content.Context)p.args[0];
+                    new Thread(()->{
+                        refreshFromContext(context);
+                        log("BOOT_CONFIG_RESTORE enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
+                    },"LiquidGlass-ConfigRestore").start();
+                }
+            });
+            log("BOOT_CONFIG_RESTORE_HOOK_READY");
+        } catch(Throwable t) { log("BOOT_CONFIG_RESTORE_HOOK_FAILED reason="+t.getClass().getSimpleName()); }
+    }
+
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
+        hookBootConfigRestore();
         log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {

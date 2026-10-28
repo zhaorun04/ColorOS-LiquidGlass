@@ -16,7 +16,7 @@ public final class MainActivity extends Activity {
     private Switch toggle(String title,String key,boolean def) {
         Switch s=new Switch(this);s.setText(title);s.setTextSize(16);s.setPadding(0,12,0,12);
         s.setChecked(prefs.getBoolean(key,def));root.addView(s);
-        s.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean(key,on).apply());return s;
+        s.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean(key,on).commit());return s;
     }
     private SeekBar slider(String title,String key,int def,int min,int max) {
         TextView t=label(title+": "+prefs.getInt(key,def)+" / "+max,15);
@@ -24,14 +24,15 @@ public final class MainActivity extends Activity {
         root.addView(bar);
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
             public void onProgressChanged(SeekBar b,int p,boolean from){int value=p+min;t.setText(title+": "+value+" / "+max);if(from)prefs.edit().putInt(key,value).apply();}
-            public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){}
+            public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){prefs.edit().putInt(key,b.getProgress()+min).commit();}
         });return bar;
     }
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.63",23);
+        label("ColorOS Liquid Glass V1.9.78",23);
+        label("设置自动保存到本机；LSPosed 作用域启用时，重启手机或桌面后自动恢复，无需手动打开应用。",14);
         label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
