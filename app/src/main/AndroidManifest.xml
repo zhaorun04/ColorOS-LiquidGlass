@@ -4,6 +4,7 @@
         <meta-data android:name="xposeddescription" android:value="ColorOS 15 runtime view probe; glass disabled by default"/>
         <meta-data android:name="xposedminversion" android:value="82"/>
         <provider android:name=".GlassConfigProvider" android:authorities="top.liquidglass.vector.config" android:exported="true" />
+        <activity android:name=".WallpaperCalibrationActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
