@@ -10,9 +10,9 @@ public final class GlassConfigProvider extends ContentProvider {
     @Override public Cursor query(Uri uri,String[] projection,String selection,String[] selectionArgs,String sortOrder){
         if(!URI.equals(uri))return null;
         android.content.SharedPreferences p=getContext().getSharedPreferences("glass",0);
-        MatrixCursor c=new MatrixCursor(new String[]{"enabled","alpha_normal","alpha_large","tint","tint_strength","highlight","diagnostics"});
+        MatrixCursor c=new MatrixCursor(new String[]{"enabled","alpha","tint","tint_strength","highlight","diagnostics"});
         int old=p.getInt("alpha",210);
-        c.addRow(new Object[]{p.getBoolean("enabled",false)?1:0,p.getInt("alpha_normal",old),p.getInt("alpha_large",old),
+        c.addRow(new Object[]{p.getBoolean("enabled",false)?1:0,p.getInt("alpha",p.getInt("alpha_normal",old)),
             p.getInt("tint",0),p.getInt("tint_strength",30),p.getBoolean("highlight",false)?1:0,p.getBoolean("diagnostics",true)?1:0});
         return c;
     }

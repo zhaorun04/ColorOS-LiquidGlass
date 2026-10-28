@@ -25,12 +25,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
     private static volatile long lastRead = 0;
     private static volatile boolean glassEnabled = false;
-    private static volatile int alphaNormal = 210, alphaLarge = 210, tintMode = 0, tintStrength = 30;
+    private static volatile int glassAlpha = 210, tintMode = 0, tintStrength = 30;
     private static volatile boolean highlightEnabled = false;
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
     private static int alphaLogs = 0;
+    private static volatile String lastConfigSummary="";
     private static final Set<Object> SEEN = Collections.newSetFromMap(new WeakHashMap<Object, Boolean>());
     private static int installed, failed, drawCount;
     private static int backgroundCalls, drawableCalls, blurCalls, switchLogs;
@@ -61,6 +62,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             try {
                 Object preview = field(v.getClass(), "mBackground").get(v);
                 log("PREVIEW_BACKGROUND class=" + (preview == null ? "null" : preview.getClass().getName()));
+                if (preview != null) {
+                    for (Class<?> k=preview.getClass();k!=null;k=k.getSuperclass()) {
+                        for (Field f:k.getDeclaredFields()) {
+                            String n=f.getName().toLowerCase();
+                            if(n.contains("blur") || n.contains("drawable")) {
+                                try { f.setAccessible(true); Object val=f.get(preview); log("NATIVE_BLUR_FIELD name="+f.getName()+" type="+f.getType().getName()+" value="+(val==null?"null":val.getClass().getName())); }
+                                catch(Throwable e){log("NATIVE_BLUR_FIELD_ERROR name="+f.getName()+" reason="+e.getClass().getSimpleName());}
+                            }
+                        }
+                    }
+                }
                 if (preview != null) {
                     int n = 0;
                     for (Method m : preview.getClass().getDeclaredMethods()) {
@@ -95,12 +107,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try (Cursor c = v.getContext().getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 glassEnabled=c.getInt(0)==1;
-                alphaNormal=Math.max(40,Math.min(255,c.getInt(1)));
-                alphaLarge=Math.max(40,Math.min(255,c.getInt(2)));
-                tintMode=Math.max(0,Math.min(3,c.getInt(3)));
-                tintStrength=Math.max(0,Math.min(90,c.getInt(4)));
-                highlightEnabled=c.getInt(5)==1;
-                diagnostics=c.getInt(6)==1;
+                glassAlpha=Math.max(40,Math.min(255,c.getInt(1)));
+                tintMode=Math.max(0,Math.min(3,c.getInt(2)));
+                tintStrength=Math.max(0,Math.min(90,c.getInt(3)));
+                highlightEnabled=c.getInt(4)==1;
+                diagnostics=c.getInt(5)==1;
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" highlight="+highlightEnabled;
+                if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
     }
@@ -120,7 +133,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Drawable d=(Drawable)result;
             synchronized(ORIGINAL_ALPHA){if(!ORIGINAL_ALPHA.containsKey(d))ORIGINAL_ALPHA.put(d,d.getAlpha());}
             int original=ORIGINAL_ALPHA.get(d);
-            int requested=(v.getWidth()>=400)?alphaLarge:alphaNormal;
+            int requested=glassAlpha;
             int alpha=glassEnabled?requested:original;
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
             if(glassEnabled && tintMode!=0 && tintStrength>0){
@@ -175,7 +188,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             String name = m.getName();
             boolean target = ("drawBackground".equals(name) && m.getParameterTypes().length == 2)
                     || ("getBgDrawable".equals(name) && m.getParameterTypes().length == 0)
-                    || ("getBlurProp".equals(name) && m.getParameterTypes().length == 0);
+                    || ("getBlurProp".equals(name) && m.getParameterTypes().length == 0)
+                    || ("initBlurDrawable".equals(name))
+                    || ("isBgSupportNewBlur".equals(name));
             if (!target) continue;
             try {
                 m.setAccessible(true);
@@ -192,9 +207,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                     log("BG_DRAWABLE_RUNTIME result=" + (result == null ? "null" : result.getClass().getName())
                                             + (result instanceof Drawable ? " alpha=" + ((Drawable)result).getAlpha() : ""));
                                 }
-                            } else if (blurCalls++ < 12) {
+                            } else if (blurCalls++ < 24) {
                                 Object result = param.getResult();
-                                log("BG_BLUR_PROP_RUNTIME result=" + (result == null ? "null" : result.getClass().getName()));
+                                log("NATIVE_BLUR_CALL method="+methodName+" signature="+((Method)param.method).toGenericString()+" result="+(result==null?"null":String.valueOf(result))+" argCount="+(param.args==null?0:param.args.length));
                             }
                         } catch (Throwable t) { log("BG_RUNTIME_ERROR=" + t.getClass().getSimpleName()); }
                     }
@@ -207,7 +222,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.8 MATERIAL_CONTROLS_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9 NATIVE_BLUR_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -217,6 +232,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.7 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }

@@ -31,12 +31,11 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.8",23);
-        label("桌面文件夹原生背景材质实验。设置可在返回桌面后生效；暂不支持实时背景模糊。",14);
+        label("ColorOS Liquid Glass V1.9",23);
+        label("原生模糊兼容性诊断版。所有桌面文件夹统一材质；此版本仅观察原生模糊状态，不强制调用隐藏方法。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
-        SeekBar normal=slider("普通文件夹不透明度","alpha_normal",210,40,255);
-        SeekBar large=slider("大文件夹不透明度","alpha_large",210,40,255);
+        SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
         label("玻璃色调（实验功能）",18);
         String[] options={"原生（推荐）","冷白","浅灰","深色"};
         Spinner tint=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,options);
@@ -49,11 +48,11 @@ public final class MainActivity extends Activity {
         Switch highlight=toggle("柔和高光描边（默认关闭）","highlight",false);
         Switch diag=toggle("保留诊断日志","diagnostics",true);
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
-        reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha_normal",210).putInt("alpha_large",210)
+        reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
             .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).apply();
-            enabled.setChecked(false);normal.setProgress(170);large.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);
+            enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
-        label("提示：色调使用 Drawable 颜色滤镜，部分主题可能不兼容。关闭实验后若外观未立即恢复，可重启桌面。不会强制启用 ColorOS 隐藏模糊功能。",13);
+        label("提示：色调使用 Drawable 颜色滤镜，部分主题可能不兼容。关闭实验后若外观未立即恢复，可重启桌面。新增被动诊断原生模糊初始化与调用；不会强制启用 ColorOS 隐藏模糊功能。",13);
         setContentView(scroll);
     }
 }
