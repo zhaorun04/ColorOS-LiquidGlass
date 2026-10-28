@@ -472,17 +472,45 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 log("REFRACTION_SAMPLING_GATE_ERROR " + t.getClass().getSimpleName());
         }
     }
-    // V1.9.63: deterministic, bounded candidate coordinates for independent image comparison.
-    // A candidate coordinate is never treated as a verified compositor transform.
+    // V1.9.64: audit source provenance; candidate geometry is not a measured compositor transform.
     private static final java.util.Map<View, String> REFERENCE_CANDIDATE_LAST =
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
     private static final java.util.concurrent.atomic.AtomicInteger REFERENCE_CANDIDATE_LOGS =
         new java.util.concurrent.atomic.AtomicInteger(0);
+    private static final java.util.concurrent.atomic.AtomicInteger DIMENSION_AUDIT_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    private static int lastAuditedDesiredW = Integer.MIN_VALUE;
+    private static int lastAuditedDesiredH = Integer.MIN_VALUE;
+    private static void auditWallpaperDimensions(View folder, String phase) {
+        if (!diagnostics || DIMENSION_AUDIT_LOGS.get() >= 20) return;
+        try {
+            android.app.WallpaperManager wm = android.app.WallpaperManager.getInstance(folder.getContext());
+            int dw = wm.getDesiredMinimumWidth(), dh = wm.getDesiredMinimumHeight();
+            boolean changed;
+            synchronized (REFERENCE_CANDIDATE_LAST) {
+                changed = dw != lastAuditedDesiredW || dh != lastAuditedDesiredH;
+                if (changed) { lastAuditedDesiredW = dw; lastAuditedDesiredH = dh; }
+            }
+            if (changed && DIMENSION_AUDIT_LOGS.incrementAndGet() <= 20) {
+                log("REFRACTION_DIMENSION_AUDIT phase=" + phase
+                    + " desiredMinimum=" + dw + "x" + dh
+                    + " initialDesiredMinimum=" + wallpaperDesiredW + "x" + wallpaperDesiredH
+                    + " source=WallpaperManager.getDesiredMinimumWidth/Height"
+                    + " originalImage=" + wallpaperImageW + "x" + wallpaperImageH
+                    + " viewport=" + wallpaperDisplayW + "x" + wallpaperDisplayH
+                    + " desiredIsRenderedSize=false compositorCrop=UNKNOWN mappingVerified=false");
+            }
+        } catch (Throwable t) {
+            if (DIMENSION_AUDIT_LOGS.incrementAndGet() <= 20)
+                log("REFRACTION_DIMENSION_AUDIT status=UNAVAILABLE reason=" + t.getClass().getSimpleName());
+        }
+    }
     private static void inspectIndependentReferenceCandidates(View folder, long left, long top,
             int w, int h, int sw, int sh, String phase) {
         if (!diagnostics || REFERENCE_CANDIDATE_LOGS.get() >= 36 ||
                 wallpaperImageW <= 0 || wallpaperImageH <= 0 ||
                 !Float.isFinite(wallpaperRequestedX) || !Float.isFinite(wallpaperRequestedY)) return;
+        auditWallpaperDimensions(folder, phase);
         String key = left + ":" + top + ":" + w + ":" + h + ":" + wallpaperOffsetRevision;
         synchronized (REFERENCE_CANDIDATE_LAST) {
             if (key.equals(REFERENCE_CANDIDATE_LAST.get(folder))) return;
@@ -490,8 +518,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         if (REFERENCE_CANDIDATE_LOGS.incrementAndGet() > 36) return;
         float cover = Math.max((float)sw / wallpaperImageW, (float)sh / wallpaperImageH);
-        float desired = wallpaperDesiredW > 0
-            ? Math.max(cover, (float)wallpaperDesiredW / wallpaperImageW) : Float.NaN;
+        // Desired minimum is a launcher/system hint, NOT the image's measured render width.
+        // Keep it as an explicitly untrusted diagnostic candidate; reject excessive scaling.
+        int currentDesired = lastAuditedDesiredW;
+        float rawDesired = currentDesired > 0 ? Math.max(cover, (float)currentDesired / wallpaperImageW) : Float.NaN;
+        boolean desiredUsable = Float.isFinite(rawDesired) && rawDesired > 0f
+            && rawDesired <= cover * 1.5f;
+        float desired = desiredUsable ? rawDesired : Float.NaN;
         float[][] pts = {{.25f,.25f},{.5f,.5f},{.75f,.75f}};
         for (int i=0; i<pts.length; i++) {
             float px = left + w*pts[i][0], py = top + h*pts[i][1];
@@ -501,6 +534,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 + " request=[" + fmt(wallpaperRequestedX) + "," + fmt(wallpaperRequestedY) + "]"
                 + " source=" + wallpaperImageW + "x" + wallpaperImageH
                 + " viewport=" + sw + "x" + sh + " revision=" + wallpaperOffsetRevision
+                + " coverSource=IMAGE_BOUNDS_AND_DISPLAY"
+                + " desiredSource=WallpaperManager.getDesiredMinimumWidth"
+                + " desiredWidth=" + currentDesired
+                + " desiredScaleRaw=" + fmt(rawDesired)
+                + " desiredStatus=" + (desiredUsable ? "HYPOTHESIS_ONLY" : "REJECTED_UNTRUSTED_DIMENSIONS")
                 + " " + mappingHypothesis("COVER",cover,wallpaperRequestedX,px,py,
                     wallpaperImageW,wallpaperImageH,sw,sh)
                 + " " + mappingHypothesis("DESIRED",desired,wallpaperRequestedX,px,py,
@@ -696,7 +734,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static void inspectWallpaperReferenceFeasibility(View folder) {
         if (!diagnostics || !WALLPAPER_REFERENCE_ONCE.compareAndSet(false, true)) return;
-        log("REFRACTION_REFERENCE_PROBE version=1.9.63 mode=READ_ONLY captureAttempted=false");
+        log("REFRACTION_REFERENCE_PROBE version=1.9.64 mode=READ_ONLY captureAttempted=false");
         try {
             android.content.Context ctx=folder.getContext();
             android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(ctx);
@@ -829,6 +867,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float sy=Math.max(0f,Math.min(dh-1f,y+h*0.5f));
         float coverScale=Math.max((float)dw/iw,(float)dh/ih);
         float desiredScale=wallpaperDesiredW>0 ? Math.max(coverScale,(float)wallpaperDesiredW/iw) : Float.NaN;
+        if (Float.isFinite(desiredScale) && desiredScale > coverScale * 1.5f) desiredScale = Float.NaN;
         mappingModelLogs++;
         log("REFRACTION_MAPPING_MODELS status=HYPOTHETICAL id="+Integer.toHexString(System.identityHashCode(folder))
             +" screenPoint=["+fmt(sx)+","+fmt(sy)+"] wallpaperOffsetRequest="+fmt(offset)
