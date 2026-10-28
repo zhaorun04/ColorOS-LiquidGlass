@@ -41,6 +41,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
     private static volatile int probeMode = 0;
+    private static volatile int nativeBlurExperiment = 0; // 0=off, 1=only material switch accessor
+    private static final java.util.Set<String> EXPERIMENT_ONCE = java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     private static int layerTraceLogs = 0;
     private static int previewTraceLogs = 0;
     private static final ThreadLocal<Integer> PREVIEW_DRAW_DEPTH = new ThreadLocal<Integer>();
@@ -134,10 +136,23 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 highlightWidth=Math.max(1,Math.min(5,c.getInt(8)));
                 directionalLight=c.getInt(9)==1;
                 probeMode=Math.max(0,Math.min(3,c.getInt(7)));
-                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode;
+                int expIndex=c.getColumnIndex("native_blur_experiment");
+                nativeBlurExperiment=expIndex>=0 ? Math.max(0,Math.min(1,c.getInt(expIndex))) : 0;
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
+    }
+    private static void refreshConfigFromContext(android.content.Context ctx) {
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-lastRead<1500)return;
+        try (Cursor c=ctx.getContentResolver().query(CONFIG,null,null,null,null)) {
+            if(c!=null && c.moveToFirst()) {
+                int i=c.getColumnIndex("native_blur_experiment");
+                nativeBlurExperiment=i<0?0:Math.max(0,Math.min(1,c.getInt(i)));
+                lastRead=now;
+            }
+        } catch(Throwable ignored) { /* keep default off on read failure */ }
     }
     private static int tintColor() {
         if(tintMode==1)return Color.rgb(225,240,255);
@@ -823,7 +838,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         @Override protected void afterHookedMethod(MethodHookParam p) {
                             try {
                                 Object value=p.getResult();
-                                String key=signature+"="+safeValue(value);
+                                if (p.args!=null) for (Object arg:p.args) {
+                                    if (arg instanceof android.content.Context) {
+                                        refreshConfigFromContext((android.content.Context)arg);
+                                        break;
+                                    }
+                                }
+                                // Read settings on the actual Launcher call, not only on folder drawing.
+                                if ("access$getMSysMaterialBlurSwitchEnable$cp".equals(method.getName())
+                                        && method.getParameterTypes().length==0
+                                        && method.getReturnType()==boolean.class
+                                        && "com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties".equals(method.getDeclaringClass().getName())) {
+                                    // This experiment intentionally changes ONLY the one observed accessor.
+                                    // It never changes system properties, other applications or global blur state.
+                                    if (nativeBlurExperiment==1 && Boolean.FALSE.equals(value)) {
+                                        p.setResult(Boolean.TRUE);
+                                        if (EXPERIMENT_ONCE.add("material-switch-forced"))
+                                            log("NATIVE_BLUR_EXPERIMENT material_switch original=false override=true");
+                                    } else if (EXPERIMENT_ONCE.add("material-switch-unchanged-"+nativeBlurExperiment)) {
+                                        log("NATIVE_BLUR_EXPERIMENT material_switch original="+safeValue(value)+" unchanged mode="+nativeBlurExperiment);
+                                    }
+                                }
+                                String key=signature+"="+safeValue(value)+"->"+safeValue(p.getResult());
                                 if(CONDITION_ONCE.size()>=64 || !CONDITION_ONCE.add(key))return;
                                 log("NATIVE_BLUR_CONDITION method="+signature
                                     +" args="+decisionArgs(p.args)
@@ -845,7 +881,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.15.1 NATIVE_BLUR_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.16 NATIVE_BLUR_EXPERIMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -860,6 +896,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.15.1 NATIVE_BLUR_PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.16 NATIVE_BLUR_EXPERIMENT_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
