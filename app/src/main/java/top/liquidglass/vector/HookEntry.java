@@ -45,6 +45,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = false;
+    private static volatile boolean wallpaperCompare = false;
+    private static final java.util.Map<View, VisualPatch> VISUAL_PATCHES = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, VisualPatch>());
+    private static int visualProbeLogs = 0;
+    private static final class VisualPatch {
+        long time; int revision; android.graphics.Bitmap cover, desired; float cx, cy, dx, dy;
+        void dispose() { if(cover!=null)cover.recycle(); if(desired!=null)desired.recycle(); }
+    }
     private static volatile int probeMode = 0;
     private static volatile boolean nativeAlphaProbe = false;
     private static final Set<String> BLUR_API_SEEN = Collections.synchronizedSet(new HashSet<String>());
@@ -141,6 +148,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 tintStrength=Math.max(0,Math.min(90,c.getInt(3)));
                 highlightEnabled=c.getInt(4)==1;
                 diagnostics=c.getInt(5)==1;
+                int visualIndex=c.getColumnIndex("wallpaper_compare");
+                wallpaperCompare=visualIndex>=0 && c.getInt(visualIndex)==1;
                 highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
                 highlightWidth=Math.max(1,Math.min(5,c.getInt(8)));
                 directionalLight=c.getInt(9)==1;
@@ -514,6 +523,65 @@ public final class HookEntry implements IXposedHookLoadPackage {
             +" "+mappingHypothesis("CENTER_COVER",coverScale,offset,sx,sy,iw,ih,dw,dh)
             +" "+mappingHypothesis("DESIRED_WIDTH",desiredScale,offset,sx,sy,iw,ih,dw,dh)
             +" compositorCrop=UNKNOWN compositorScale=UNKNOWN verified=false pixelsRead=false rendering=false");
+    }
+    // V1.9.50: opt-in, read-only source-image comparison. No wallpaper is stored.
+    // The two tiny patches are HYPOTHETICAL; neither proves compositor crop.
+    private static void drawWallpaperVisualComparison(View folder, Canvas canvas) {
+        if (!wallpaperCompare || !diagnostics || !glassEnabled || canvas==null ||
+            wallpaperImageW<=0 || wallpaperImageH<=0 || wallpaperDisplayW<=0 || wallpaperDisplayH<=0 ||
+            "UNKNOWN".equals(wallpaperRequestState(android.os.SystemClock.uptimeMillis()))) return;
+        int[] pos=new int[2]; folder.getLocationOnScreen(pos);
+        int w=folder.getWidth(),h=folder.getHeight();
+        if(w<100||h<100||pos[0]<0||pos[1]<0||pos[0]+w>wallpaperDisplayW||pos[1]+h>wallpaperDisplayH)return;
+        long now=android.os.SystemClock.uptimeMillis();
+        VisualPatch patch;
+        synchronized(VISUAL_PATCHES){patch=VISUAL_PATCHES.get(folder);}
+        if(patch==null || (now-patch.time>4500L && patch.revision!=wallpaperOffsetRevision)) {
+            // Decode only 2 small bounded regions at most once every 4.5 seconds per folder.
+            VisualPatch next=new VisualPatch(); next.time=now; next.revision=wallpaperOffsetRevision;
+            android.os.ParcelFileDescriptor fd=null; android.graphics.BitmapRegionDecoder decoder=null;
+            try {
+                float sx=pos[0]+w*0.5f, sy=pos[1]+h*0.5f;
+                float cover=Math.max((float)wallpaperDisplayW/wallpaperImageW,(float)wallpaperDisplayH/wallpaperImageH);
+                float desired=wallpaperDesiredW>0?Math.max(cover,(float)wallpaperDesiredW/wallpaperImageW):cover;
+                float[] scales={cover,desired};
+                android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(folder.getContext());
+                fd=wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM);
+                if(fd==null)return;
+                decoder=android.graphics.BitmapRegionDecoder.newInstance(fd.getFileDescriptor(),false);
+                for(int i=0;i<2;i++){
+                    float scale=scales[i];
+                    float px=(sx+Math.max(0f,wallpaperImageW*scale-wallpaperDisplayW)*wallpaperRequestedX)/scale;
+                    float py=(sy+Math.max(0f,wallpaperImageH*scale-wallpaperDisplayH)*0.5f)/scale;
+                    int half=16, left=Math.max(0,Math.min(wallpaperImageW-1,(int)px-half));
+                    int top=Math.max(0,Math.min(wallpaperImageH-1,(int)py-half));
+                    android.graphics.Rect region=new android.graphics.Rect(left,top,Math.min(wallpaperImageW,left+32),Math.min(wallpaperImageH,top+32));
+                    android.graphics.Bitmap bitmap=decoder.decodeRegion(region,new android.graphics.BitmapFactory.Options());
+                    if(i==0){next.cover=bitmap;next.cx=px;next.cy=py;}
+                    else{next.desired=bitmap;next.dx=px;next.dy=py;}
+                }
+                synchronized(VISUAL_PATCHES){VisualPatch old=VISUAL_PATCHES.put(folder,next);if(old!=null)old.dispose();}
+                patch=next;
+                if(visualProbeLogs++<16)log("REFRACTION_VISUAL_COMPARE status=PATCH_READY offset="+fmt(wallpaperRequestedX)
+                    +" cover=["+fmt(next.cx)+","+fmt(next.cy)+"] desired=["+fmt(next.dx)+","+fmt(next.dy)
+                    +"] verified=false pixelsRendered=PATCH_ONLY");
+            } catch(Throwable t){if(visualProbeLogs++<16)log("REFRACTION_VISUAL_COMPARE status=UNAVAILABLE reason="+t.getClass().getSimpleName());return;}
+            finally{if(decoder!=null)try{decoder.recycle();}catch(Throwable ignored){} if(fd!=null)try{fd.close();}catch(Throwable ignored){}}
+        }
+        if(patch==null)return;
+        canvas.save();
+        try {
+            float density=folder.getResources().getDisplayMetrics().density;
+            float sz=Math.min(w*0.26f,Math.max(52f,56f*density));
+            float x=Math.max(6f,w-2f*sz-18f), y=Math.max(8f,h-sz-30f);
+            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setColor(0xDD111B2B);
+            canvas.drawRoundRect(new RectF(x-5,y-23,x+sz*2+15,y+sz+7),9,9,paint);
+            paint.setColor(Color.WHITE);paint.setTextSize(11f*density);
+            canvas.drawText("COVER",x,y-7,paint);canvas.drawText("DESIRED",x+sz+8,y-7,paint);
+            paint.setFilterBitmap(true);
+            if(patch.cover!=null)canvas.drawBitmap(patch.cover,null,new RectF(x,y,x+sz,y+sz),paint);
+            if(patch.desired!=null)canvas.drawBitmap(patch.desired,null,new RectF(x+sz+8,y,x+sz*2+8,y+sz),paint);
+        } finally {canvas.restore();}
     }
     private static void inspectScrollCoordinates(View folder) {
         if (!diagnostics || refractionMotionLogs >= 48 || !folder.isAttachedToWindow()) return;
@@ -1403,6 +1471,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     try {
                         inspect(label,param.thisObject);
+                        if(draw && "FolderIcon".equals(label) && param.thisObject instanceof View && param.args.length>0 && param.args[0] instanceof Canvas)
+                            drawWallpaperVisualComparison((View)param.thisObject,(Canvas)param.args[0]);
                         // No highlight in FolderIcon.dispatchDraw: its canvas coordinates
                         // are NOT the same as the background drawable's coordinates.
                     } catch(Throwable t){log("PROBE_ERROR label="+label+" reason="+t.getClass().getSimpleName());}
