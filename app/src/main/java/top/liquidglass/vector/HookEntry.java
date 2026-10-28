@@ -25,7 +25,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
     private static volatile long lastRead = 0;
     private static volatile boolean glassEnabled = false;
-    private static volatile int glassAlpha = 210;
+    private static volatile int alphaNormal = 210, alphaLarge = 210, tintMode = 0, tintStrength = 30;
+    private static volatile boolean highlightEnabled = false;
+    private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
+    private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
     private static int alphaLogs = 0;
     private static final Set<Object> SEEN = Collections.newSetFromMap(new WeakHashMap<Object, Boolean>());
@@ -92,26 +95,54 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try (Cursor c = v.getContext().getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 glassEnabled=c.getInt(0)==1;
-                glassAlpha=Math.max(40,Math.min(255,c.getInt(1)));
-                diagnostics=c.getInt(2)==1;
+                alphaNormal=Math.max(40,Math.min(255,c.getInt(1)));
+                alphaLarge=Math.max(40,Math.min(255,c.getInt(2)));
+                tintMode=Math.max(0,Math.min(3,c.getInt(3)));
+                tintStrength=Math.max(0,Math.min(90,c.getInt(4)));
+                highlightEnabled=c.getInt(5)==1;
+                diagnostics=c.getInt(6)==1;
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
     }
+    private static int tintColor() {
+        if(tintMode==1)return Color.rgb(225,240,255);
+        if(tintMode==2)return Color.rgb(185,192,202);
+        return Color.rgb(40,50,65);
+    }
     private static void applyNativeBackground(View v) {
         refresh(v);
-        if(!glassEnabled) return;
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
-            if(preview==null) return;
-            Method m=preview.getClass().getDeclaredMethod("getBgDrawable");
-            m.setAccessible(true);
+            if(preview==null)return;
+            Method m=preview.getClass().getDeclaredMethod("getBgDrawable");m.setAccessible(true);
             Object result=m.invoke(preview);
-            if(result instanceof Drawable) {
-                Drawable d=(Drawable)result;
-                d.setAlpha(glassAlpha);
-                if(alphaLogs++<8) log("NATIVE_ALPHA_APPLIED drawable="+d.getClass().getName()+" alpha="+glassAlpha);
-            } else if(alphaLogs++<8) log("NATIVE_ALPHA_SKIPPED drawable=null");
-        } catch(Throwable t) { if(alphaLogs++<8) log("NATIVE_ALPHA_FAILED reason="+t.getClass().getSimpleName()); }
+            if(!(result instanceof Drawable))return;
+            Drawable d=(Drawable)result;
+            synchronized(ORIGINAL_ALPHA){if(!ORIGINAL_ALPHA.containsKey(d))ORIGINAL_ALPHA.put(d,d.getAlpha());}
+            int original=ORIGINAL_ALPHA.get(d);
+            int requested=(v.getWidth()>=400)?alphaLarge:alphaNormal;
+            int alpha=glassEnabled?requested:original;
+            if(d.getAlpha()!=alpha)d.setAlpha(alpha);
+            if(glassEnabled && tintMode!=0 && tintStrength>0){
+                int rgb=tintColor();
+                int overlay=Color.argb((int)(255*tintStrength/100f),Color.red(rgb),Color.green(rgb),Color.blue(rgb));
+                d.setColorFilter(overlay,android.graphics.PorterDuff.Mode.SRC_ATOP);
+                synchronized(TINTED){TINTED.add(d);}
+            } else {
+                synchronized(TINTED){if(TINTED.remove(d))d.clearColorFilter();}
+            }
+            if(alphaLogs++<16)log("MATERIAL_APPLIED enabled="+glassEnabled+" size="+v.getWidth()+"x"+v.getHeight()+
+                " alpha="+alpha+" tint="+tintMode+" drawable="+d.getClass().getSimpleName());
+        }catch(Throwable t){if(alphaLogs++<12)log("MATERIAL_FAILED reason="+t.getClass().getSimpleName());}
+    }
+    private static void drawHighlight(View v,Canvas canvas) {
+        if(!glassEnabled||!highlightEnabled||v.getWidth()<2||v.getHeight()<2)return;
+        Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);p.setStyle(Paint.Style.STROKE);
+        p.setStrokeWidth(v.getResources().getDisplayMetrics().density*0.7f);
+        p.setColor(Color.argb(45,255,255,255));
+        float inset=p.getStrokeWidth()*2;
+        float r=Math.min(v.getWidth(),v.getHeight())*0.15f;
+        canvas.drawRoundRect(new RectF(inset,inset,v.getWidth()-inset,v.getHeight()-inset),r,r,p);
     }
     private static void hook(Class<?> c, String methodName, Class<?>[] args, final String label, final boolean draw) {
         if (c == null) return;
@@ -119,14 +150,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Method method = c.getDeclaredMethod(methodName, args);
             method.setAccessible(true);
             XposedBridge.hookMethod(method, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if(draw && param.thisObject instanceof View)applyNativeBackground((View)param.thisObject);
+                }
                 @Override protected void afterHookedMethod(MethodHookParam param) {
                     try {
-                        inspect(label, param.thisObject);
-                        if (draw && param.thisObject instanceof View && param.args != null && param.args.length > 0 && param.args[0] instanceof Canvas) {
-                            View v = (View) param.thisObject;
-                            applyNativeBackground(v);
-                        }
-                    } catch (Throwable t) { log("PROBE_ERROR label=" + label + " reason=" + t.getClass().getSimpleName()); }
+                        inspect(label,param.thisObject);
+                        if(draw && param.thisObject instanceof View && param.args!=null && param.args.length>0 && param.args[0] instanceof Canvas)
+                            drawHighlight((View)param.thisObject,(Canvas)param.args[0]);
+                    } catch(Throwable t){log("PROBE_ERROR label="+label+" reason="+t.getClass().getSimpleName());}
                 }
             });
             installed++;
@@ -175,7 +207,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.7 APP_CONTROLS_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.8 MATERIAL_CONTROLS_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);

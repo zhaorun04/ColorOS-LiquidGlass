@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 8
-        versionName '1.7-app-controls'
+        versionCode 9
+        versionName '1.8-material-controls'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

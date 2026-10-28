@@ -4,40 +4,56 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.content.SharedPreferences;
-import android.view.ViewGroup;
-import android.widget.LinearLayout;
-import android.widget.TextView;
-import android.widget.Switch;
-import android.widget.SeekBar;
+import android.widget.*;
 
 public final class MainActivity extends Activity {
     private SharedPreferences prefs;
-    private TextView opacity;
-    private TextView line(LinearLayout root, String s, int size) {
-        TextView t=new TextView(this); t.setText(s); t.setTextSize(size); t.setTextColor(Color.rgb(35,45,55));
-        t.setPadding(0,16,0,16); root.addView(t); return t;
+    private LinearLayout root;
+    private TextView label(String s, int size) {
+        TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(35,45,55));
+        t.setPadding(0,16,0,12);root.addView(t);return t;
     }
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state);
-        prefs=getSharedPreferences("glass",0);
-        LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(42,55,42,30); root.setBackgroundColor(Color.rgb(247,249,252));
-        line(root,"ColorOS Liquid Glass  V1.7",23);
-        line(root,"文件夹原生背景透明度实验（不包含实时模糊）。修改后返回桌面，重新打开文件夹或重启桌面以观察变化。",14);
-        Switch enabled=new Switch(this); enabled.setText("启用原生背景透明度实验"); enabled.setTextSize(16);
-        enabled.setChecked(prefs.getBoolean("enabled",false)); root.addView(enabled);
-        enabled.setOnCheckedChangeListener((b,on)->prefs.edit().putBoolean("enabled",on).apply());
-        opacity=line(root,"背景不透明度："+prefs.getInt("alpha",210)+" / 255",16);
-        SeekBar seek=new SeekBar(this); seek.setMax(255); seek.setProgress(prefs.getInt("alpha",210)); root.addView(seek);
-        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar b,int v,boolean fromUser){ int a=Math.max(40,v); opacity.setText("背景不透明度："+a+" / 255"); if(fromUser) prefs.edit().putInt("alpha",a).apply(); }
+    private Switch toggle(String title,String key,boolean def) {
+        Switch s=new Switch(this);s.setText(title);s.setTextSize(16);s.setPadding(0,12,0,12);
+        s.setChecked(prefs.getBoolean(key,def));root.addView(s);
+        s.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean(key,on).apply());return s;
+    }
+    private SeekBar slider(String title,String key,int def,int min,int max) {
+        TextView t=label(title+": "+prefs.getInt(key,def)+" / "+max,15);
+        SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(Math.max(0,Math.min(max-min,prefs.getInt(key,def)-min)));
+        root.addView(bar);
+        bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
+            public void onProgressChanged(SeekBar b,int p,boolean from){int value=p+min;t.setText(title+": "+value+" / "+max);if(from)prefs.edit().putInt(key,value).apply();}
             public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){}
+        });return bar;
+    }
+    @Override public void onCreate(Bundle b) {
+        super.onCreate(b);prefs=getSharedPreferences("glass",0);
+        ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
+        label("ColorOS Liquid Glass V1.8",23);
+        label("桌面文件夹原生背景材质实验。设置可在返回桌面后生效；暂不支持实时背景模糊。",14);
+        Switch enabled=toggle("启用文件夹材质实验","enabled",false);
+        label("透明度（数值越小越透明）",18);
+        SeekBar normal=slider("普通文件夹不透明度","alpha_normal",210,40,255);
+        SeekBar large=slider("大文件夹不透明度","alpha_large",210,40,255);
+        label("玻璃色调（实验功能）",18);
+        String[] options={"原生（推荐）","冷白","浅灰","深色"};
+        Spinner tint=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,options);
+        tint.setAdapter(adapter);tint.setSelection(Math.max(0,Math.min(3,prefs.getInt("tint",0))));root.addView(tint);
+        tint.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("tint",pos).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> p){}
         });
-        Switch diag=new Switch(this); diag.setText("保留诊断日志"); diag.setChecked(prefs.getBoolean("diagnostics",true)); root.addView(diag);
-        diag.setOnCheckedChangeListener((b,on)->prefs.edit().putBoolean("diagnostics",on).apply());
-        TextView reset=line(root,"恢复默认：关闭实验，背景不透明度 210",15);
-        reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210).apply(); enabled.setChecked(false); seek.setProgress(210);});
-        line(root,"说明：不会启用旧版白色描边。当前仅针对可获取到的背景 Drawable 生效；若原生背景采用 Canvas 自绘，可能仍无视觉变化。",13);
-        setContentView(root);
+        SeekBar tintStrength=slider("色调强度","tint_strength",30,0,90);
+        Switch highlight=toggle("柔和高光描边（默认关闭）","highlight",false);
+        Switch diag=toggle("保留诊断日志","diagnostics",true);
+        Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
+        reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha_normal",210).putInt("alpha_large",210)
+            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).apply();
+            enabled.setChecked(false);normal.setProgress(170);large.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);
+            Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
+        label("提示：色调使用 Drawable 颜色滤镜，部分主题可能不兼容。关闭实验后若外观未立即恢复，可重启桌面。不会强制启用 ColorOS 隐藏模糊功能。",13);
+        setContentView(scroll);
     }
 }
