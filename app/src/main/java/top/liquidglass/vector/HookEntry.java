@@ -660,10 +660,94 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(BLUR_METHODS_SEEN.add(signature))log("BLUR_METHOD_CATALOG "+signature);
         }
     }
+    // V1.9.13: read-only decision-chain snapshots; no global framework hooks.
+    private static final java.util.Set<String> DECISION_ONCE =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    private static String decisionStack() {
+        StackTraceElement[] frames = Thread.currentThread().getStackTrace();
+        StringBuilder sb = new StringBuilder();
+        int emitted = 0;
+        for (StackTraceElement frame : frames) {
+            String owner = frame.getClassName();
+            if (owner.equals(Thread.class.getName()) || owner.equals(HookEntry.class.getName())
+                    || owner.startsWith("de.robv.android.xposed") || owner.startsWith("java.lang.reflect")) continue;
+            if (emitted++ >= 12) break;
+            if (sb.length() > 0) sb.append(" <- ");
+            sb.append(owner).append('.').append(frame.getMethodName()).append(':').append(frame.getLineNumber());
+        }
+        return sb.toString();
+    }
+    private static String decisionArgs(Object[] args) {
+        if (args == null) return "[]";
+        StringBuilder sb = new StringBuilder("[");
+        for (int i=0;i<args.length && i<5;i++) {
+            if (i>0) sb.append(',');
+            Object v=args[i];
+            if (v instanceof android.content.Context) {
+                android.content.Context c=(android.content.Context)v;
+                sb.append("Context:").append(c.getClass().getSimpleName());
+            } else sb.append(safeValue(v));
+        }
+        return sb.append(']').toString();
+    }
+    private static void decisionSnapshot(String stage, String name, Object owner, Object[] args, Object result) {
+        if (!diagnostics) return;
+        String key = stage + ':' + name + ':' + safeValue(result);
+        if (!DECISION_ONCE.add(key)) return;
+        if (DECISION_ONCE.size() > 36) return;
+        log("BLUR_DECISION_"+stage+" method="+name+" owner="+drawableTag(owner)
+                +" args="+decisionArgs(args)+" result="+safeValue(result));
+        log("BLUR_DECISION_STACK method="+name+" stage="+stage+" frames="+decisionStack());
+        if (owner != null) traceConditions(owner,"decision:"+name);
+    }
+    private static void hookDecisionChain(ClassLoader loader) {
+        String[] owners = {
+                "com.android.launcher3.folder.FolderIcon",
+                "com.android.launcher3.folder.OplusPreviewBackground"
+        };
+        for (String ownerName : owners) {
+            Class<?> owner = find(ownerName,loader);
+            if (owner==null) continue;
+            for (final Method m : owner.getDeclaredMethods()) {
+                String n=m.getName();
+                if (!(n.equals("isSupportNewBlurLocal") || n.equals("isBgSupportNewBlur")
+                        || n.equals("initBlurDrawable") || n.equals("getBlurProp")
+                        || n.equals("updateBlurDrawableColor"))) continue;
+                try {
+                    m.setAccessible(true);
+                    final String signature=m.toGenericString();
+                    XposedBridge.hookMethod(m,new XC_MethodHook(){
+                        @Override protected void beforeHookedMethod(MethodHookParam p) {
+                            try { decisionSnapshot("ENTER",signature,p.thisObject,p.args,null); }
+                            catch(Throwable ignored) {}
+                        }
+                        @Override protected void afterHookedMethod(MethodHookParam p) {
+                            try { decisionSnapshot("EXIT",signature,p.thisObject,p.args,p.getResult()); }
+                            catch(Throwable ignored) {}
+                        }
+                    });
+                    installed++;
+                    log("BLUR_DECISION_HOOK_INSTALLED "+signature);
+                } catch(Throwable e) {
+                    failed++;
+                    log("BLUR_DECISION_HOOK_FAILED "+m.toGenericString()+" "+e.getClass().getSimpleName());
+                }
+            }
+        }
+        // Enumerate candidate blur property APIs without invoking constructors or methods.
+        Class<?> prop = find("com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties",loader);
+        if (prop!=null) {
+            int count=0;
+            for (Method m:prop.getDeclaredMethods()) {
+                if(count++>=24)break;
+                log("BLUR_PROPERTIES_API "+m.toGenericString());
+            }
+        }
+    }
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.12 BLUR_CONDITIONS_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.13 BLUR_DECISION_TRACE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -675,7 +759,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookPreview(p.classLoader);
             traceBlurMethods(p.classLoader);
             hookFolderConditions(p.classLoader);
+            hookDecisionChain(p.classLoader);
         }
-        log("V1.9.12 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.13 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
