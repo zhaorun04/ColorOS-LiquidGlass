@@ -264,6 +264,96 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch(Throwable t) { log("BLUR_FUSION_HOOK_UNAVAILABLE reason="+t.getClass().getSimpleName()); }
     }
 
+    // V1.9.19: draw within FolderIcon's own Canvas. Blur is composited by the OEM
+    // beneath this View; material goes before child icons, edge light after them.
+    private static int folderFusionLogs = 0;
+    private static final ThreadLocal<Boolean> FOLDER_FUSION_GUARD = new ThreadLocal<Boolean>();
+    private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
+        if (!glassEnabled || probeMode == 1 || canvas == null || v.getWidth() <= 0 || v.getHeight() <= 0) return;
+        if (Boolean.TRUE.equals(FOLDER_FUSION_GUARD.get())) return;
+        try {
+            Object preview = field(v.getClass(), "mBackground").get(v);
+            if (preview == null) return;
+            Method getter = preview.getClass().getDeclaredMethod("getBgDrawable");
+            getter.setAccessible(true);
+            Object value = getter.invoke(preview);
+            if (!(value instanceof Drawable) || !value.getClass().getName().endsWith(".LayerBlurDrawable")) return;
+            // Canvas belongs to FolderIcon, so use View-local coordinates, not the
+            // LayerBlurDrawable bounds (often empty or in another coordinate system).
+            float w = v.getWidth(), h = v.getHeight();
+            float radius = Math.min(w,h) * 0.21f; // conservative fallback, NOT OEM geometry
+            boolean nativeOutline = false;
+            try {
+                Outline outline = new Outline();
+                if (v.getOutlineProvider() != null) {
+                    v.getOutlineProvider().getOutline(v, outline);
+                    Rect r = new Rect();
+                    if (outline.getRect(r) && !r.isEmpty() && outline.getRadius() > 0f) {
+                        radius = outline.getRadius(); nativeOutline = true;
+                    }
+                }
+            } catch (Throwable ignored) {}
+            RectF rect = new RectF(0,0,w,h);
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            int save = canvas.save();
+            FOLDER_FUSION_GUARD.set(Boolean.TRUE);
+            try {
+                if (!edgeOnly) {
+                    Path mask = new Path();
+                    mask.addRoundRect(rect,radius,radius,Path.Direction.CW);
+                    canvas.clipPath(mask);
+                    float opacity = glassAlpha / 255f;
+                    paint.setColor(Color.argb(Math.round(34f*opacity),245,250,255));
+                    canvas.drawRoundRect(rect,radius,radius,paint);
+                    if (tintMode != 0 && tintStrength > 0 && probeMode != 2) {
+                        paint.setColor(tintColor());
+                        paint.setAlpha(Math.round(tintStrength * opacity * 1.5f));
+                        canvas.drawRoundRect(rect,radius,radius,paint);
+                    }
+                } else if (highlightEnabled && highlightStrength > 0 && probeMode != 3) {
+                    float stroke = Math.max(1f,highlightWidth);
+                    float inset = stroke * 0.65f;
+                    RectF inner = new RectF(rect); inner.inset(inset,inset);
+                    paint.setStyle(Paint.Style.STROKE);
+                    paint.setStrokeWidth(stroke);
+                    paint.setShader(new android.graphics.LinearGradient(0,0,w,h,
+                        directionalLight ? new int[]{0xDDFFFFFF,0x66DDEFFF,0x18FFFFFF} : new int[]{0x99FFFFFF,0x99FFFFFF},
+                        null,android.graphics.Shader.TileMode.CLAMP));
+                    paint.setAlpha(Math.round(255f*highlightStrength/100f));
+                    canvas.drawRoundRect(inner,Math.max(0f,radius-inset),Math.max(0f,radius-inset),paint);
+                }
+                if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_DRAW phase="+(edgeOnly?"edge":"surface")+
+                    " size="+(int)w+"x"+(int)h+" radius="+radius+" nativeOutline="+nativeOutline+
+                    " tint="+tintMode+" highlight="+highlightEnabled);
+            } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
+        } catch (Throwable t) {
+            if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
+        }
+    }
+    private static void hookFolderIconCanvasFusion(ClassLoader loader) {
+        Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
+        if (c == null) return;
+        try {
+            Method m = c.getDeclaredMethod("dispatchDraw",Canvas.class);
+            m.setAccessible(true);
+            XposedBridge.hookMethod(m,new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam p) {
+                    if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
+                        View v=(View)p.thisObject;
+                        refresh(v);
+                        drawFolderIconFusion(v,(Canvas)p.args[0],false);
+                    }
+                }
+                @Override protected void afterHookedMethod(MethodHookParam p) {
+                    if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas)
+                        drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
+                }
+            });
+            installed++;
+            log("FOLDER_CANVAS_FUSION_HOOK_INSTALLED method="+m.toGenericString());
+        } catch(Throwable t) { failed++; log("FOLDER_CANVAS_FUSION_HOOK_FAILED reason="+t.getClass().getSimpleName()); }
+    }
+
     private static int geometryLogs = 0;
     private static int nativeDrawLogs = 0;
     private static int contourTraceLogs = 0;
@@ -974,7 +1064,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.18 PREVIEW_CANVAS_FUSION_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.19 FOLDER_CANVAS_FUSION_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -984,12 +1074,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V1.9.18: render from the confirmed preview drawBackground entry, not a nonexistent LayerBlurDrawable.draw override.
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
+            hookFolderIconCanvasFusion(p.classLoader);
             hookPreview(p.classLoader);
             traceBlurMethods(p.classLoader);
             hookFolderConditions(p.classLoader);
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.18 PREVIEW_CANVAS_FUSION_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.19 FOLDER_CANVAS_FUSION_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
