@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.7",23);
-        label("背景图层归属诊断：观察原生绘制与高光图层的关系。此版本不保证修复圆角。",14);
+        label("ColorOS Liquid Glass V1.9.8",23);
+        label("原生 Alpha 遮罩实验：色调和高光不再自行绘制圆角，直接跟随原生背景像素边缘。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
         SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
@@ -64,7 +64,7 @@ public final class MainActivity extends Activity {
             .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",25).putInt("probe_mode",0).apply();
             enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(25);probe.setSelection(0);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
-        label("提示：色调现在使用原生背景绘制后的叠色层；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。新增被动诊断原生模糊初始化与调用；不会强制启用 ColorOS 隐藏模糊功能。",13);
+        label("提示：色调现在使用原生背景 Alpha 遮罩；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。新增被动诊断原生模糊初始化与调用；不会强制启用 ColorOS 隐藏模糊功能。",13);
         setContentView(scroll);
     }
 }

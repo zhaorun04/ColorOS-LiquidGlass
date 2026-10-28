@@ -296,55 +296,97 @@ public final class HookEntry implements IXposedHookLoadPackage {
         path.addRoundRect(r, adjusted, Path.Direction.CW);
         return path;
     }
-    private static void drawMaterialOnNativeCanvas(GradientDrawable drawable, Canvas canvas) {
-        if (!glassEnabled || probeMode == 1) return;
-        boolean tint = tintMode != 0 && tintStrength > 0;
-        boolean shine = (highlightEnabled && highlightStrength > 0 && probeMode != 3) || probeMode == 2;
-        if (!tint && !shine) return;
-        Rect bounds = drawable.getBounds();
-        if (bounds == null || bounds.isEmpty()) return;
-        RectF base = new RectF(bounds);
-        if (base.width() < 4 || base.height() < 4) return;
-        ShapeGeometry geometry = getShapeGeometry(drawable, bounds);
-        Path path = shapePath(geometry, 0f);
-        if (tint && probeMode != 2) {
-            Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-            fill.setStyle(Paint.Style.FILL);
-            int c = tintColor();
-            // Overlay opacity is deliberately tied to the slider; no SRC_ATOP filter.
-            int opacity = Math.round(160f * tintStrength / 90f);
-            fill.setColor(Color.argb(opacity,Color.red(c),Color.green(c),Color.blue(c)));
-            canvas.drawPath(path, fill);
-            if (nativeDrawLogs++ < 32) log("GLASS_TINT_APPLIED mode="+tintMode+" strength="+tintStrength+" overlayAlpha="+opacity);
+    // V1.9.8: never approximate the vendor's contour with Path.addRoundRect.
+    // Render the SAME drawable to an offscreen alpha mask, then extract a narrow
+    // inward-facing edge directly from its pixels. Cache by drawable and bounds.
+    private static final ThreadLocal<Boolean> MASK_RENDERING = new ThreadLocal<Boolean>();
+    private static final java.util.Map<Drawable, MaskCache> MASKS =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable, MaskCache>());
+    private static final class MaskCache {
+        final int w, h, alpha, radiusHash;
+        final android.graphics.Bitmap mask, edge;
+        MaskCache(int w,int h,int a,int rh,android.graphics.Bitmap m,android.graphics.Bitmap e){
+            this.w=w;this.h=h;this.alpha=a;this.radiusHash=rh;this.mask=m;this.edge=e;
         }
-        if (shine) {
-            float density = drawable.getCallback() instanceof View ?
-                    ((View)drawable.getCallback()).getResources().getDisplayMetrics().density :
-                    android.content.res.Resources.getSystem().getDisplayMetrics().density;
-            float stroke = Math.max(0.7f, density * 0.55f);
-            float inset = stroke / 2f;
-            RectF strokeRect = new RectF(geometry.rect);
-            strokeRect.inset(inset,inset);
-            if(strokeRect.width() > 4 && strokeRect.height() > 4){
-                Path strokePath = shapePath(geometry, inset);
-                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-                paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeWidth(stroke);
-                int opacity = Math.round(72f * (highlightStrength / 100f) * (highlightStrength / 100f));
-                paint.setColor(probeMode == 2 ? Color.argb(220,255,40,40) : Color.argb(opacity,255,255,255));
-                canvas.drawPath(strokePath, paint);
-                if (nativeDrawLogs++ < 32) log("GLASS_HIGHLIGHT_STRENGTH value="+highlightStrength+" alpha="+opacity+
-                    " mode="+probeMode+" GLASS_CORNER_RADIUS="+drawable.getCornerRadius()+
-                    " GLASS_CORNER_RADII="+java.util.Arrays.toString(drawable.getCornerRadii())+
-                    " bounds="+bounds.toShortString()+" geometrySource="+geometry.source+" inset="+inset+" adjustedRadius="+Math.max(0f,geometry.radii[0]-inset));
+    }
+    private static MaskCache nativeMask(GradientDrawable d) {
+        Rect b=d.getBounds();
+        int w=b.width(),h=b.height();
+        if(w<4||h<4||w>1400||h>1400)return null;
+        int rh=Float.floatToIntBits(d.getCornerRadius()) ^ java.util.Arrays.hashCode(d.getCornerRadii());
+        MaskCache old=MASKS.get(d);
+        if(old!=null && old.w==w && old.h==h && old.alpha==d.getAlpha() && old.radiusHash==rh)return old;
+        android.graphics.Bitmap bitmap=null, edge=null;
+        Rect original=new Rect(b);
+        try {
+            bitmap=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            Canvas c=new Canvas(bitmap);
+            MASK_RENDERING.set(true);
+            d.setBounds(0,0,w,h);
+            d.draw(c);
+            d.setBounds(original);
+            MASK_RENDERING.remove();
+            int[] pixels=new int[w*h];bitmap.getPixels(pixels,0,w,0,0,w,h);
+            // Native alpha is the only shape authority. A 1-2 pixel inner edge
+            // follows all four corners including OEM antialiasing and clipping.
+            int[] edgePixels=new int[w*h];
+            for(int y=1;y<h-1;y++)for(int x=1;x<w-1;x++){
+                int i=y*w+x, center=pixels[i]>>>24;
+                if(center<24)continue;
+                int min=Math.min(Math.min(pixels[i-1]>>>24,pixels[i+1]>>>24),
+                    Math.min(pixels[i-w]>>>24,pixels[i+w]>>>24));
+                int a=Math.max(0,Math.min(center,(center-min)*2));
+                edgePixels[i]=(a<<24)|0x00ffffff;
             }
+            edge=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            edge.setPixels(edgePixels,0,w,0,0,w,h);
+            MaskCache result=new MaskCache(w,h,d.getAlpha(),rh,bitmap,edge);
+            MASKS.put(d,result);
+            if(nativeDrawLogs++<20)log("NATIVE_ALPHA_MASK_READY size="+w+"x"+h+" radiusHash="+rh);
+            return result;
+        }catch(Throwable t){
+            if(nativeDrawLogs++<12)log("NATIVE_ALPHA_MASK_FAILED reason="+t.getClass().getSimpleName());
+            return null;
+        }finally{
+            try{d.setBounds(original);}catch(Throwable ignored){}
+            MASK_RENDERING.remove();
         }
+    }
+    private static void drawMaterialOnNativeCanvas(GradientDrawable drawable, Canvas canvas) {
+        if(Boolean.TRUE.equals(MASK_RENDERING.get()) || !glassEnabled || probeMode==1)return;
+        boolean tint=tintMode!=0 && tintStrength>0 && probeMode!=2;
+        boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
+        if(!tint&&!shine)return;
+        MaskCache cache=nativeMask(drawable);
+        if(cache==null)return;
+        Rect b=drawable.getBounds();
+        canvas.save();
+        canvas.translate(b.left,b.top);
+        if(tint){
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+            int c=tintColor();
+            int a=Math.round(160f*tintStrength/90f);
+            p.setColorFilter(new android.graphics.PorterDuffColorFilter(
+                Color.rgb(Color.red(c),Color.green(c),Color.blue(c)),android.graphics.PorterDuff.Mode.SRC_IN));
+            p.setAlpha(a);
+            canvas.drawBitmap(cache.mask,0,0,p);
+            if(nativeDrawLogs++<24)log("MASK_TINT_APPLIED strength="+tintStrength+" alpha="+a);
+        }
+        if(shine){
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+            p.setAlpha(probeMode==2?220:Math.round(110f*highlightStrength/100f));
+            if(probeMode==2)p.setColorFilter(new android.graphics.PorterDuffColorFilter(Color.RED,android.graphics.PorterDuff.Mode.SRC_IN));
+            canvas.drawBitmap(cache.edge,0,0,p);
+            if(nativeDrawLogs++<24)log("MASK_EDGE_APPLIED strength="+highlightStrength+" probe="+probeMode);
+        }
+        canvas.restore();
     }
     private static void hookNativeDrawableDraw() {
         try {
             Method method = GradientDrawable.class.getDeclaredMethod("draw", Canvas.class);
             XposedBridge.hookMethod(method, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (Boolean.TRUE.equals(MASK_RENDERING.get())) return;
                     if (!(param.thisObject instanceof Drawable) || param.args == null || param.args.length == 0 ||
                             !(param.args[0] instanceof Canvas)) return;
                     Drawable drawable = (Drawable) param.thisObject;
