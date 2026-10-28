@@ -343,6 +343,44 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("REFRACTION_WALLPAPER_OFFSET_HOOK installed=false reason="+t.getClass().getSimpleName());
         }
     }
+    // V1.9.46: metadata-only wallpaper geometry probe. No wallpaper bitmap is decoded.
+    private static final java.util.concurrent.atomic.AtomicBoolean WALLPAPER_GEOMETRY_ONCE =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static volatile int wallpaperImageW = -1, wallpaperImageH = -1;
+    private static volatile int wallpaperDisplayW = -1, wallpaperDisplayH = -1;
+    private static void inspectWallpaperGeometry(View folder) {
+        if (!diagnostics || !WALLPAPER_GEOMETRY_ONCE.compareAndSet(false, true)) return;
+        try {
+            android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(folder.getContext());
+            android.graphics.Point real=new android.graphics.Point();
+            android.view.Display display=folder.getDisplay();
+            if(display!=null) display.getRealSize(real);
+            wallpaperDisplayW=real.x; wallpaperDisplayH=real.y;
+            int desiredW=wm.getDesiredMinimumWidth(), desiredH=wm.getDesiredMinimumHeight();
+            log("REFRACTION_WALLPAPER_GEOMETRY displayReal="+real.x+"x"+real.y
+                +" desiredMinimum="+desiredW+"x"+desiredH
+                +" note=desired_minimum_not_rendered_size");
+            android.os.ParcelFileDescriptor fd=null;
+            try {
+                fd=wm.getWallpaperFile(android.app.WallpaperManager.FLAG_SYSTEM);
+                if(fd==null) {
+                    log("REFRACTION_WALLPAPER_FILE status=NULL bitmapRead=false");
+                } else {
+                    android.graphics.BitmapFactory.Options options=new android.graphics.BitmapFactory.Options();
+                    options.inJustDecodeBounds=true;
+                    android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,options);
+                    wallpaperImageW=options.outWidth;wallpaperImageH=options.outHeight;
+                    log("REFRACTION_WALLPAPER_FILE status=BOUNDS_ONLY image="+wallpaperImageW+"x"+wallpaperImageH
+                        +" bitmapRead=false pixelsRead=false");
+                }
+            } catch (Throwable t) {
+                log("REFRACTION_WALLPAPER_FILE status=UNAVAILABLE reason="+t.getClass().getSimpleName()
+                    +" bitmapRead=false pixelsRead=false");
+            } finally { if(fd!=null)try{fd.close();}catch(Throwable ignored){} }
+            log("REFRACTION_MAPPING_STATUS mode=METADATA_ONLY actualCrop=UNKNOWN actualScale=UNKNOWN"
+                +" compositorTransform=UNKNOWN wallpaperPixels=NOT_SAMPLED");
+        } catch(Throwable t){log("REFRACTION_WALLPAPER_GEOMETRY_ERROR "+t.getClass().getSimpleName());}
+    }
     private static void inspectScrollCoordinates(View folder) {
         if (!diagnostics || refractionMotionLogs >= 48 || !folder.isAttachedToWindow()) return;
         try {
@@ -373,6 +411,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 Object parent=ancestor.getParent();
                 ancestor=parent instanceof View?(View)parent:null;
             }
+            if (refractionMotionLogs < 48 && (refractionMotionLogs % 6 == 0)) {
+                long age=wallpaperOffsetTime==0?-1:now-wallpaperOffsetTime;
+                boolean valid=visible && wallpaperRequestedX>=0f && wallpaperRequestedX<=1f
+                    && wallpaperRequestedY>=0f && wallpaperRequestedY<=1f
+                    && age>=0 && age<=2000 && wallpaperImageW>0 && wallpaperImageH>0
+                    && wallpaperDisplayW>0 && wallpaperDisplayH>0;
+                log("REFRACTION_MAPPING_CANDIDATE id="+Integer.toHexString(System.identityHashCode(folder))
+                    +" visible="+visible+" offsetFresh="+(age>=0&&age<=2000)
+                    +" imageBoundsKnown="+(wallpaperImageW>0&&wallpaperImageH>0)
+                    +" screenRect=["+screen[0]+","+screen[1]+","+(screen[0]+w)+","+(screen[1]+h)+"]"
+                    +" wallpaperRequest=["+wallpaperRequestedX+","+wallpaperRequestedY+"]"
+                    +" metadataReady="+valid+" mappingVerified=false reason=final_crop_scale_unavailable");
+            }
             refractionMotionLogs++;
             log("REFRACTION_SCROLL_SAMPLE id="+Integer.toHexString(System.identityHashCode(folder))
                 +" screen=["+screen[0]+","+screen[1]+"] delta=["+dx+","+dy+"]"
@@ -394,6 +445,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         refresh(v);
         inspectFolderBlur(v);
         inspectSamplingFeasibility(v);
+        inspectWallpaperGeometry(v);
         inspectScrollCoordinates(v);
         traceViewHierarchy(v);
         try {
