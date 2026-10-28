@@ -1559,33 +1559,59 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new Thread(new Runnable(){public void run(){
             android.graphics.Bitmap next=null;
             try {
-                android.net.Uri uri=android.net.Uri.parse("content://top.liquidglass.vector.config/wallpaper_reference");
-                android.os.Bundle info=app.getContentResolver().call(uri,"referenceInfo",null,null);
-                if(info==null || !"OK".equals(info.getString("status")))return;
-                long modified=info.getLong("modified",-1L),length=info.getLong("length",-1L);
-                if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
-                try(android.os.ParcelFileDescriptor fd=app.getContentResolver().openFileDescriptor(uri,"r")) {
-                    if(fd!=null){
-                        android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
-                        opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
-                        next=android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,opts);
+                // Prefer a Launcher-owned reference: ColorOS blocks cold-starting
+                // the module ContentProvider from Launcher at boot.
+                java.io.File local=new java.io.File(app.getFilesDir(),"liquidglass_wallpaper_reference.jpg");
+                long modified=-1L,length=-1L;
+                if(local.isFile() && local.length()>1024L){
+                    modified=local.lastModified();length=local.length();
+                    if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
+                    android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+                    opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+                    next=android.graphics.BitmapFactory.decodeFile(local.getAbsolutePath(),opts);
+                    if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME_SOURCE launcher_private");
+                } else {
+                    // Legacy fallback when the Root helper has not run yet.
+                    android.net.Uri uri=android.net.Uri.parse("content://top.liquidglass.vector.config/wallpaper_reference");
+                    android.os.Bundle info=app.getContentResolver().call(uri,"referenceInfo",null,null);
+                    if(info==null || !"OK".equals(info.getString("status")))return;
+                    modified=info.getLong("modified",-1L);length=info.getLong("length",-1L);
+                    if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
+                    try(android.os.ParcelFileDescriptor fd=app.getContentResolver().openFileDescriptor(uri,"r")){
+                        if(fd!=null){
+                            android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+                            opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+                            next=android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,opts);
+                        }
                     }
+                    if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME_SOURCE provider_fallback");
                 }
+                final long loadedModified=modified,loadedLength=length;
                 if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
                     REFRACTION_FRAME=next;
-                    REFRACTION_FRAME_MODIFIED=modified;
-                    REFRACTION_FRAME_LENGTH=length;
+                    REFRACTION_FRAME_MODIFIED=loadedModified;
+                    REFRACTION_FRAME_LENGTH=loadedLength;
                     // The first reference frame arrives off-thread. Force one draw even
                     // when the icon is stationary and hardware-render-node cached.
                     new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable(){
                         @Override public void run(){
                             synchronized(DYNAMIC_REFRACTION){
                                 for(View trackedView:DYNAMIC_REFRACTION.keySet())
-                                    if(trackedView!=null && trackedView.isAttachedToWindow())trackedView.invalidate();
+                                    if(trackedView!=null && trackedView.isAttachedToWindow()){
+                                        trackedView.invalidate();
+                                        View root=trackedView.getRootView();
+                                        if(root!=null)root.invalidate();
+                                    }
                             }
                             if(view.isAttachedToWindow()){
                                 view.invalidate();
                                 // Parent render-node caches may not redraw the child until scroll.
+                                android.view.ViewParent parent=view.getParent();
+                                int depth=0;
+                                while(parent instanceof View && depth++<12){
+                                    ((View)parent).invalidate();
+                                    parent=parent.getParent();
+                                }
                                 View parentRoot=view.getRootView();
                                 if(parentRoot!=null)parentRoot.invalidate();
                                 view.postInvalidateDelayed(120L);
@@ -2549,6 +2575,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // Settings.Global is local to system_server and does not need
                     // the ColorOS-blocked third-party ContentProvider to start.
                     restoreBootSnapshot(app);
+                    // The first reference may not exist yet; retry on subsequent draws.
+                    REFRACTION_LAST_CHECK=0L;
                     final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
                     // Direct-boot/credential storage can make the config provider
                     // unavailable when Launcher starts. Retry after unlock without

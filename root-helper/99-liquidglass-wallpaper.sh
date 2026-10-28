@@ -6,6 +6,10 @@ SRC=/data/system/users/0/wallpaper_screenshot.png
 DSTDIR=/data/user/0/$PKG/files
 DST=$DSTDIR/wallpaper_reference.jpg
 SIGFILE=$DSTDIR/.wallpaper_reference_source_sig
+# Separate copy owned by Launcher: bypass third-party provider cold-start restrictions.
+LAUNCHERDIR=/data/user/0/com.android.launcher/files
+LAUNCHERDST=$LAUNCHERDIR/liquidglass_wallpaper_reference.jpg
+LAUNCHERSIG=$LAUNCHERDIR/.liquidglass_wallpaper_reference_sig
 TRIGGER=/data/local/tmp/.liquidglass-wallpaper-trigger
 LOG=/data/local/tmp/liquidglass-wallpaper-sync.log
 WATCHER_PID=
@@ -98,7 +102,36 @@ sync_once() {
   fi
   rm -f "$TMP"
 }
+sync_launcher_reference() {
+  [ -f "$SRC" ] && [ -d "$LAUNCHERDIR" ] || return
+  LUID=$(stat -c %u /data/user/0/com.android.launcher 2>/dev/null)
+  case "$LUID" in ''|*[!0-9]*) return;; esac
+  BEFORE=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
+  [ -n "$BEFORE" ] || return
+  PREV=$(cat "$LAUNCHERSIG" 2>/dev/null)
+  [ "$BEFORE" != "$PREV" ] || return
+  sleep 2
+  AFTER=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
+  [ "$BEFORE" = "$AFTER" ] || return
+  TMP="$LAUNCHERDIR/.liquidglass_wallpaper.new.$$"
+  if cp "$SRC" "$TMP" 2>/dev/null && [ "$(stat -c %s "$TMP" 2>/dev/null)" -gt 1024 ]; then
+    FINAL=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
+    if [ "$FINAL" = "$AFTER" ]; then
+      chown "$LUID:$LUID" "$TMP" && chmod 600 "$TMP"
+      restorecon "$TMP" 2>/dev/null
+      if mv -f "$TMP" "$LAUNCHERDST"; then
+        printf '%s' "$FINAL" > "$LAUNCHERSIG"
+        chown "$LUID:$LUID" "$LAUNCHERSIG"
+        chmod 600 "$LAUNCHERSIG"
+        restorecon "$LAUNCHERDST" "$LAUNCHERSIG" 2>/dev/null
+        echo "$(date) launcher reference synced $FINAL" >> "$LOG"
+      fi
+    fi
+  fi
+  rm -f "$TMP"
+}
 sync_config
+sync_launcher_reference
 sync_once
 # Check the event marker every 5s (cheap stat); full source metadata every 300s.
 # No wallpaper image reads unless metadata changed.
@@ -110,8 +143,10 @@ while true; do
   if [ -e "$TRIGGER" ]; then
     rm -f "$TRIGGER"
     sync_once
+    sync_launcher_reference
   elif [ "$TICKS" -ge 60 ]; then
     sync_once
+    sync_launcher_reference
   fi
   [ "$TICKS" -ge 60 ] && TICKS=0
 done
