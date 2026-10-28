@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.29",23);
-        label("保留现有材质；新增仅针对 Launcher 的原生模糊开关隔离实验。默认关闭，异常时立即关闭并重启桌面。",14);
+        label("ColorOS Liquid Glass V1.9.30",23);
+        label("清透液态玻璃整合版：保留 V1.9.28 圆角校正，使用已验证的原生模糊透明度控制。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
         SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
@@ -60,12 +60,27 @@ public final class MainActivity extends Activity {
             public void onNothingSelected(android.widget.AdapterView<?> parent){}
         });
         label("建议在模式 0 测试高光宽度 1～5 与方向性反射。模式 2 的红线是几何对照，不是正式外观。",13);
-        label("V1.9.23：安全撤回无效模糊半径调节；保留原生模糊与玻璃材质融合，继续诊断圆角双线。",14);
+        label("V1.9.28 的圆角校正已保留；本版不改变圆角几何。",14);
         label("原生模糊强度暂不可调：旧滑块误修改圆角半径，已停用。",14);
-        label("建议先尝试 35%～60%。此项调整的是原生半径参数，视觉效果可能非线性；若系统忽略设置，将记录 BLUR_RADIUS_UNSUPPORTED。",13);
-        label("V1.9.29：原生模糊透明度实验",18);
-        toggle("实验：将透明度滑块应用到原生模糊背景（默认关闭）","native_alpha_probe",false);
-        label("仅测试 LayerBlurDrawable.setAlpha() 是否生效，不代表模糊强度可调。若背景异常，关闭此实验并重启桌面。日志 NATIVE_BLUR_API / NATIVE_BLUR_CHILD_API 记录可用方法。",13);
+        label("模糊可见度通过 Drawable Alpha 调节，不等于真正改变模糊半径。",13);
+        label("原生模糊背景透明度",18);
+        final Switch nativeAlpha=toggle("透明度滑块同时控制原生模糊背景","native_alpha_probe",true);
+        label("已在 V1.9.29 真机验证有效。控制模糊层可见度，不是模糊半径。",13);
+        label("一键视觉预设",18);
+        Button clearPreset=new Button(this);clearPreset.setText("应用清透液态玻璃预设");root.addView(clearPreset);
+        clearPreset.setOnClickListener(v->{
+            prefs.edit().putBoolean("enabled",true).putInt("alpha",95)
+                .putInt("tint",0).putInt("tint_strength",20)
+                .putBoolean("highlight",true).putInt("highlight_strength",55)
+                .putInt("highlight_width",2).putBoolean("directional_light",true)
+                .putInt("probe_mode",0).putBoolean("native_alpha_probe",true).apply();
+            enabled.setChecked(true);normal.setProgress(95-40);tint.setSelection(0);
+            tintStrength.setProgress(20);highlight.setChecked(true);
+            highlightStrength.setProgress(55);highlightWidth.setProgress(1);
+            directional.setChecked(true);probe.setSelection(0);nativeAlpha.setChecked(true);
+            Toast.makeText(this,"已应用清透预设；原生模糊开关保持原设置，返回桌面查看效果",Toast.LENGTH_LONG).show();
+        });
+        label("预设：背景不透明度 95/255、原生色调、高光 55/100、宽度 2 px。可继续手动微调。",13);
         label("ColorOS 原生模糊隔离实验（切换后重启桌面生效）",18);
         final Switch nativeExp=toggle("实验 A：仅将材质模糊开关返回值设为 true（风险：桌面异常）","native_blur_experiment_enabled",false);
         // Store the integer mode consumed by the provider, not the checkbox key.
@@ -74,8 +89,8 @@ public final class MainActivity extends Activity {
         Switch diag=toggle("保留诊断日志","diagnostics",true);
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
         reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
-            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).apply();
-            nativeExp.setChecked(false);enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(35);highlightWidth.setProgress(1);directional.setChecked(true);probe.setSelection(0);
+            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).putBoolean("native_alpha_probe",false).apply();
+            nativeExp.setChecked(false);nativeAlpha.setChecked(false);enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(35);highlightWidth.setProgress(1);directional.setChecked(true);probe.setSelection(0);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
         label("提示：色调现在使用原生背景 Alpha 遮罩；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。开启诊断日志后，返回桌面观察文件夹并导出 Vector 日志，搜索 BLUR_PROBE 与 NATIVE_BLUR_CALL。探测不会主动启用模糊。",13);
         setContentView(scroll);

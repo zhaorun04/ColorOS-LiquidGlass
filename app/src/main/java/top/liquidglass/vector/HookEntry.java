@@ -206,7 +206,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                 }catch(Throwable t){log("NATIVE_BLUR_API_ERROR "+t.getClass().getSimpleName());}
             }
-            // Experimental alpha is opt-in. It does not change blur radius.
+            // Verified native blur drawable alpha control. This does not change blur radius.
             int alpha=isBlur ? (glassEnabled && nativeAlphaProbe ? requested : original) : (glassEnabled?requested:original);
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
             // V1.9.4 tint is painted directly on the native Canvas after background.draw.
