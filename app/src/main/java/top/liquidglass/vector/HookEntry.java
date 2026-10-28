@@ -312,6 +312,43 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile float wallpaperRequestedX = Float.NaN;
     private static volatile float wallpaperRequestedY = Float.NaN;
     private static volatile long wallpaperOffsetTime = 0L;
+    // A stationary wallpaper request remains the last known state; age alone does not invalidate it.
+    // It remains a REQUEST, never a verified compositor transform.
+    private static volatile long wallpaperOffsetRevision = 0L;
+    private static volatile long wallpaperLastMotionTime = 0L;
+    private static volatile boolean wallpaperOffsetMoving = false;
+    private static volatile int wallpaperOffsetViewportW = -1, wallpaperOffsetViewportH = -1;
+    private static volatile int wallpaperOffsetWallpaperId = -1;
+    private static int wallpaperStateLogs = 0;
+    private static final long WALLPAPER_SETTLE_MS = 650L;
+    private static String wallpaperRequestState(long now) {
+        if (wallpaperOffsetTime == 0L || !Float.isFinite(wallpaperRequestedX)
+            || !Float.isFinite(wallpaperRequestedY)
+            || wallpaperRequestedX < 0f || wallpaperRequestedX > 1f
+            || wallpaperRequestedY < 0f || wallpaperRequestedY > 1f) return "UNKNOWN";
+        return now - wallpaperLastMotionTime < WALLPAPER_SETTLE_MS ? "MOVING" : "SETTLED";
+    }
+    private static void invalidateWallpaperRequest(String reason) {
+        wallpaperOffsetTime = 0L;
+        wallpaperRequestedX = Float.NaN;
+        wallpaperRequestedY = Float.NaN;
+        wallpaperOffsetRevision++;
+        if (diagnostics && wallpaperStateLogs++ < 28)
+            log("REFRACTION_OFFSET_STATE invalidated="+reason+" state=UNKNOWN revision="+wallpaperOffsetRevision);
+    }
+    private static void validateWallpaperRequestContext(View folder, int sw, int sh) {
+        if (wallpaperOffsetViewportW != -1 && (wallpaperOffsetViewportW != sw || wallpaperOffsetViewportH != sh))
+            invalidateWallpaperRequest("display_size_changed");
+        wallpaperOffsetViewportW = sw;
+        wallpaperOffsetViewportH = sh;
+        try {
+            android.app.WallpaperManager wm = android.app.WallpaperManager.getInstance(folder.getContext());
+            int id = wm.getWallpaperId(android.app.WallpaperManager.FLAG_SYSTEM);
+            if (wallpaperOffsetWallpaperId != -1 && id != wallpaperOffsetWallpaperId)
+                invalidateWallpaperRequest("wallpaper_id_changed");
+            wallpaperOffsetWallpaperId = id;
+        } catch (Throwable ignored) { /* not all launchers can read wallpaper ID */ }
+    }
     private static int wallpaperOffsetLogs = 0;
     private static final java.util.Map<View, long[]> REFRACTION_MOTION =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, long[]>());
@@ -326,8 +363,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     @Override protected void beforeHookedMethod(MethodHookParam p) {
                         if (!(p.args[1] instanceof Float) || !(p.args[2] instanceof Float)) return;
                         float x=(Float)p.args[1], y=(Float)p.args[2];
+                        long now=android.os.SystemClock.uptimeMillis();
+                        boolean changed=Float.isNaN(wallpaperRequestedX) || Float.isNaN(wallpaperRequestedY)
+                            || Math.abs(x-wallpaperRequestedX)>0.0001f || Math.abs(y-wallpaperRequestedY)>0.0001f;
                         wallpaperRequestedX=x; wallpaperRequestedY=y;
-                        wallpaperOffsetTime=android.os.SystemClock.uptimeMillis();
+                        wallpaperOffsetTime=now;
+                        if (changed) { wallpaperLastMotionTime=now; wallpaperOffsetRevision++; }
+                        wallpaperOffsetMoving=changed;
                         if (diagnostics && wallpaperOffsetLogs++ < 40)
                             log("REFRACTION_WALLPAPER_OFFSET_REQUEST x="+x+" y="+y
                                 +" timestamp="+wallpaperOffsetTime+" source=WallpaperManager.setWallpaperOffsets");
@@ -455,8 +497,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // The request is process-local and may be stale when a folder first appears.
         long age = wallpaperOffsetTime == 0 ? -1 : now - wallpaperOffsetTime;
         float offset = wallpaperRequestedX;
-        if (age < 0 || age > 2000 || Float.isNaN(offset) || offset < 0f || offset > 1f) {
-            if (mappingModelLogs++ < 32) log("REFRACTION_MAPPING_MODELS status=SKIPPED reason=offset_stale_or_invalid ageMs="+age
+        if ("UNKNOWN".equals(wallpaperRequestState(now))) {
+            if (mappingModelLogs++ < 32) log("REFRACTION_MAPPING_MODELS status=SKIPPED reason=offset_unknown_or_invalid ageMs="+age
                 +" id="+Integer.toHexString(System.identityHashCode(folder)));
             return;
         }
@@ -468,7 +510,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         mappingModelLogs++;
         log("REFRACTION_MAPPING_MODELS status=HYPOTHETICAL id="+Integer.toHexString(System.identityHashCode(folder))
             +" screenPoint=["+fmt(sx)+","+fmt(sy)+"] wallpaperOffsetRequest="+fmt(offset)
-            +" offsetAgeMs="+age
+            +" offsetAgeMs="+age+" requestState="+wallpaperRequestState(now)+" revision="+wallpaperOffsetRevision
             +" "+mappingHypothesis("CENTER_COVER",coverScale,offset,sx,sy,iw,ih,dw,dh)
             +" "+mappingHypothesis("DESIRED_WIDTH",desiredScale,offset,sx,sy,iw,ih,dw,dh)
             +" compositorCrop=UNKNOWN compositorScale=UNKNOWN verified=false pixelsRead=false rendering=false");
@@ -482,6 +524,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if (w<=0 || h<=0) return;
             android.util.DisplayMetrics dm=folder.getResources().getDisplayMetrics();
             int sw=dm.widthPixels, sh=dm.heightPixels;
+            validateWallpaperRequestContext(folder,sw,sh);
             boolean visible=screen[0]<sw && screen[1]<sh && screen[0]+w>0 && screen[1]+h>0;
             boolean fullyVisible=screen[0]>=0 && screen[1]>=0 && screen[0]+w<=sw && screen[1]+h<=sh;
             long[] prev;
@@ -507,14 +550,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 long age=wallpaperOffsetTime==0?-1:now-wallpaperOffsetTime;
                 boolean valid=visible && wallpaperRequestedX>=0f && wallpaperRequestedX<=1f
                     && wallpaperRequestedY>=0f && wallpaperRequestedY<=1f
-                    && age>=0 && age<=2000 && wallpaperImageW>0 && wallpaperImageH>0
+                    && !"UNKNOWN".equals(wallpaperRequestState(now)) && wallpaperImageW>0 && wallpaperImageH>0
                     && wallpaperDisplayW>0 && wallpaperDisplayH>0;
                 log("REFRACTION_MAPPING_CANDIDATE id="+Integer.toHexString(System.identityHashCode(folder))
-                    +" visible="+visible+" offsetFresh="+(age>=0&&age<=2000)
+                    +" visible="+visible+" offsetState="+wallpaperRequestState(now)+" offsetKnown="+(!"UNKNOWN".equals(wallpaperRequestState(now)))
                     +" imageBoundsKnown="+(wallpaperImageW>0&&wallpaperImageH>0)
                     +" screenRect=["+screen[0]+","+screen[1]+","+(screen[0]+w)+","+(screen[1]+h)+"]"
                     +" wallpaperRequest=["+wallpaperRequestedX+","+wallpaperRequestedY+"]"
                     +" metadataReady="+valid+" mappingVerified=false reason=final_crop_scale_unavailable");
+            }
+            if (wallpaperStateLogs < 28 && (wallpaperStateLogs == 0 || refractionMotionLogs % 6 == 0)) {
+                wallpaperStateLogs++;
+                log("REFRACTION_OFFSET_STATE state="+wallpaperRequestState(now)
+                    +" revision="+wallpaperOffsetRevision
+                    +" lastRequestAgeMs="+(wallpaperOffsetTime==0?-1:now-wallpaperOffsetTime)
+                    +" lastMotionAgeMs="+(wallpaperLastMotionTime==0?-1:now-wallpaperLastMotionTime)
+                    +" request=["+wallpaperRequestedX+","+wallpaperRequestedY+"] verified=false");
             }
             inspectMappingModels(folder,screen[0],screen[1],w,h,sw,sh,visible,now);
             refractionMotionLogs++;
@@ -524,6 +575,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 +" visible="+visible+" fullyVisible="+fullyVisible
                 +" wallpaperRequest=["+wallpaperRequestedX+","+wallpaperRequestedY+"]"
                 +" wallpaperRequestAgeMs="+(wallpaperOffsetTime==0?-1:now-wallpaperOffsetTime)
+                +" offsetState="+wallpaperRequestState(now)+" offsetRevision="+wallpaperOffsetRevision
                 +" ancestorScroll="+chain);
             if(refractionMotionLogs==1)
                 log("REFRACTION_COORDINATE_LIMIT wallpaperOffset=REQUEST_ONLY"
