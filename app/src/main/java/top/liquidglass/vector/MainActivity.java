@@ -12,7 +12,7 @@ public final class MainActivity extends Activity {
         text.setTextSize(17f);
         text.setTextColor(Color.BLACK);
         text.setPadding(36, 50, 36, 36);
-        text.setText("ColorOS Liquid Glass V1.0\n\nVector compatibility test only.\n\nEnable this module in Vector, select SystemUI and OplusLauncher, reboot, then check Vector logs for ColorOSLiquidGlass / HOOK_LOADED.\n\nNo visual changes are applied by this build.");
+        text.setText("ColorOS Liquid Glass V1.2\n\nRead-only view discovery for ColorOS 15.\n\nEnable in Vector for SystemUI and Launcher, reboot, and export Vector logs containing ColorOSLiquidGlass.\n\nNo UI modifications are applied.");
         setContentView(text);
     }
 }
