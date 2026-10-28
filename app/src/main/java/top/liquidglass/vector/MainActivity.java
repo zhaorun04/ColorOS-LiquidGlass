@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.61",23);
+        label("ColorOS Liquid Glass V1.9.62",23);
         label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
@@ -62,7 +62,7 @@ public final class MainActivity extends Activity {
         label("建议在模式 0 测试高光宽度 1～5 与方向性反射。模式 2 的红线是几何对照，不是正式外观。",13);
         label("V1.9.28 的圆角校正已保留；本版不改变圆角几何。",14);
         label("原生模糊强度暂不可调：旧滑块误修改圆角半径，已停用。",14);
-        label("V1.9.61：保留V1.9.45光学外观；保留动态映射诊断；详细诊断开启时仅一次尝试读取壁纸原图3个像素，验证读取能力；不绘制、不保存图像、不启用真实折射。",13);
+        label("V1.9.62：保留V1.9.45光学外观；保留动态映射诊断；详细诊断开启时仅一次尝试读取壁纸原图3个像素，验证读取能力；不绘制、不保存图像、不启用真实折射。",13);
         label("模糊可见度通过 Drawable Alpha 调节，不等于真正改变模糊半径。",13);
         label("原生模糊背景透明度",18);
         final Switch nativeAlpha=toggle("透明度滑块同时控制原生模糊背景","native_alpha_probe",true);
@@ -140,7 +140,7 @@ public final class MainActivity extends Activity {
         label("实验仅修改 Launcher 内部一个已确认的布尔访问器，不修改其他模糊条件。出现闪退或显示异常时关闭此开关并重启桌面。",13);
         Switch diag=toggle("详细诊断日志（排查时开启）","diagnostics",false);
         toggle("旧版文件夹内对照图（建议关闭）","wallpaper_compare",false);
-        label("V1.9.61 建议关闭旧版对照，使用独立校准页面；不会遮挡桌面文件夹图标。",13);
+        label("V1.9.62 建议关闭旧版对照，使用独立校准页面；不会遮挡桌面文件夹图标。",13);
         Button calibrate=new Button(this);calibrate.setText("打开独立壁纸坐标校准页面（实验）");root.addView(calibrate);
         calibrate.setOnClickListener(v->startActivity(new android.content.Intent(this,WallpaperCalibrationActivity.class)));
         label("校准页面在壁纸前显示透明背景和两个原图采样块，可调整采样屏幕位置、壁纸偏移与候选模型。系统可能对独立 Activity 使用不同的壁纸偏移；因此只能目视比较，不能自动验证 Launcher 实际变换。",13);

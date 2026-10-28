@@ -388,7 +388,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 log("REFRACTION_DYNAMIC_FOLDER_ERROR " + t.getClass().getSimpleName());
         }
     }
-    // V1.9.61: diagnostic-only gate. Never enables real refraction or reads framebuffer pixels.
+    // V1.9.62: read-only settled geometry snapshots. No framebuffer capture.
+    private static final java.util.Map<View, String> SNAPSHOT_LAST =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
+    private static final java.util.concurrent.atomic.AtomicInteger SNAPSHOT_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    // V1.9.62: diagnostic-only gate. Never enables real refraction or reads framebuffer pixels.
     private static final java.util.Map<View, String> GATE_LAST =
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
     private static final java.util.concurrent.atomic.AtomicInteger GATE_LOGS =
@@ -406,6 +411,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             long left = loc[0], top = loc[1], right = left + w, bottom = top + h;
             long clipL = Math.max(0L, left), clipT = Math.max(0L, top);
             long clipR = Math.min((long)sw, right), clipB = Math.min((long)sh, bottom);
+            // Normalize empty intersections: never publish inverted clip coordinates.
+            if (clipR <= clipL || clipB <= clipT) {
+                clipL = 0L; clipT = 0L; clipR = 0L; clipB = 0L;
+            }
             boolean attached = folder.isAttachedToWindow();
             boolean nonEmpty = w > 0 && h > 0 && clipR > clipL && clipB > clipT;
             boolean visible = attached && folder.isShown() && folder.getAlpha() > 0f && nonEmpty;
@@ -425,6 +434,26 @@ public final class HookEntry implements IXposedHookLoadPackage {
             synchronized (GATE_LAST) {
                 if (key.equals(GATE_LAST.get(folder))) return;
                 GATE_LAST.put(folder, key);
+            }
+            if (metadataReady && SNAPSHOT_LOGS.get() < 48) {
+                String snapshotKey = left + ":" + top + ":" + w + ":" + h + ":"
+                    + wallpaperOffsetRevision + ":" + wallpaperRequestedX + ":" + wallpaperRequestedY;
+                boolean changed;
+                synchronized (SNAPSHOT_LAST) {
+                    changed = !snapshotKey.equals(SNAPSHOT_LAST.get(folder));
+                    if (changed) SNAPSHOT_LAST.put(folder, snapshotKey);
+                }
+                if (changed && SNAPSHOT_LOGS.incrementAndGet() <= 48) {
+                    log("REFRACTION_STABLE_SNAPSHOT id="
+                        + Integer.toHexString(System.identityHashCode(folder))
+                        + " phase=" + phase + " screenRect=[" + left + "," + top + "," + right + "," + bottom + "]"
+                        + " viewport=" + sw + "x" + sh
+                        + " wallpaperRequest=[" + wallpaperRequestedX + "," + wallpaperRequestedY + "]"
+                        + " requestRevision=" + wallpaperOffsetRevision
+                        + " requestAgeMs=" + (now - wallpaperOffsetTime)
+                        + " cropTransform=UNKNOWN compositorFrame=UNAVAILABLE"
+                        + " mappingVerified=false samplingAllowed=false");
+                }
             }
             if (GATE_LOGS.incrementAndGet() > 120) return;
             log("REFRACTION_SAMPLING_GATE phase=" + phase
