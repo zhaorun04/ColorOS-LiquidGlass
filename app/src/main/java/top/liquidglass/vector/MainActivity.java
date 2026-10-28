@@ -12,7 +12,7 @@ public final class MainActivity extends Activity {
         text.setTextSize(17f);
         text.setTextColor(Color.BLACK);
         text.setPadding(36, 50, 36, 36);
-        text.setText("ColorOS Liquid Glass V1.3\n\nRuntime view probe for ColorOS 15.\n\nEnable in Vector for SystemUI and Launcher, reboot, and export Vector logs containing ColorOSLiquidGlass.\n\nDefault: diagnostics only. Folder glass is an opt-in source-code experiment.");
+        text.setText("ColorOS Liquid Glass V1.5\n\nFolder preview background inspection and opt-in highlight border.\n\nDefault OFF. Enable via root shell: settings put global coloros_liquidglass_folder_glass 1\nDisable: settings put global coloros_liquidglass_folder_glass 0\n\nThis is a border experiment, not true background blur.");
         setContentView(text);
     }
 }
