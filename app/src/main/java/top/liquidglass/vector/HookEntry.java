@@ -455,7 +455,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         + " mappingVerified=false samplingAllowed=false");
                 }
             }
-            if (metadataReady) inspectIndependentReferenceCandidates(folder, left, top, w, h, sw, sh, phase);
+            if (metadataReady) {
+                inspectIndependentReferenceCandidates(folder, left, top, w, h, sw, sh, phase);
+                inspectDisplayedWallpaperCoordinates(folder, left, top, w, h, sw, sh, phase);
+            }
             if (GATE_LOGS.incrementAndGet() > 120) return;
             log("REFRACTION_SAMPLING_GATE phase=" + phase
                 + " id=" + Integer.toHexString(System.identityHashCode(folder))
@@ -471,6 +474,44 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if (GATE_LOGS.incrementAndGet() <= 120)
                 log("REFRACTION_SAMPLING_GATE_ERROR " + t.getClass().getSimpleName());
         }
+    }
+    // V1.9.65: screen-space correspondence is independent of WallpaperManager request offsets.
+    // These points identify WHERE pixels are displayed, not WHICH source image texels produced them.
+    // Do not read the launcher framebuffer, perform screenshot capture, or turn on refraction here.
+    private static final java.util.Map<View, String> DISPLAY_COORD_LAST =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
+    private static final java.util.concurrent.atomic.AtomicInteger DISPLAY_COORD_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    private static void inspectDisplayedWallpaperCoordinates(View folder, long left, long top,
+            int w, int h, int sw, int sh, String phase) {
+        if (!diagnostics || DISPLAY_COORD_LOGS.get() >= 48 || sw <= 0 || sh <= 0) return;
+        // Wallpaper is user-observed stationary. This is a test hypothesis, not an API guarantee.
+        String key = left + ":" + top + ":" + w + ":" + h;
+        synchronized (DISPLAY_COORD_LAST) {
+            if (key.equals(DISPLAY_COORD_LAST.get(folder))) return;
+            DISPLAY_COORD_LAST.put(folder, key);
+        }
+        if (DISPLAY_COORD_LOGS.incrementAndGet() > 48) return;
+        final float[][] pts = {{0f,0f},{.5f,.5f},{1f,1f}};
+        for (int i = 0; i < pts.length; i++) {
+            float sx = left + w * pts[i][0];
+            float sy = top + h * pts[i][1];
+            log("REFRACTION_DISPLAY_COORD phase=" + phase
+                + " folder=" + Integer.toHexString(System.identityHashCode(folder))
+                + " point=" + (i+1) + " screenPx=[" + fmt(sx) + "," + fmt(sy) + "]"
+                + " screenUV=[" + fmt(sx/sw) + "," + fmt(sy/sh) + "]"
+                + " viewport=" + sw + "x" + sh
+                + " wallpaperMotion=USER_REPORTED_STATIONARY"
+                + " offsetRequestIgnoredForDisplayCoordinates=true"
+                + " independentRenderedWallpaperPixels=UNAVAILABLE"
+                + " compositorTextureTransform=UNKNOWN mappingVerified=false samplingAllowed=false");
+        }
+        log("REFRACTION_DISPLAY_REFERENCE status=EXTERNAL_REFERENCE_REQUIRED"
+            + " coordinateSpace=DISPLAY_PIXELS"
+            + " referenceKind=UNOBSTRUCTED_WALLPAPER_SCREENSHOT"
+            + " captureAttempted=false screenshotAttempted=false"
+            + " systemUiWallpaperSurfaceRead=false sourceImageCropAssumed=false"
+            + " fixedWallpaper=USER_OBSERVATION_ONLY mappingVerified=false samplingAllowed=false");
     }
     // V1.9.64: audit source provenance; candidate geometry is not a measured compositor transform.
     private static final java.util.Map<View, String> REFERENCE_CANDIDATE_LAST =
@@ -734,7 +775,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         new java.util.concurrent.atomic.AtomicBoolean(false);
     private static void inspectWallpaperReferenceFeasibility(View folder) {
         if (!diagnostics || !WALLPAPER_REFERENCE_ONCE.compareAndSet(false, true)) return;
-        log("REFRACTION_REFERENCE_PROBE version=1.9.64 mode=READ_ONLY captureAttempted=false");
+        log("REFRACTION_REFERENCE_PROBE version=1.9.65 mode=READ_ONLY captureAttempted=false");
         try {
             android.content.Context ctx=folder.getContext();
             android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(ctx);
