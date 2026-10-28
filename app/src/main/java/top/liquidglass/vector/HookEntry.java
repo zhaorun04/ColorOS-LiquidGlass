@@ -388,6 +388,60 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 log("REFRACTION_DYNAMIC_FOLDER_ERROR " + t.getClass().getSimpleName());
         }
     }
+    // V1.9.61: diagnostic-only gate. Never enables real refraction or reads framebuffer pixels.
+    private static final java.util.Map<View, String> GATE_LAST =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
+    private static final java.util.concurrent.atomic.AtomicInteger GATE_LOGS =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+    private static void inspectSamplingGate(View folder, String phase) {
+        if (!diagnostics || folder == null || GATE_LOGS.get() >= 120) return;
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            int[] loc = new int[2]; folder.getLocationOnScreen(loc);
+            int w = folder.getWidth(), h = folder.getHeight();
+            android.util.DisplayMetrics dm = folder.getResources().getDisplayMetrics();
+            int sw = dm.widthPixels, sh = dm.heightPixels;
+            if (sw <= 0 || sh <= 0) return;
+            validateWallpaperRequestContext(folder, sw, sh);
+            long left = loc[0], top = loc[1], right = left + w, bottom = top + h;
+            long clipL = Math.max(0L, left), clipT = Math.max(0L, top);
+            long clipR = Math.min((long)sw, right), clipB = Math.min((long)sh, bottom);
+            boolean attached = folder.isAttachedToWindow();
+            boolean nonEmpty = w > 0 && h > 0 && clipR > clipL && clipB > clipT;
+            boolean visible = attached && folder.isShown() && folder.getAlpha() > 0f && nonEmpty;
+            boolean fullyInside = nonEmpty && left >= 0 && top >= 0 && right <= sw && bottom <= sh;
+            String offset = wallpaperRequestState(now);
+            boolean offsetStable = "SETTLED".equals(offset);
+            boolean requestValid = Float.isFinite(wallpaperRequestedX) && Float.isFinite(wallpaperRequestedY)
+                && wallpaperRequestedX >= 0f && wallpaperRequestedX <= 1f
+                && wallpaperRequestedY >= 0f && wallpaperRequestedY <= 1f;
+            // This is a metadata readiness gate, NOT permission to sample wallpaper pixels.
+            boolean metadataReady = visible && fullyInside && offsetStable && requestValid;
+            String reason = !attached ? "DETACHED" : !visible ? "NOT_VISIBLE_OR_OUTSIDE"
+                : !fullyInside ? "PARTIALLY_CLIPPED" : !requestValid ? "OFFSET_UNKNOWN"
+                : !offsetStable ? "OFFSET_MOVING" : "METADATA_ONLY_CROP_UNVERIFIED";
+            String key = phase + ":" + reason + ":" + wallpaperOffsetRevision
+                + ":" + left + ":" + top + ":" + w + ":" + h;
+            synchronized (GATE_LAST) {
+                if (key.equals(GATE_LAST.get(folder))) return;
+                GATE_LAST.put(folder, key);
+            }
+            if (GATE_LOGS.incrementAndGet() > 120) return;
+            log("REFRACTION_SAMPLING_GATE phase=" + phase
+                + " id=" + Integer.toHexString(System.identityHashCode(folder))
+                + " screenRect=[" + left + "," + top + "," + right + "," + bottom + "]"
+                + " clipRect=[" + clipL + "," + clipT + "," + clipR + "," + clipB + "]"
+                + " viewport=" + sw + "x" + sh + " attached=" + attached
+                + " viewShown=" + folder.isShown() + " visible=" + visible
+                + " fullyInside=" + fullyInside + " offsetState=" + offset
+                + " request=[" + wallpaperRequestedX + "," + wallpaperRequestedY + "]"
+                + " revision=" + wallpaperOffsetRevision + " metadataReady=" + metadataReady
+                + " samplingAllowed=false mappingVerified=false reason=" + reason);
+        } catch (Throwable t) {
+            if (GATE_LOGS.incrementAndGet() <= 120)
+                log("REFRACTION_SAMPLING_GATE_ERROR " + t.getClass().getSimpleName());
+        }
+    }
     private static int wallpaperOffsetLogs = 0;
     private static final java.util.Map<View, long[]> REFRACTION_MOTION =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, long[]>());
@@ -401,7 +455,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 final String phase = name.equals("onAttachedToWindow") ? "ATTACHED" : "DETACHING";
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam p) {
-                        if (p.thisObject instanceof View) trackFolderPhase((View)p.thisObject, phase);
+                        if (p.thisObject instanceof View) {
+                            trackFolderPhase((View)p.thisObject, phase);
+                            inspectSamplingGate((View)p.thisObject, phase);
+                        }
                     }
                 });
                 installed++;
@@ -897,6 +954,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         inspectWallpaperReferenceFeasibility(v);
         inspectScrollCoordinates(v);
         trackFolderPhase(v, "DRAW");
+        inspectSamplingGate(v, "DRAW");
         traceViewHierarchy(v);
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
