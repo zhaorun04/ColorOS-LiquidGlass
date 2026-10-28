@@ -79,6 +79,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             try {
                 Object preview = field(v.getClass(), "mBackground").get(v);
                 log("PREVIEW_BACKGROUND class=" + (preview == null ? "null" : preview.getClass().getName()));
+                inspectBlurState(preview,"inspect");
                 if (preview != null) {
                     for (Class<?> k=preview.getClass();k!=null;k=k.getSuperclass()) {
                         for (Field f:k.getDeclaredFields()) {
@@ -145,6 +146,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static void applyNativeBackground(View v) {
         refresh(v);
+        inspectFolderBlur(v);
         traceViewHierarchy(v);
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
@@ -480,6 +482,43 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("HOOK_FAILED class=" + c.getName() + " method=" + methodName + " reason=" + t.getClass().getName() + " message=" + t.getMessage());
         }
     }
+    // V1.9.11: passive only. Never call blur initialization, mutate flags, or blur icon views.
+    private static int blurStateLogs=0;
+    private static final Set<Object> BLUR_SEEN=Collections.newSetFromMap(new WeakHashMap<Object,Boolean>());
+    private static String safeValue(Object value) {
+        if(value==null)return "null";
+        if(value instanceof Boolean || value instanceof Number || value instanceof String) {
+            String s=String.valueOf(value);return s.length()>100?s.substring(0,100):s;
+        }
+        if(value instanceof Drawable)return drawableTag(value)+" alpha="+((Drawable)value).getAlpha();
+        return drawableTag(value);
+    }
+    private static void inspectBlurState(Object preview, String source) {
+        if(!diagnostics || preview==null)return;
+        synchronized(BLUR_SEEN){if(!BLUR_SEEN.add(preview))return;}
+        if(blurStateLogs++>16)return;
+        log("BLUR_PROBE_INSTANCE source="+source+" class="+preview.getClass().getName());
+        int count=0;
+        for(Class<?> k=preview.getClass();k!=null && count<32;k=k.getSuperclass()){
+            for(Field f:k.getDeclaredFields()){
+                String n=f.getName().toLowerCase(java.util.Locale.ROOT);
+                if(!(n.contains("blur")||n.contains("background")||n.contains("drawable")||n.contains("support")))continue;
+                if(java.lang.reflect.Modifier.isStatic(f.getModifiers()))continue;
+                try{f.setAccessible(true);log("BLUR_PROBE_FIELD "+f.getName()+" type="+f.getType().getName()+" value="+safeValue(f.get(preview)));}
+                catch(Throwable e){log("BLUR_PROBE_FIELD_ERROR "+f.getName()+" "+e.getClass().getSimpleName());}
+                if(++count>=32)break;
+            }
+        }
+    }
+    private static void inspectFolderBlur(View v) {
+        if(!diagnostics || blurStateLogs>24)return;
+        try{
+            Object flag=field(v.getClass(),"mIsSupportNewBlurLocal").get(v);
+            log("BLUR_PROBE_FOLDER class="+v.getClass().getName()+" localSupport="+safeValue(flag)+" size="+v.getWidth()+"x"+v.getHeight());
+            Object preview=field(v.getClass(),"mBackground").get(v);
+            inspectBlurState(preview,"FolderIcon");
+        }catch(Throwable e){if(blurStateLogs++<8)log("BLUR_PROBE_FOLDER_ERROR="+e.getClass().getSimpleName());}
+    }
     private static void hookPreview(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.OplusPreviewBackground", loader);
         if (c == null) return;
@@ -489,7 +528,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     || ("getBgDrawable".equals(name) && m.getParameterTypes().length == 0)
                     || ("getBlurProp".equals(name) && m.getParameterTypes().length == 0)
                     || ("initBlurDrawable".equals(name))
-                    || ("isBgSupportNewBlur".equals(name));
+                    || ("isBgSupportNewBlur".equals(name))
+                    || (name.toLowerCase(java.util.Locale.ROOT).contains("blur") && m.getParameterTypes().length<=3);
             if (!target) continue;
             try {
                 m.setAccessible(true);
@@ -525,9 +565,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                     log("BG_DRAWABLE_RUNTIME result=" + (result == null ? "null" : result.getClass().getName())
                                             + (result instanceof Drawable ? " alpha=" + ((Drawable)result).getAlpha() : ""));
                                 }
-                            } else if (blurCalls++ < 24) {
+                            } else if (blurCalls++ < 48) {
                                 Object result = param.getResult();
-                                log("NATIVE_BLUR_CALL method="+methodName+" signature="+((Method)param.method).toGenericString()+" result="+(result==null?"null":String.valueOf(result))+" argCount="+(param.args==null?0:param.args.length));
+                                StringBuilder args=new StringBuilder();
+                                if(param.args!=null)for(Object arg:param.args)args.append(" ").append(safeValue(arg));
+                                log("NATIVE_BLUR_CALL method="+methodName+" signature="+((Method)param.method).toGenericString()+" result="+safeValue(result)+" args="+args);
+                                inspectBlurState(param.thisObject,"method:"+methodName);
                             }
                         } catch (Throwable t) { log("BG_RUNTIME_ERROR=" + t.getClass().getSimpleName()); }
                         finally {
@@ -547,7 +590,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.7 LAYER_ATTRIBUTION_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.11 NATIVE_BLUR_PASSIVE_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -558,6 +601,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9.7 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.11 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
