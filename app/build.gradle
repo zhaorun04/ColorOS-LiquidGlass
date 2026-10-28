@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 1966
-        versionName '1.9.68-dynamic-sampling-performance'
+        versionName '1.9.69-smooth-refraction-experiment'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

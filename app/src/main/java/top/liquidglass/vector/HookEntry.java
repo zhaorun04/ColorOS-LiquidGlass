@@ -1637,19 +1637,25 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try {
             state.clip.reset();state.clip.addRoundRect(rect,radius,radius,Path.Direction.CW);
             canvas.clipPath(state.clip);
-            // Fewer bands and reused objects keep per-frame allocation near zero.
-            final int bands=12;
-            float band=rect.width()/bands;
+            // V1.9.69: smaller, overlapping sampling slices to reduce visible stair-step
+            // artifacts. A single cached BitmapShader is reused; no per-frame bitmap decode.
+            // This is a transitional approximation, not a continuous optical warp shader.
+            final int bands=48;
+            final float band=rect.width()/bands;
             for(int i=0;i<bands;i++){
-                float x0=rect.left+i*band,x1=(i==bands-1?rect.right:x0+band+0.5f);
-                float nx=(i+0.5f)/bands;
-                float distance=Math.min(nx,1f-nx)*2f;
-                float displacement=(float)Math.pow(1f-distance,2.4f)*9f;
-                float dx=nx<0.5f?displacement:-displacement;
-                state.shaderMatrix.reset();state.shaderMatrix.setTranslate(-left+dx,-top);
+                final float x0=rect.left+i*band;
+                final float x1=(i==bands-1?rect.right:Math.min(rect.right,x0+band+0.75f));
+                final float nx=(i+0.5f)/bands;
+                final float edge=1f-2f*Math.min(nx,1f-nx);
+                // Cubic ease-out avoids abrupt transitions in the central region.
+                final float envelope=edge*edge*(3f-2f*edge);
+                final float dx=(nx<0.5f?1f:-1f)*envelope*6.0f;
+                state.shaderMatrix.reset();
+                state.shaderMatrix.setTranslate(-left+dx,-top);
                 state.shader.setLocalMatrix(state.shaderMatrix);
                 state.samplePaint.setShader(state.shader);
-                state.samplePaint.setAlpha(Math.round(170f*(float)Math.pow(1f-distance,2.1f)));
+                // Reduce overdraw/striping: low-opacity edge refraction, transparent center.
+                state.samplePaint.setAlpha(Math.round(112f*envelope));
                 canvas.drawRect(x0,rect.top,x1,rect.bottom,state.samplePaint);
             }
             state.samplePaint.setShader(null);
