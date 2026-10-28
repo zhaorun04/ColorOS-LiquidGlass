@@ -836,7 +836,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     log("NATIVE_BLUR_HOOK_INSTALLED "+signature);
                 } catch(Throwable t) {
                     failed++;
-                    log("NATIVE_BLUR_HOOK_FAILED "+signature+" reason="+t.getClass().getSimpleName());
+                    log("NATIVE_BLUR_HOOK_FAILED "+method.toGenericString()+" reason="+t.getClass().getSimpleName());
                 }
             }
         }
@@ -845,7 +845,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.15 NATIVE_BLUR_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.15.1 NATIVE_BLUR_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -860,6 +860,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.15 NATIVE_BLUR_PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.15.1 NATIVE_BLUR_PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
