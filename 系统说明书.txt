@@ -1,0 +1,23 @@
+ColorOS Liquid Glass V1.0 - GitHub Actions云编译测试版
+适配：一加13T PKX110 / ColorOS 15.0.2.603(CN01) / Android 15 / Vector 2.2
+
+本版本仅验证Xposed/Vector模块加载，不改变任何UI。未经过真实设备测试。
+
+【手机端云编译】
+1. 登录GitHub，创建Public或Private新仓库，建议不初始化README。
+2. 解压本ZIP，将最外层工程文件及隐藏目录.github上传到仓库根目录（不能多套一层文件夹）。
+3. 打开仓库Actions页，找到Build Vector Test APK，点击Run workflow。
+   也可以直接push到main/master触发。
+4. 等待构建成功，在运行详情最下方Artifacts下载ColorOS-LiquidGlass-V1.0-Vector-Test-APK。
+5. 解压下载的Artifact ZIP，安装app-debug.apk。它是GitHub构建机生成的调试签名APK，测试用途。
+
+【Vector设置】
+启用ColorOS Liquid Glass Test模块，勾选com.android.systemui和com.android.launcher；
+如框架允许，另勾选com.oplus.systemui.plugins。重启后查看Vector日志中
+ColorOSLiquidGlass: V1.0 HOOK_LOADED package=...。
+
+【重要】
+- 此项目的xposed-stubs仅供编译，compileOnly不会打包到APK；运行时由Vector提供Xposed API。
+- Vector是否兼容旧版Xposed入口仍需真机验证。
+- 若构建失败，提供GitHub Actions日志；若运行失败，先禁用Vector作用域或模块并重启。
+- 不要上传个人密钥、系统隐私文件；本项目无需上传三个系统APK。
