@@ -1629,7 +1629,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float envelope=edge*edge*(3.0-2.0*edge);\n"+
         " float direction=1.0-2.0*smoothstep(0.47,0.53,u);\n"+
         " half4 color=wallpaper.eval(p+float2(direction*envelope*strength,0.0));\n"+
-        " color.a=half(0.4392157*envelope);\n"+
+        // Keep optical displacement separate from the overlay opacity. The old
+        // 0.439 edge alpha washed out both sides of the glass, especially on
+        // bright wallpapers. Attenuate overlay opacity with sampled luminance.
+        " float luminance=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
+        " float bright=smoothstep(0.52,0.92,luminance);\n"+
+        " float edgeWeight=envelope*envelope;\n"+
+        " float opacity=0.14*edgeWeight*(1.0-0.78*bright);\n"+
+        " color.a=half(clamp(opacity,0.0,0.14));\n"+
         " return color;\n"+
         "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
