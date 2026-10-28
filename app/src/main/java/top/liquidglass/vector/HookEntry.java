@@ -559,6 +559,42 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return null;
         }
     }
+    // V1.9.40: continuous size-adaptive, inward-only bottom optical depth. Unlike a stroke, this
+    // gradient is clipped to the SAME verified shape mask and never changes the
+    // V1.9.28 +6px corner correction or any straight-edge coordinates.
+    private static void drawAdaptiveBottomDepth(Canvas canvas, MaskCache cache, float strength) {
+        if (cache == null || cache.mask == null || strength <= 0f) return;
+        final int w = cache.w, h = cache.h;
+        // Continuous size-based optical profile using the actual glass background.
+        // Anchors: 162x162 -> 10px/1.00x; 444x162 -> 14px/1.18x;
+        //          162x444 -> 14px/1.15x; 444x444 -> 26px/1.35x.
+        // Clamp each axis to avoid excessive shading on unusually sized folders.
+        final float x = Math.max(0f, Math.min(1f, (w - 162f) / 282f));
+        final float y = Math.max(0f, Math.min(1f, (h - 162f) / 282f));
+        final float reach = 10f + 4f * x + 4f * y + 8f * x * y;
+        final float gain = 1f + 0.18f * x + 0.15f * y + 0.02f * x * y;
+        final float opacity = Math.min(1f, strength * gain);
+        final int bottomAlpha = Math.min(100, Math.round(83f * opacity));
+        final int middleAlpha = Math.min(58, Math.round(39f * opacity));
+        if (bottomAlpha <= 0) return;
+        final float y0 = Math.max(0f, h - reach);
+        final int layer = canvas.saveLayer(0f, 0f, w, h, null);
+        try {
+            Paint shadow = new Paint(Paint.ANTI_ALIAS_FLAG);
+            shadow.setShader(new android.graphics.LinearGradient(
+                0f, y0, 0f, (float) h,
+                new int[]{0x00203242, (middleAlpha << 24) | 0x00203242,
+                    (bottomAlpha << 24) | 0x00152132},
+                new float[]{0f, 0.57f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRect(0f, y0, w, h, shadow);
+            shadow.setShader(null);
+            Paint clip = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            clip.setXfermode(new android.graphics.PorterDuffXfermode(
+                android.graphics.PorterDuff.Mode.DST_IN));
+            canvas.drawBitmap(cache.mask, 0f, 0f, clip);
+            clip.setXfermode(null);
+        } finally { canvas.restoreToCount(layer); }
+    }
     private static void drawUnifiedMaterial(Canvas canvas, MaskCache cache, boolean edgeOnly) {
         if(cache==null)return;
         boolean tint=tintMode!=0 && tintStrength>0 && probeMode!=2;
@@ -652,6 +688,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         dark.setXfermode(null);
                         dark.setShader(null);
                     } finally { canvas.restoreToCount(depthLayer); }
+                    // Size-aware internal shading: small baseline, tall moderate,
+                    // large stronger and wider. The existing rim remains intact.
+                    drawAdaptiveBottomDepth(canvas, cache, strength);
                 }
             }
         }
