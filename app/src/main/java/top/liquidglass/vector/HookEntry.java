@@ -38,6 +38,39 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile int highlightStrength = 25;
     private static volatile int highlightWidth = 2;
     private static volatile boolean directionalLight = true;
+    // 100 = OEM blur radius; lower values are experimental radius multipliers.
+    private static volatile int blurRadiusPercent = 100;
+    private static final java.util.Map<Drawable,Float> ORIGINAL_BLUR_RADIUS =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Float>());
+    private static final java.util.Map<Drawable,Integer> APPLIED_BLUR_PERCENT =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
+    private static int blurRadiusLogs = 0;
+    private static void applyBlurRadius(Drawable drawable) {
+        if (nativeBlurExperiment != 1 || drawable == null) return;
+        try {
+            Float original = ORIGINAL_BLUR_RADIUS.get(drawable);
+            Method get = drawable.getClass().getMethod("getMRadius");
+            Method set = drawable.getClass().getMethod("setMRadius",float.class);
+            get.setAccessible(true); set.setAccessible(true);
+            if (original == null) {
+                Object result=get.invoke(drawable);
+                if (!(result instanceof Number)) return;
+                original=((Number)result).floatValue();
+                if (!Float.isFinite(original) || original <= 0f) return;
+                ORIGINAL_BLUR_RADIUS.put(drawable,original);
+            }
+            int percent=Math.max(10,Math.min(100,blurRadiusPercent));
+            Integer previous=APPLIED_BLUR_PERCENT.get(drawable);
+            if (previous != null && previous == percent) return;
+            float target=original*percent/100f;
+            set.invoke(drawable,target);
+            APPLIED_BLUR_PERCENT.put(drawable,percent);
+            drawable.invalidateSelf();
+            if (blurRadiusLogs++ < 16) log("BLUR_RADIUS_SET original="+original+" target="+target+" percent="+percent);
+        } catch (Throwable t) {
+            if (blurRadiusLogs++ < 8) log("BLUR_RADIUS_UNSUPPORTED reason="+t.getClass().getSimpleName());
+        }
+    }
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
@@ -136,10 +169,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
                 highlightWidth=Math.max(1,Math.min(5,c.getInt(8)));
                 directionalLight=c.getInt(9)==1;
+                int radiusIndex=c.getColumnIndex("blur_radius_percent");
+                blurRadiusPercent=radiusIndex>=0 ? Math.max(10,Math.min(100,c.getInt(radiusIndex))) : 100;
                 probeMode=Math.max(0,Math.min(3,c.getInt(7)));
                 int expIndex=c.getColumnIndex("native_blur_experiment");
                 nativeBlurExperiment=expIndex>=0 ? Math.max(0,Math.min(1,c.getInt(expIndex))) : 0;
-                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment;
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -326,6 +361,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // preview offsets translate them into FolderIcon's Canvas coordinates.
             // Never use FolderIcon's full dimensions (they include the label).
             Drawable blur = (Drawable)value;
+            if (!edgeOnly) applyBlurRadius(blur);
             Rect nativeBounds = blur.getBounds();
             if (nativeBounds == null || nativeBounds.isEmpty()) {
                 if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=empty_blur_bounds");
@@ -382,7 +418,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                 } else if (highlightEnabled && highlightStrength > 0 && probeMode != 3) {
                     float stroke = Math.max(1f,highlightWidth);
-                    float inset = stroke * 0.65f;
+                    float inset = stroke * 0.5f;
                     RectF inner = new RectF(rect); inner.inset(inset,inset);
                     paint.setStyle(Paint.Style.STROKE);
                     paint.setStrokeWidth(stroke);
@@ -390,6 +426,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         directionalLight ? new int[]{0xDDFFFFFF,0x66DDEFFF,0x18FFFFFF} : new int[]{0x99FFFFFF,0x99FFFFFF},
                         null,android.graphics.Shader.TileMode.CLAMP));
                     paint.setAlpha(Math.round(255f*highlightStrength/100f));
+                    Path contour = new Path();
+                    contour.addRoundRect(rect,radius,radius,Path.Direction.CW);
+                    canvas.clipPath(contour);
                     canvas.drawRoundRect(inner,Math.max(0f,radius-inset),Math.max(0f,radius-inset),paint);
                 }
                 if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_DRAW phase="+(edgeOnly?"edge":"surface")+

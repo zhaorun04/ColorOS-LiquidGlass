@@ -1,16 +1,11 @@
-ColorOS Liquid Glass V1.9.19｜FolderIcon Canvas 融合实验版
+ColorOS Liquid Glass V1.9.22｜圆角描边与原生模糊半径实验版
 
-基础：V1.9.18，保留已验证有效的 Launcher 原生模糊实验 A。
+基于 V1.9.21。保留原生模糊实验开关、文件夹玻璃材质和现有 Canvas 融合。
+1. 将高光描边中心线内缩调整为描边宽度的一半，裁剪至背景轮廓内部，减少四角溢出。
+2. 新增原生模糊半径比例（10%～100%，默认100%），仅当原生模糊实验开启时生效。
+3. 读取 LayerBlurDrawable.getMRadius() 的原始值，再尝试调用 setMRadius(float)，对每个 Drawable 缓存，只有设置变化时更新，100% 恢复初始值。
+4. 注意：setMRadius 是否实际控制视觉模糊仍需真机验证。该参数不是模糊透明度，也不能保证线性效果。
+5. 当前仍基于圆角矩形绘制高光，ColorOS 若使用连续曲率曲线，四角可能尚有微小差异；后续需复用原生像素 Alpha 蒙版。
+6. 出现桌面异常时，关闭原生模糊实验并重启桌面。
 
-修改：新增 FolderIcon.dispatchDraw(Canvas) 前后两段绘制。
-- 绘制子图标前：绘制透明玻璃表面和色调，避免覆盖图标。
-- 绘制子图标后：绘制细边缘高光。
-- 仅当 getBgDrawable() 实际为 LayerBlurDrawable 时触发；旧 GradientDrawable 路径保留。
-- 使用 FolderIcon 本地坐标，不使用 LayerBlurDrawable 的无效 Outline/bounds。
-- 优先读取 FolderIcon 的 View Outline 圆角，取不到时采用 21% 边长近似圆角。
-
-限制：这是新的实验绘制入口，未经过真机验证；近似圆角可能与原生四角不完全一致。
-日志：FOLDER_CANVAS_FUSION_HOOK_INSTALLED、FOLDER_CANVAS_FUSION_DRAW、FOLDER_CANVAS_FUSION_FAILED。
-
-注意：原生模糊开关仅针对 Launcher 的实验性覆盖；出现桌面异常时关闭实验 A 并重启桌面，必要时在框架停用模块。
-构建：GitHub Actions 依照 .github/workflows/build-apk.yml。
+本包未通过 Android Gradle 编译或真机验证。
