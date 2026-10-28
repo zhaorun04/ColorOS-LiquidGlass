@@ -266,6 +266,49 @@ public final class HookEntry implements IXposedHookLoadPackage {
 
     // V1.9.19: draw within FolderIcon's own Canvas. Blur is composited by the OEM
     // beneath this View; material goes before child icons, edge light after them.
+    // V1.9.20: read-only diagnostics for OEM geometry and blur control points.
+    // We do not fabricate a blur-strength slider until a real setter is identified.
+    private static int fusionGeometryLogs = 0;
+    private static void inspectFusionGeometry(View v, Object preview, Drawable blur) {
+        if (!diagnostics || fusionGeometryLogs >= 14) return;
+        fusionGeometryLogs++;
+        try {
+            Rect bounds = blur.getBounds();
+            Outline outline = new Outline(); blur.getOutline(outline);
+            Rect outlineRect = new Rect();
+            boolean hasOutline = outline.getRect(outlineRect);
+            log("FUSION_GEOMETRY_NATIVE view="+v.getWidth()+"x"+v.getHeight()
+                +" padding="+v.getPaddingLeft()+","+v.getPaddingTop()+","+v.getPaddingRight()+","+v.getPaddingBottom()
+                +" blurBounds="+bounds.toShortString()
+                +" blurOutline="+(hasOutline?outlineRect.toShortString():"none")
+                +" blurRadius="+outline.getRadius());
+            int count=0;
+            for(Class<?> c=preview.getClass();c!=null && count<60;c=c.getSuperclass()) {
+                for(Field f:c.getDeclaredFields()) {
+                    if(Modifier.isStatic(f.getModifiers())) continue;
+                    String n=f.getName().toLowerCase(java.util.Locale.ROOT);
+                    if(!(n.contains("size")||n.contains("width")||n.contains("height")||n.contains("radius")||n.contains("offset")||n.contains("padding")||n.contains("scale")||n.contains("rect")||n.contains("bounds")))continue;
+                    try { f.setAccessible(true); Object value=f.get(preview);
+                        if(value instanceof Number || value instanceof Rect || value instanceof RectF)
+                            log("FUSION_GEOMETRY_FIELD "+f.getName()+"="+String.valueOf(value));
+                    }catch(Throwable ignored){}
+                    count++;
+                }
+            }
+            if(fusionGeometryLogs<=3) {
+                int found=0;
+                for(Class<?> c=blur.getClass();c!=null && found<32;c=c.getSuperclass()) {
+                    for(Method m:c.getDeclaredMethods()) {
+                        String n=m.getName().toLowerCase(java.util.Locale.ROOT);
+                        if(n.contains("blur")||n.contains("radius")||n.contains("strength")) {
+                            log("FUSION_BLUR_API "+m.toGenericString());
+                            found++;
+                        }
+                    }
+                }
+            }
+        }catch(Throwable t){log("FUSION_GEOMETRY_FAILED "+t.getClass().getSimpleName());}
+    }
     private static int folderFusionLogs = 0;
     private static final ThreadLocal<Boolean> FOLDER_FUSION_GUARD = new ThreadLocal<Boolean>();
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
@@ -278,6 +321,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             getter.setAccessible(true);
             Object value = getter.invoke(preview);
             if (!(value instanceof Drawable) || !value.getClass().getName().endsWith(".LayerBlurDrawable")) return;
+            if (!edgeOnly) inspectFusionGeometry(v,preview,(Drawable)value);
             // Canvas belongs to FolderIcon, so use View-local coordinates, not the
             // LayerBlurDrawable bounds (often empty or in another coordinate system).
             float w = v.getWidth(), h = v.getHeight();
@@ -1064,7 +1108,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.19 FOLDER_CANVAS_FUSION_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.20 GEOMETRY_BLUR_API_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -1081,6 +1125,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.19 FOLDER_CANVAS_FUSION_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.20 GEOMETRY_BLUR_API_PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
