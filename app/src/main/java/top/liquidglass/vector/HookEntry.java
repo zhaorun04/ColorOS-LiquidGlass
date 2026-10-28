@@ -307,10 +307,59 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 + " reason=need_pre_folder_composited_frame_not_root_screenshot");
         } catch (Throwable t) { log("REFRACTION_FEASIBILITY_ERROR " + t.getClass().getSimpleName()); }
     }
+    // V1.9.43: bounded, read-only scroll coordinate observations. This is NOT
+    // wallpaper-offset tracking or a source of pre-folder backdrop pixels.
+    private static final java.util.Map<View, long[]> REFRACTION_MOTION =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, long[]>());
+    private static int refractionMotionLogs = 0;
+    private static void inspectScrollCoordinates(View folder) {
+        if (!diagnostics || refractionMotionLogs >= 36 || !folder.isAttachedToWindow()) return;
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            int[] screen = new int[2];
+            folder.getLocationOnScreen(screen);
+            long[] prev;
+            synchronized (REFRACTION_MOTION) {
+                prev = REFRACTION_MOTION.get(folder);
+                if (prev != null && now - prev[0] < 350L) return;
+                if (prev != null && now - prev[0] < 1800L &&
+                    Math.abs(screen[0] - prev[1]) < 2 && Math.abs(screen[1] - prev[2]) < 2) return;
+                REFRACTION_MOTION.put(folder, new long[]{now, screen[0], screen[1]});
+            }
+            int dx = prev == null ? 0 : screen[0] - (int) prev[1];
+            int dy = prev == null ? 0 : screen[1] - (int) prev[2];
+            View ancestor = folder;
+            StringBuilder chain = new StringBuilder();
+            for (int i = 0; i < 7 && ancestor != null; i++) {
+                if (i > 0) chain.append('>');
+                chain.append(ancestor.getClass().getSimpleName())
+                     .append('(').append(ancestor.getScrollX()).append(',')
+                     .append(ancestor.getScrollY()).append(')');
+                Object parent = ancestor.getParent();
+                ancestor = parent instanceof View ? (View) parent : null;
+            }
+            refractionMotionLogs++;
+            log("REFRACTION_SCROLL_SAMPLE screen=[" + screen[0] + "," + screen[1]
+                + "] delta=[" + dx + "," + dy + "] size="
+                + folder.getWidth() + "x" + folder.getHeight()
+                + " translation=[" + folder.getTranslationX() + "," + folder.getTranslationY() + "]"
+                + " ancestorScroll=" + chain.toString());
+            if (refractionMotionLogs == 1) {
+                log("REFRACTION_COORDINATE_LIMIT wallpaperOffset=UNVERIFIED"
+                    + " wallpaperCrop=UNVERIFIED wallpaperScale=UNVERIFIED"
+                    + " backdropPixels=UNAVAILABLE sampling=false"
+                    + " reason=screen_position_alone_cannot_map_wallpaper_pixels");
+            }
+        } catch (Throwable t) {
+            if (refractionMotionLogs++ < 36)
+                log("REFRACTION_SCROLL_ERROR " + t.getClass().getSimpleName());
+        }
+    }
     private static void applyNativeBackground(View v) {
         refresh(v);
         inspectFolderBlur(v);
         inspectSamplingFeasibility(v);
+        inspectScrollCoordinates(v);
         traceViewHierarchy(v);
         try {
             Object preview=field(v.getClass(),"mBackground").get(v);
