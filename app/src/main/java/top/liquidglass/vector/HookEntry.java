@@ -330,11 +330,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // Native alpha is the only shape authority. A 1-2 pixel inner edge
             // follows all four corners including OEM antialiasing and clipping.
             int[] edgePixels=new int[w*h];
-            for(int y=1;y<h-1;y++)for(int x=1;x<w-1;x++){
+            // Include all outermost pixels. Off-bitmap neighbours are transparent.
+            // The previous 1..w-2 / 1..h-2 loop dropped straight sides entirely
+            // when the native shape reached the drawable bounds.
+            for(int y=0;y<h;y++)for(int x=0;x<w;x++){
                 int i=y*w+x, center=pixels[i]>>>24;
-                if(center<24)continue;
-                int min=Math.min(Math.min(pixels[i-1]>>>24,pixels[i+1]>>>24),
-                    Math.min(pixels[i-w]>>>24,pixels[i+w]>>>24));
+                if(center<8)continue;
+                int left = x==0 ? 0 : pixels[i-1]>>>24;
+                int right = x==w-1 ? 0 : pixels[i+1]>>>24;
+                int top = y==0 ? 0 : pixels[i-w]>>>24;
+                int bottom = y==h-1 ? 0 : pixels[i+w]>>>24;
+                int min=Math.min(Math.min(left,right),Math.min(top,bottom));
                 int a=Math.max(0,Math.min(center,(center-min)*2));
                 edgePixels[i]=(a<<24)|0x00ffffff;
             }

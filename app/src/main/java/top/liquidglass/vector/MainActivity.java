@@ -31,7 +31,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.8",23);
+        label("ColorOS Liquid Glass V1.9.9",23);
         label("原生 Alpha 遮罩实验：色调和高光不再自行绘制圆角，直接跟随原生背景像素边缘。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
