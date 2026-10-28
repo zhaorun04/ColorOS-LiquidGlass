@@ -467,6 +467,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 else light.setColor(0xCCFFFFFF);
                 canvas.drawRect(0,0,cache.w,cache.h,light);
                 light.setXfermode(null);canvas.restoreToCount(layer);
+                // V1.9.31: subtle inner-edge optical depth. Reuse the EXACT
+                // edge mask (including the blur-mode +6px corner correction).
+                // No extra stroke, rectangle inset, or radius calculation.
+                if (probeMode==0) {
+                    Paint depth=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                    int depthLayer=canvas.saveLayer(0,0,cache.w,cache.h,null);
+                    try {
+                        depth.setAlpha(Math.round(38f*strength));
+                        canvas.drawBitmap(cache.glow,0,0,depth);
+                        depth.setAlpha(255);
+                        depth.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+                        depth.setShader(new android.graphics.LinearGradient(
+                            0f,0f,cache.w*0.24f,cache.h,
+                            new int[]{0x00FFFFFF,0x007E94A0,0x80607788,0xB0485968},
+                            new float[]{0f,0.38f,0.78f,1f},
+                            android.graphics.Shader.TileMode.CLAMP));
+                        canvas.drawRect(0,0,cache.w,cache.h,depth);
+                        depth.setShader(null);
+                        depth.setXfermode(null);
+                    } finally { canvas.restoreToCount(depthLayer); }
+                }
             }
         }
     }
