@@ -512,6 +512,59 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 +" compositorTransform=UNKNOWN wallpaperPixels=NOT_SAMPLED");
         } catch(Throwable t){log("REFRACTION_WALLPAPER_GEOMETRY_ERROR "+t.getClass().getSimpleName());}
     }
+    // V1.9.58: read-only feasibility probe. Neither window contents nor pixels are captured.
+    // Launcher window geometry and wallpaper metadata are NOT compositor transforms.
+    private static final java.util.concurrent.atomic.AtomicBoolean WALLPAPER_REFERENCE_ONCE =
+        new java.util.concurrent.atomic.AtomicBoolean(false);
+    private static void inspectWallpaperReferenceFeasibility(View folder) {
+        if (!diagnostics || !WALLPAPER_REFERENCE_ONCE.compareAndSet(false, true)) return;
+        log("REFRACTION_REFERENCE_PROBE version=1.9.58 mode=READ_ONLY captureAttempted=false");
+        try {
+            android.content.Context ctx=folder.getContext();
+            android.app.WallpaperManager wm=android.app.WallpaperManager.getInstance(ctx);
+            int id=wm.getWallpaperId(android.app.WallpaperManager.FLAG_SYSTEM);
+            int desiredW=wm.getDesiredMinimumWidth(), desiredH=wm.getDesiredMinimumHeight();
+            log("REFRACTION_REFERENCE_WALLPAPER id="+id+" desiredMinimum="+desiredW+"x"+desiredH
+                +" desiredIsCompositorSize=false");
+            try {
+                android.app.WallpaperInfo info=wm.getWallpaperInfo(android.app.WallpaperManager.FLAG_SYSTEM);
+                log("REFRACTION_REFERENCE_ENGINE liveInfo="+(info==null?"NULL_OR_UNAVAILABLE":"AVAILABLE")
+                    +" actualEngineOffset=UNAVAILABLE actualEngineZoom=UNAVAILABLE"
+                    +" note=WallpaperInfo_does_not_expose_rendered_crop");
+            } catch(Throwable t) {
+                log("REFRACTION_REFERENCE_ENGINE status=UNAVAILABLE reason="+t.getClass().getSimpleName());
+            }
+            try {
+                int[] location=new int[2]; folder.getLocationOnScreen(location);
+                View root=folder.getRootView();
+                android.view.WindowInsets insets=root.getRootWindowInsets();
+                String insetStatus="UNAVAILABLE";
+                if(insets!=null) {
+                    android.graphics.Insets bars=insets.getInsets(android.view.WindowInsets.Type.systemBars());
+                    insetStatus="["+bars.left+","+bars.top+","+bars.right+","+bars.bottom+"]";
+                }
+                android.view.ViewGroup.LayoutParams lp=root.getLayoutParams();
+                String flags="UNAVAILABLE";
+                if(lp instanceof android.view.WindowManager.LayoutParams) {
+                    android.view.WindowManager.LayoutParams wlp=(android.view.WindowManager.LayoutParams)lp;
+                    flags="0x"+Integer.toHexString(wlp.flags)+" type="+wlp.type;
+                }
+                log("REFRACTION_REFERENCE_WINDOW folderScreen=["+location[0]+","+location[1]+"]"
+                    +" folderSize="+folder.getWidth()+"x"+folder.getHeight()
+                    +" rootSize="+root.getWidth()+"x"+root.getHeight()
+                    +" systemBarsInsets="+insetStatus+" rootWindow="+flags
+                    +" wallpaperLayerTransform=UNAVAILABLE");
+            } catch(Throwable t) {
+                log("REFRACTION_REFERENCE_WINDOW status=UNAVAILABLE reason="+t.getClass().getSimpleName());
+            }
+        } catch(Throwable t) {
+            log("REFRACTION_REFERENCE_PROBE status=UNAVAILABLE reason="+t.getClass().getSimpleName());
+        }
+        log("REFRACTION_REFERENCE_FEASIBILITY status=NO_INDEPENDENT_WALLPAPER_FRAME"
+            +" screenshotAttempted=false screenCaptureAttempted=false"
+            +" wallpaperServiceHookAttempted=false compositorCrop=UNKNOWN compositorScale=UNKNOWN"
+            +" modelVerified=false refractionEnabled=false");
+    }
     // V1.9.48: hypothetical screen->source mappings. These are NOT compositor measurements.
     // Center-crop assumes a static source image scaled uniformly to fill the display.
     // A second model assumes the source is uniformly scaled to at least desiredMinimumWidth.
@@ -737,6 +790,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         inspectFolderBlur(v);
         inspectSamplingFeasibility(v);
         inspectWallpaperGeometry(v);
+        inspectWallpaperReferenceFeasibility(v);
         inspectScrollCoordinates(v);
         traceViewHierarchy(v);
         try {
