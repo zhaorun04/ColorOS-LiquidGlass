@@ -517,6 +517,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("BLUR_PROBE_FOLDER class="+v.getClass().getName()+" localSupport="+safeValue(flag)+" size="+v.getWidth()+"x"+v.getHeight());
             Object preview=field(v.getClass(),"mBackground").get(v);
             inspectBlurState(preview,"FolderIcon");
+            traceConditions(v,"folderIcon");
+            traceConditions(preview,"preview");
         }catch(Throwable e){if(blurStateLogs++<8)log("BLUR_PROBE_FOLDER_ERROR="+e.getClass().getSimpleName());}
     }
     private static void hookPreview(ClassLoader loader) {
@@ -571,6 +573,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 if(param.args!=null)for(Object arg:param.args)args.append(" ").append(safeValue(arg));
                                 log("NATIVE_BLUR_CALL method="+methodName+" signature="+((Method)param.method).toGenericString()+" result="+safeValue(result)+" args="+args);
                                 inspectBlurState(param.thisObject,"method:"+methodName);
+                                traceConditions(param.thisObject,"method:"+methodName);
                             }
                         } catch (Throwable t) { log("BG_RUNTIME_ERROR=" + t.getClass().getSimpleName()); }
                         finally {
@@ -587,10 +590,80 @@ public final class HookEntry implements IXposedHookLoadPackage {
             } catch (Throwable t) { failed++; log("HOOK_FAILED class=" + c.getName() + " method=" + m.toGenericString() + " error=" + t); }
         }
     }
+    // V1.9.12: read-only condition tracing. No forced blur flags or initialization.
+    private static final java.util.Map<Object,String> BLUR_SNAPSHOTS =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Object,String>());
+    private static final java.util.Set<String> BLUR_METHODS_SEEN =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    private static int conditionLogs = 0;
+    private static String conditionSnapshot(Object owner) {
+        if (owner == null) return "null";
+        StringBuilder sb = new StringBuilder();
+        int count = 0;
+        for (Class<?> c=owner.getClass();c!=null && count<24;c=c.getSuperclass()) {
+            for (Field f:c.getDeclaredFields()) {
+                String n=f.getName().toLowerCase(java.util.Locale.ROOT);
+                if (!n.contains("blur") && !n.contains("support") && !n.contains("effect") && !n.contains("background")) continue;
+                if (Modifier.isStatic(f.getModifiers())) continue;
+                try {
+                    f.setAccessible(true);
+                    Object v=f.get(owner);
+                    if (v instanceof Boolean || v instanceof Number || v == null || v instanceof Drawable) {
+                        sb.append(f.getName()).append('=').append(safeValue(v)).append(';');
+                        count++;
+                    }
+                } catch (Throwable ignored) {}
+                if (count>=24) break;
+            }
+        }
+        return sb.toString();
+    }
+    private static void traceConditions(Object owner, String source) {
+        if (!diagnostics || owner==null) return;
+        String snap=conditionSnapshot(owner);
+        String prior;
+        synchronized(BLUR_SNAPSHOTS) { prior=BLUR_SNAPSHOTS.put(owner,snap); }
+        if (!snap.equals(prior) && conditionLogs++<75)
+            log("BLUR_CONDITION_CHANGE source="+source+" owner="+drawableTag(owner)+" state="+snap);
+    }
+    private static void hookFolderConditions(ClassLoader loader) {
+        Class<?> folder=find("com.android.launcher3.folder.FolderIcon",loader);
+        if (folder==null)return;
+        for (Method m:folder.getDeclaredMethods()) {
+            String name=m.getName().toLowerCase(java.util.Locale.ROOT);
+            if (!name.contains("blur") && !name.contains("support"))continue;
+            if (m.getParameterTypes().length>4)continue;
+            try {
+                m.setAccessible(true);
+                final String signature=m.toGenericString();
+                XposedBridge.hookMethod(m,new XC_MethodHook(){
+                    @Override protected void afterHookedMethod(MethodHookParam p){
+                        try {
+                            if (conditionLogs++<75)log("BLUR_FOLDER_METHOD signature="+signature+" result="+safeValue(p.getResult()));
+                            traceConditions(p.thisObject,"folderMethod");
+                        }catch(Throwable ignored){}
+                    }
+                });
+                installed++;
+                log("BLUR_CONDITION_HOOK_INSTALLED "+signature);
+            } catch(Throwable e){failed++;log("BLUR_CONDITION_HOOK_FAILED "+signature+" "+e.getClass().getSimpleName());}
+        }
+    }
+    private static void traceBlurMethods(ClassLoader loader) {
+        Class<?> preview=find("com.android.launcher3.folder.OplusPreviewBackground",loader);
+        if (preview==null)return;
+        for (Method m:preview.getDeclaredMethods()) {
+            String name=m.getName().toLowerCase(java.util.Locale.ROOT);
+            if (!name.contains("blur") && !name.contains("support"))continue;
+            if (m.getParameterTypes().length>4)continue;
+            String signature=m.toGenericString();
+            if(BLUR_METHODS_SEEN.add(signature))log("BLUR_METHOD_CATALOG "+signature);
+        }
+    }
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.11 NATIVE_BLUR_PASSIVE_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.12 BLUR_CONDITIONS_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -600,7 +673,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
+            traceBlurMethods(p.classLoader);
+            hookFolderConditions(p.classLoader);
         }
-        log("V1.9.11 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.12 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
