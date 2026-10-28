@@ -31,8 +31,8 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.6",23);
-        label("圆角内缩修正、Outline 轮廓诊断、可调色调与高光强度。所有文件夹共用一套参数；真实背景模糊仍处于诊断阶段。",14);
+        label("ColorOS Liquid Glass V1.9.7",23);
+        label("背景图层归属诊断：观察原生绘制与高光图层的关系。此版本不保证修复圆角。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);
         SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
@@ -48,11 +48,21 @@ public final class MainActivity extends Activity {
         });
         Switch highlight=toggle("柔和高光描边（默认关闭）","highlight",false);
         SeekBar highlightStrength=slider("柔和高光强度","highlight_strength",25,0,100);
+        label("背景图层诊断模式（切换后返回桌面等待约 2 秒）",18);
+        String[] probeOptions={"0 · 正常材质","1 · 仅原生背景（关闭高光与叠色）","2 · 红色轮廓对照（仅用于短时测试）","3 · 仅色调（关闭高光）"};
+        Spinner probe=new Spinner(this);
+        probe.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,probeOptions));
+        probe.setSelection(Math.max(0,Math.min(3,prefs.getInt("probe_mode",0))));root.addView(probe);
+        probe.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> parent,android.view.View view,int pos,long id){prefs.edit().putInt("probe_mode",pos).apply();}
+            public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+        label("建议依次测试模式 1、0、2，分别截图。模式 2 的红线是几何对照，不是正式外观。",13);
         Switch diag=toggle("保留诊断日志","diagnostics",true);
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
         reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
-            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",25).apply();
-            enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(25);
+            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",25).putInt("probe_mode",0).apply();
+            enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(25);probe.setSelection(0);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
         label("提示：色调现在使用原生背景绘制后的叠色层；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。新增被动诊断原生模糊初始化与调用；不会强制启用 ColorOS 隐藏模糊功能。",13);
         setContentView(scroll);

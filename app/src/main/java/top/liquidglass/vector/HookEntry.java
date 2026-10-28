@@ -38,6 +38,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = true;
+    private static volatile int probeMode = 0;
+    private static int layerTraceLogs = 0;
+    private static int previewTraceLogs = 0;
+    private static final ThreadLocal<Integer> PREVIEW_DRAW_DEPTH = new ThreadLocal<Integer>();
+    private static String drawableTag(Object d) {
+        return d == null ? "null" : d.getClass().getSimpleName() + "@" + Integer.toHexString(System.identityHashCode(d));
+    }
     private static int alphaLogs = 0;
     private static volatile String lastConfigSummary="";
     private static final Set<Object> SEEN = Collections.newSetFromMap(new WeakHashMap<Object, Boolean>());
@@ -121,7 +128,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 highlightEnabled=c.getInt(4)==1;
                 diagnostics=c.getInt(5)==1;
                 highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
-                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength;
+                probeMode=Math.max(0,Math.min(3,c.getInt(7)));
+                String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" probeMode="+probeMode;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<3) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -153,7 +161,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // Clear any legacy color filter previously applied by V1.9.3.
             synchronized(TINTED){if(TINTED.remove(d))d.clearColorFilter();}
             if(alphaLogs++<16)log("MATERIAL_APPLIED enabled="+glassEnabled+" size="+v.getWidth()+"x"+v.getHeight()+
-                " alpha="+alpha+" tint="+tintMode+" drawable="+d.getClass().getSimpleName());
+                " alpha="+alpha+" tint="+tintMode+" drawable="+drawableTag(d));
         }catch(Throwable t){if(alphaLogs++<12)log("MATERIAL_FAILED reason="+t.getClass().getSimpleName());}
     }
     // Weak references avoid retaining Launcher drawables beyond their lifecycle.
@@ -289,9 +297,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return path;
     }
     private static void drawMaterialOnNativeCanvas(GradientDrawable drawable, Canvas canvas) {
-        if (!glassEnabled) return;
+        if (!glassEnabled || probeMode == 1) return;
         boolean tint = tintMode != 0 && tintStrength > 0;
-        boolean shine = highlightEnabled && highlightStrength > 0;
+        boolean shine = (highlightEnabled && highlightStrength > 0 && probeMode != 3) || probeMode == 2;
         if (!tint && !shine) return;
         Rect bounds = drawable.getBounds();
         if (bounds == null || bounds.isEmpty()) return;
@@ -299,7 +307,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (base.width() < 4 || base.height() < 4) return;
         ShapeGeometry geometry = getShapeGeometry(drawable, bounds);
         Path path = shapePath(geometry, 0f);
-        if (tint) {
+        if (tint && probeMode != 2) {
             Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
             fill.setStyle(Paint.Style.FILL);
             int c = tintColor();
@@ -323,10 +331,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 paint.setStyle(Paint.Style.STROKE);
                 paint.setStrokeWidth(stroke);
                 int opacity = Math.round(72f * (highlightStrength / 100f) * (highlightStrength / 100f));
-                paint.setColor(Color.argb(opacity,255,255,255));
+                paint.setColor(probeMode == 2 ? Color.argb(220,255,40,40) : Color.argb(opacity,255,255,255));
                 canvas.drawPath(strokePath, paint);
                 if (nativeDrawLogs++ < 32) log("GLASS_HIGHLIGHT_STRENGTH value="+highlightStrength+" alpha="+opacity+
-                    " GLASS_CORNER_RADIUS="+drawable.getCornerRadius()+
+                    " mode="+probeMode+" GLASS_CORNER_RADIUS="+drawable.getCornerRadius()+
                     " GLASS_CORNER_RADII="+java.util.Arrays.toString(drawable.getCornerRadii())+
                     " bounds="+bounds.toShortString()+" geometrySource="+geometry.source+" inset="+inset+" adjustedRadius="+Math.max(0f,geometry.radii[0]-inset));
             }
@@ -343,7 +351,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     synchronized (TRACKED_BACKGROUNDS) {
                         if (!TRACKED_BACKGROUNDS.contains(drawable)) return;
                     }
-                    try { traceCanvasContour((GradientDrawable)drawable, (Canvas)param.args[0]);
+                    try {
+                        if (diagnostics && layerTraceLogs++ < 48) {
+                            GradientDrawable gd=(GradientDrawable)drawable;
+                            log("LAYER_DRAW id="+drawableTag(drawable)+" tracked=true previewDepth="+
+                                (PREVIEW_DRAW_DEPTH.get()==null?0:PREVIEW_DRAW_DEPTH.get())+
+                                " bounds="+gd.getBounds().toShortString()+" alpha="+gd.getAlpha()+
+                                " radius="+gd.getCornerRadius()+" mode="+probeMode);
+                        }
+                        traceCanvasContour((GradientDrawable)drawable, (Canvas)param.args[0]);
                         drawMaterialOnNativeCanvas((GradientDrawable)drawable, (Canvas)param.args[0]); }
                     catch (Throwable t) {
                         if (geometryLogs++ < 8) log("HIGHLIGHT_NATIVE_ERROR reason=" + t.getClass().getSimpleName());
@@ -396,9 +412,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 m.setAccessible(true);
                 final String methodName = name;
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam param) {
+                        if (!"drawBackground".equals(methodName)) return;
+                        Integer depth=PREVIEW_DRAW_DEPTH.get();
+                        PREVIEW_DRAW_DEPTH.set(depth==null?1:depth+1);
+                        if (diagnostics && previewTraceLogs++ < 32) {
+                            String args="";
+                            for (Object a:param.args) args+= " " + drawableTag(a);
+                            log("PREVIEW_DRAW_ENTER owner="+drawableTag(param.thisObject)+" method="+
+                                ((Method)param.method).toGenericString()+" args="+args+
+                                " depth="+PREVIEW_DRAW_DEPTH.get());
+                        }
+                    }
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         try {
                             if ("drawBackground".equals(methodName)) {
+                                if (diagnostics && previewTraceLogs++ < 32) {
+                                    Object result=null;
+                                    try { Method bg=param.thisObject.getClass().getDeclaredMethod("getBgDrawable"); bg.setAccessible(true); result=bg.invoke(param.thisObject); }
+                                    catch(Throwable ignored) {}
+                                    log("PREVIEW_DRAW_EXIT owner="+drawableTag(param.thisObject)+
+                                        " background="+drawableTag(result)+" depth="+PREVIEW_DRAW_DEPTH.get());
+                                }
                                 if (backgroundCalls++ < 12) log("BG_DRAW_RUNTIME signature=" + ((Method)param.method).toGenericString()
                                         + " arg1=" + (param.args[1] == null ? "null" : param.args[1].getClass().getName()));
                             } else if ("getBgDrawable".equals(methodName)) {
@@ -412,6 +447,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 log("NATIVE_BLUR_CALL method="+methodName+" signature="+((Method)param.method).toGenericString()+" result="+(result==null?"null":String.valueOf(result))+" argCount="+(param.args==null?0:param.args.length));
                             }
                         } catch (Throwable t) { log("BG_RUNTIME_ERROR=" + t.getClass().getSimpleName()); }
+                        finally {
+                            if ("drawBackground".equals(methodName)) {
+                                Integer depth=PREVIEW_DRAW_DEPTH.get();
+                                if (depth==null || depth<=1) PREVIEW_DRAW_DEPTH.remove();
+                                else PREVIEW_DRAW_DEPTH.set(depth-1);
+                            }
+                        }
                     }
                 });
                 installed++;
@@ -422,7 +464,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.6 NATIVE_CONTOUR_TRACE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.7 LAYER_ATTRIBUTION_PROBE_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -433,6 +475,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
         }
-        log("V1.9.6 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.7 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
