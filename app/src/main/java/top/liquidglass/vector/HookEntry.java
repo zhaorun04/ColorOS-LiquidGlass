@@ -33,6 +33,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
     private static volatile long lastRead = 0;
     private static volatile boolean configEverLoaded = false;
+    private static volatile android.content.Context launcherContext;
     private static volatile long lastExperimentRead = 0;
     private static volatile boolean glassEnabled = false;
     private static volatile int glassAlpha = 210, tintMode = 0, tintStrength = 30;
@@ -162,7 +163,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 blurRadiusPercent=radiusIndex>=0 ? Math.max(10,Math.min(100,c.getInt(radiusIndex))) : 100;
                 probeMode=Math.max(0,Math.min(3,c.getInt(7)));
                 int expIndex=c.getColumnIndex("native_blur_experiment");
-                nativeBlurExperiment=expIndex>=0 ? Math.max(0,Math.min(1,c.getInt(expIndex))) : 0;
+                nativeBlurExperiment=glassEnabled ? 1 : 0; // Native blur is a mandatory glass layer
                 int alphaProbeIndex=c.getColumnIndex("native_alpha_probe");
                 nativeAlphaProbe=alphaProbeIndex>=0 && c.getInt(alphaProbeIndex)==1;
                 String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
@@ -177,7 +178,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try (Cursor c=ctx.getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 int i=c.getColumnIndex("native_blur_experiment");
-                nativeBlurExperiment=i<0?0:Math.max(0,Math.min(1,c.getInt(i)));
+                nativeBlurExperiment=glassEnabled?1:0;
                 lastExperimentRead=now;
             }
         } catch(Throwable ignored) { /* keep default off on read failure */ }
@@ -1616,6 +1617,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         };
         view.getViewTreeObserver().addOnPreDrawListener(tracked.listener);
         DYNAMIC_REFRACTION.put(view,state);
+        view.postInvalidate(); // Draw a stable refraction frame even before the first swipe
         return state;
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
@@ -2447,6 +2449,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         @Override protected void afterHookedMethod(MethodHookParam p) {
                             try {
                                 Object value=p.getResult();
+                                if (launcherContext!=null) refreshFromContext(launcherContext);
                                 if (p.args!=null) for (Object arg:p.args) {
                                     if (arg instanceof android.content.Context) {
                                         refreshConfigFromContext((android.content.Context)arg);
@@ -2460,7 +2463,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                         && "com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties".equals(method.getDeclaringClass().getName())) {
                                     // This experiment intentionally changes ONLY the one observed accessor.
                                     // It never changes system properties, other applications or global blur state.
-                                    if (nativeBlurExperiment==1 && Boolean.FALSE.equals(value)) {
+                                    if (glassEnabled && Boolean.FALSE.equals(value)) {
                                         p.setResult(Boolean.TRUE);
                                         if (EXPERIMENT_ONCE.add("material-switch-forced"))
                                             log("NATIVE_BLUR_EXPERIMENT material_switch original=false override=true");
@@ -2513,6 +2516,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     final android.content.Context context=(android.content.Context)p.args[0];
                     if (!"com.android.launcher".equals(context.getPackageName())) return;
                     final android.content.Context app=context.getApplicationContext()==null?context:context.getApplicationContext();
+                    launcherContext=app;
                     final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
                     // Direct-boot/credential storage can make the config provider
                     // unavailable when Launcher starts. Retry after unlock without
@@ -2523,11 +2527,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 boolean wasLoaded=configEverLoaded;
                                 refreshFromContext(app);
                                 log("BOOT_CONFIG_RESTORE loaded="+configEverLoaded+" enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
-                                if(!wasLoaded && configEverLoaded)handler.post(()->invalidateGlassViews());
+                                if(configEverLoaded)handler.post(()->invalidateGlassViews());
                             },"LiquidGlass-ConfigRestore").start();
                         }
                     };
                     restore.run();
+                    try {
+                        app.getContentResolver().registerContentObserver(CONFIG,false,new android.database.ContentObserver(handler){
+                            @Override public void onChange(boolean selfChange){
+                                lastRead=0L;
+                                restore.run();
+                            }
+                        });
+                    } catch(Throwable t){log("CONFIG_OBSERVER_FAILED "+t.getClass().getSimpleName());}
                     handler.postDelayed(restore,2000L);
                     handler.postDelayed(restore,8000L);
                     handler.postDelayed(restore,25000L);

@@ -27,11 +27,15 @@ public final class MainActivity extends Activity {
             public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){prefs.edit().putInt(key,b.getProgress()+min).commit();}
         });return bar;
     }
+    @Override protected void onPause(){
+        super.onPause();
+        getContentResolver().notifyChange(GlassConfigProvider.URI,null);
+    }
     @Override public void onCreate(Bundle b) {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.78",23);
+        label("ColorOS Liquid Glass V1.9.82",23);
         label("设置自动保存到本机；LSPosed 作用域启用时，重启手机或桌面后自动恢复，无需手动打开应用。",14);
         label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
@@ -126,8 +130,9 @@ public final class MainActivity extends Activity {
             Toast.makeText(this,"已恢复预设前设置；若原生模糊状态改变请重启桌面",Toast.LENGTH_LONG).show();
         });
         label("预设：背景不透明度 95/255、原生色调、高光 55/100、宽度 2 px。原生模糊默认保留当前开关。",13);
-        label("ColorOS 原生模糊隔离实验（切换后重启桌面生效）",18);
-        final Switch nativeExp=toggle("实验 A：仅将材质模糊开关返回值设为 true（风险：桌面异常）","native_blur_experiment_enabled",false);
+        label("ColorOS 原生模糊：随玻璃总开关自动启用，无需单独设置",18);
+        final Switch nativeExp=toggle("原生模糊（由玻璃总开关自动控制）","native_blur_experiment_enabled",true);
+        nativeExp.setEnabled(false);
         Button presetWithBlur=new Button(this);presetWithBlur.setText("应用清透预设并开启原生模糊");root.addView(presetWithBlur);
         presetWithBlur.setOnClickListener(v->{
             clearPreset.performClick();
@@ -137,8 +142,8 @@ public final class MainActivity extends Activity {
         });
         nativeExpUi[0]=nativeExp;
         // Store the integer mode consumed by the provider, not the checkbox key.
-        nativeExp.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean("native_blur_experiment_enabled",on).putInt("native_blur_experiment",on?1:0).apply());
-        label("实验仅修改 Launcher 内部一个已确认的布尔访问器，不修改其他模糊条件。出现闪退或显示异常时关闭此开关并重启桌面。",13);
+        // Native blur is bound to the master glass toggle in the Launcher hook.
+        label("模糊仅覆盖已确认的 Launcher 材质开关访问器；其他 OEM 模糊条件仍由系统控制。",13);
         Switch diag=toggle("详细诊断日志（排查时开启）","diagnostics",false);
         toggle("旧版文件夹内对照图（建议关闭）","wallpaper_compare",false);
         toggle("V1.9.66 实际壁纸像素边缘折射（需先用 Root 导入参考帧）","real_refraction",false);
@@ -149,7 +154,7 @@ public final class MainActivity extends Activity {
         Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
         reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
             .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).putBoolean("native_alpha_probe",false).putBoolean("wallpaper_compare",false).putBoolean("real_refraction",false).apply();
-            nativeExp.setChecked(false);nativeAlpha.setChecked(false);enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(35);highlightWidth.setProgress(1);directional.setChecked(true);probe.setSelection(0);
+            nativeAlpha.setChecked(false);enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(35);highlightWidth.setProgress(1);directional.setChecked(true);probe.setSelection(0);
             Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
         label("提示：色调现在使用原生背景 Alpha 遮罩；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。开启诊断日志后，返回桌面观察文件夹并导出 Vector 日志，搜索 BLUR_PROBE 与 NATIVE_BLUR_CALL。探测不会主动启用模糊。",13);
         setContentView(scroll);

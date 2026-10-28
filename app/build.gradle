@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1979
-        versionName '1.9.79-auto-wallpaper-sync'
+        versionCode 1982
+        versionName '1.9.82-persistent-native-blur'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
