@@ -372,16 +372,54 @@ public final class HookEntry implements IXposedHookLoadPackage {
             MASK_RENDERING.remove();
         }
     }
+    // V1.9.14: self-rendered optical material. No screen capture, no native blur
+    // flags, no synthetic round-rect. The OEM alpha mask remains the sole shape.
+    // This is a physically-inspired glass sheen, NOT a true backdrop blur.
+    private static void drawOpticalGlass(Canvas canvas, MaskCache cache) {
+        if (cache == null || cache.w < 8 || cache.h < 8) return;
+        int layer = canvas.saveLayer(0, 0, cache.w, cache.h, null);
+        try {
+            Paint glass = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            // Low opacity central illumination and darker lower edge add depth
+            // without covering the icon content or changing OEM geometry.
+            glass.setShader(new android.graphics.LinearGradient(
+                0, 0, cache.w * 0.72f, cache.h,
+                new int[]{0x31FFFFFF, 0x12DCEEFF, 0x08FFFFFF, 0x1B7E9BB4},
+                new float[]{0f, 0.30f, 0.68f, 1f},
+                android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, cache.w, cache.h, glass);
+            glass.setShader(null);
+            // A broad curved reflection with very low opacity.
+            glass.setShader(new android.graphics.RadialGradient(
+                cache.w * 0.12f, cache.h * 0.08f,
+                Math.max(cache.w, cache.h) * 0.9f,
+                new int[]{0x24FFFFFF, 0x0AFFFFFF, 0x00FFFFFF},
+                new float[]{0f, 0.50f, 1f},
+                android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, cache.w, cache.h, glass);
+            glass.setShader(null);
+            // Mask the entire optical material to the real OEM alpha shape.
+            glass.setXfermode(new android.graphics.PorterDuffXfermode(
+                android.graphics.PorterDuff.Mode.DST_IN));
+            canvas.drawBitmap(cache.mask, 0, 0, glass);
+            glass.setXfermode(null);
+        } finally {
+            canvas.restoreToCount(layer);
+        }
+    }
     private static void drawMaterialOnNativeCanvas(GradientDrawable drawable, Canvas canvas) {
         if(Boolean.TRUE.equals(MASK_RENDERING.get()) || !glassEnabled || probeMode==1)return;
         boolean tint=tintMode!=0 && tintStrength>0 && probeMode!=2;
         boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
-        if(!tint&&!shine)return;
+        // Optical layer is active whenever the glass switch is on, except probe modes.
+        boolean optical=probeMode==0;
+        if(!tint&&!shine&&!optical)return;
         MaskCache cache=nativeMask(drawable);
         if(cache==null)return;
         Rect b=drawable.getBounds();
         canvas.save();
         canvas.translate(b.left,b.top);
+        if(optical)drawOpticalGlass(canvas,cache);
         if(tint){
             Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             int c=tintColor();
@@ -747,7 +785,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.13 BLUR_DECISION_TRACE_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.14 OPTICAL_GLASS_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
@@ -761,6 +799,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookFolderConditions(p.classLoader);
             hookDecisionChain(p.classLoader);
         }
-        log("V1.9.13 PROBE_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.14 OPTICAL_GLASS_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
