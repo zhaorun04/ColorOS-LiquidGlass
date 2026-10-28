@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1987
-        versionName '1.9.87-refraction-draw-rollback'
+        versionCode 1988
+        versionName '1.9.88-conditional-background-composition'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

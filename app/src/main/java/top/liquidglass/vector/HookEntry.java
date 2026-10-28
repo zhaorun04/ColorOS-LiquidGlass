@@ -1855,6 +1855,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final ThreadLocal<View> ACTIVE_FOLDER_ICON = new ThreadLocal<View>();
     private static final ThreadLocal<Boolean> PREVIEW_SURFACE_DRAWN = new ThreadLocal<Boolean>();
     private static int surfaceOrderLogs = 0;
+    // Only promote a folder to background-after-blur drawing after the OEM callback
+    // has been observed INSIDE its dispatchDraw. A per-view weak map avoids global
+    // assumptions across different ColorOS folder implementations.
+    private static final java.util.Map<View,Boolean> PREVIEW_CONFIRMED =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View,Boolean>());
+    private static final ThreadLocal<Boolean> EARLY_SURFACE_DRAWN = new ThreadLocal<Boolean>();
+    private static final ThreadLocal<Matrix> FOLDER_CANVAS_MATRIX = new ThreadLocal<Matrix>();
+    private static int compositionLogs = 0;
     private static void hookFolderIconCanvasFusion(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
         if (c == null) return;
@@ -1868,11 +1876,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         refresh(v);
                         ACTIVE_FOLDER_ICON.set(v);
                         PREVIEW_SURFACE_DRAWN.set(Boolean.FALSE);
+                        EARLY_SURFACE_DRAWN.set(Boolean.FALSE);
+                        Matrix folderMatrix=new Matrix();
+                        ((Canvas)p.args[0]).getMatrix(folderMatrix);
+                        FOLDER_CANVAS_MATRIX.set(folderMatrix);
                         // V1.9.87: restore the known-working surface entry point.
                         // The OEM preview hook is not guaranteed to run inside dispatchDraw.
-                        if (p.args[0] instanceof Canvas) {
+                        if (!Boolean.TRUE.equals(PREVIEW_CONFIRMED.get(v))) {
                             drawFolderIconFusion(v, (Canvas)p.args[0], false);
-                            if (surfaceOrderLogs++ < 12) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE");
+                            EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
+                            if (surfaceOrderLogs++ < 12) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE fallback=true");
                         }
                     }
                 }
@@ -1881,11 +1894,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                             // Do not draw the surface here: it would cover app icons.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
-                            if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER mode=DISPATCH_AFTER_EDGE previewCallback="+Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()));
+                            boolean callback=Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get());
+                            View icon=(View)p.thisObject;
+                            if (!callback && Boolean.TRUE.equals(PREVIEW_CONFIRMED.remove(icon))) {
+                                // The OEM callback stopped firing. Return to the proven
+                                // fallback next frame, rather than covering child icons here.
+                                icon.postInvalidate();
+                                if(compositionLogs++<24)log("REFRACTION_COMPOSITION_FALLBACK reason=callback_missing");
+                            }
+                            if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER mode=DISPATCH_AFTER_EDGE previewCallback="+callback);
                         }
                     } finally {
                         ACTIVE_FOLDER_ICON.remove();
                         PREVIEW_SURFACE_DRAWN.remove();
+                        EARLY_SURFACE_DRAWN.remove();
+                        FOLDER_CANVAS_MATRIX.remove();
                     }
                 }
             });
@@ -2285,8 +2308,33 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 if(targetCanvas!=null && activeIcon!=null &&
                                         !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
                                     PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
-                                    // V1.9.87: diagnostic only. The surface was drawn at dispatchDraw entry.
-                                    // Do not draw a second pass over the OEM preview.
+                                    // Never double-paint a frame: the first observed callback
+                                    // only arms the new path for the next draw.
+                                    if (!Boolean.TRUE.equals(EARLY_SURFACE_DRAWN.get())) {
+                                        Matrix folder=FOLDER_CANVAS_MATRIX.get();
+                                        Matrix callback=new Matrix();
+                                        Matrix inverse=new Matrix();
+                                        targetCanvas.getMatrix(callback);
+                                        if(folder!=null && callback.invert(inverse)) {
+                                            // Convert FolderIcon-local drawing into the OEM
+                                            // callback's local Canvas coordinate system.
+                                            Matrix localToCallback=new Matrix();
+                                            localToCallback.setConcat(inverse,folder);
+                                            int save=targetCanvas.save();
+                                            try {
+                                                targetCanvas.concat(localToCallback);
+                                                drawFolderIconFusion(activeIcon,targetCanvas,false);
+                                                if(compositionLogs++<24)log("REFRACTION_COMPOSITION mode=AFTER_OEM_BACKGROUND beforeChildren=true");
+                                            } finally { targetCanvas.restoreToCount(save); }
+                                        } else {
+                                            PREVIEW_CONFIRMED.remove(activeIcon);
+                                            if(compositionLogs++<24)log("REFRACTION_COMPOSITION_FALLBACK reason=matrix_unavailable");
+                                        }
+                                    } else {
+                                        if(compositionLogs++<24)log("REFRACTION_COMPOSITION mode=EARLY_FRAME_CALLBACK_OBSERVED");
+                                    }
+                                    if (Boolean.TRUE.equals(EARLY_SURFACE_DRAWN.get()) ||
+                                        (FOLDER_CANVAS_MATRIX.get()!=null)) PREVIEW_CONFIRMED.put(activeIcon,Boolean.TRUE);
                                 }
                                 if (false && targetCanvas!=null && glassEnabled && probeMode!=1) { // V1.9.25: legacy overlay disabled
                                     Object bg=null;
