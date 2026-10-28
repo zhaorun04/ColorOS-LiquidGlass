@@ -1882,11 +1882,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         FOLDER_CANVAS_MATRIX.set(folderMatrix);
                         // V1.9.87: restore the known-working surface entry point.
                         // The OEM preview hook is not guaranteed to run inside dispatchDraw.
-                        if (!Boolean.TRUE.equals(PREVIEW_CONFIRMED.get(v))) {
-                            drawFolderIconFusion(v, (Canvas)p.args[0], false);
-                            EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
-                            if (surfaceOrderLogs++ < 12) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE fallback=true");
-                        }
+                        // V1.9.89: Always preserve the proven pre-background draw.
+                        // A callback observed in a previous frame does not prove that
+                        // it will run or successfully composite in this frame.
+                        drawFolderIconFusion(v, (Canvas)p.args[0], false);
+                        EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
+                        if (surfaceOrderLogs++ < 20) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE fallback=always");
                     }
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -1896,12 +1897,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             boolean callback=Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get());
                             View icon=(View)p.thisObject;
-                            if (!callback && Boolean.TRUE.equals(PREVIEW_CONFIRMED.remove(icon))) {
-                                // The OEM callback stopped firing. Return to the proven
-                                // fallback next frame, rather than covering child icons here.
-                                icon.postInvalidate();
-                                if(compositionLogs++<24)log("REFRACTION_COMPOSITION_FALLBACK reason=callback_missing");
-                            }
+                            if (!callback && compositionLogs++ < 24)
+                                log("REFRACTION_COMPOSITION_FALLBACK reason=callback_missing early_surface_preserved=true");
                             if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER mode=DISPATCH_AFTER_EDGE previewCallback="+callback);
                         }
                     } finally {
@@ -2308,9 +2305,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 if(targetCanvas!=null && activeIcon!=null &&
                                         !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
                                     PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
-                                    // Never double-paint a frame: the first observed callback
-                                    // only arms the new path for the next draw.
-                                    if (!Boolean.TRUE.equals(EARLY_SURFACE_DRAWN.get())) {
+                                    // Draw again AFTER the OEM background when a valid
+                                    // callback Canvas exists. The earlier surface may have
+                                    // been occluded by the OEM background, so it is not a
+                                    // substitute for this later composition pass.
+                                    {
                                         Matrix folder=FOLDER_CANVAS_MATRIX.get();
                                         Matrix callback=new Matrix();
                                         Matrix inverse=new Matrix();
@@ -2333,8 +2332,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                     } else {
                                         if(compositionLogs++<24)log("REFRACTION_COMPOSITION mode=EARLY_FRAME_CALLBACK_OBSERVED");
                                     }
-                                    if (Boolean.TRUE.equals(EARLY_SURFACE_DRAWN.get()) ||
-                                        (FOLDER_CANVAS_MATRIX.get()!=null)) PREVIEW_CONFIRMED.put(activeIcon,Boolean.TRUE);
+                                    // Do not treat callback observation alone as proof
+                                    // that a refractive surface was actually composited.
                                 }
                                 if (false && targetCanvas!=null && glassEnabled && probeMode!=1) { // V1.9.25: legacy overlay disabled
                                     Object bg=null;
