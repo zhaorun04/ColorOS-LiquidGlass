@@ -6,7 +6,7 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 28
+        versionCode 1917
         versionName '1.9.16.1-native-blur-switch-buildfix'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }

@@ -31,6 +31,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "ColorOSLiquidGlass";
     private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
     private static volatile long lastRead = 0;
+    private static volatile long lastExperimentRead = 0;
     private static volatile boolean glassEnabled = false;
     private static volatile int glassAlpha = 210, tintMode = 0, tintStrength = 30;
     private static volatile boolean highlightEnabled = false;
@@ -145,12 +146,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static void refreshConfigFromContext(android.content.Context ctx) {
         long now=android.os.SystemClock.uptimeMillis();
-        if(now-lastRead<1500)return;
+        if(now-lastExperimentRead<1500)return;
         try (Cursor c=ctx.getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 int i=c.getColumnIndex("native_blur_experiment");
                 nativeBlurExperiment=i<0?0:Math.max(0,Math.min(1,c.getInt(i)));
-                lastRead=now;
+                lastExperimentRead=now;
             }
         } catch(Throwable ignored) { /* keep default off on read failure */ }
     }
@@ -172,11 +173,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Drawable d=(Drawable)result;
             if (d instanceof GradientDrawable) {
                 synchronized (TRACKED_BACKGROUNDS) { TRACKED_BACKGROUNDS.add(d); }
+            } else if (d.getClass().getName().endsWith(".LayerBlurDrawable")) {
+                synchronized (TRACKED_BLUR_BACKGROUNDS) { TRACKED_BLUR_BACKGROUNDS.add(d); }
             }
             synchronized(ORIGINAL_ALPHA){if(!ORIGINAL_ALPHA.containsKey(d))ORIGINAL_ALPHA.put(d,d.getAlpha());}
             int original=ORIGINAL_ALPHA.get(d);
             int requested=glassAlpha;
-            int alpha=glassEnabled?requested:original;
+            int alpha=(d.getClass().getName().endsWith(".LayerBlurDrawable")) ? original : (glassEnabled?requested:original);
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
             // V1.9.4 tint is painted directly on the native Canvas after background.draw.
             // Clear any legacy color filter previously applied by V1.9.3.
@@ -189,6 +192,77 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // Drawing inside GradientDrawable.draw(Canvas) uses the SAME canvas matrix and
     // bounds as the native background. No FolderIcon size/padding guesses.
     private static final Set<Drawable> TRACKED_BACKGROUNDS = Collections.newSetFromMap(new WeakHashMap<Drawable, Boolean>());
+    private static final Set<Drawable> TRACKED_BLUR_BACKGROUNDS = Collections.newSetFromMap(new WeakHashMap<Drawable, Boolean>());
+    private static int blurFusionLogs = 0;
+    // This overlay is drawn AFTER the OEM blur drawable, never changing its alpha or blur state.
+    // A round-rect outline is used only when the OEM drawable exposes one. Unknown shapes
+    // deliberately skip the overlay instead of guessing corner geometry.
+    private static void drawBlurGlassOverlay(Drawable drawable, Canvas canvas) {
+        if (!glassEnabled || probeMode == 1) return;
+        Rect bounds = drawable.getBounds();
+        if (bounds.isEmpty()) return;
+        Outline outline = new Outline();
+        drawable.getOutline(outline);
+        Rect r = new Rect();
+        if (!outline.getRect(r) || r.isEmpty() || outline.getRadius() <= 0f) {
+            if (blurFusionLogs++ < 6) log("BLUR_FUSION_SKIPPED reason=outline_unavailable class="+drawableTag(drawable));
+            return;
+        }
+        RectF rect = new RectF(r);
+        float radius = outline.getRadius();
+        int save = canvas.save();
+        try {
+            Path clip = new Path();
+            clip.addRoundRect(rect, radius, radius, Path.Direction.CW);
+            canvas.clipPath(clip);
+            float alphaScale = glassAlpha / 255f;
+            Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            // Glass alpha controls the surface overlay only; it does not alter OEM blur alpha.
+            int topAlpha = Math.round(32f * alphaScale);
+            int bottomAlpha = Math.round(12f * alphaScale);
+            paint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,rect.left,rect.bottom,
+                new int[]{Color.argb(topAlpha,255,255,255),Color.argb(bottomAlpha,180,205,230)},null,
+                android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(rect,radius,radius,paint);
+            paint.setShader(null);
+            if (tintMode != 0 && tintStrength > 0 && probeMode != 2) {
+                paint.setColor(tintColor());
+                paint.setAlpha(Math.round(tintStrength * 0.85f * alphaScale));
+                canvas.drawRoundRect(rect,radius,radius,paint);
+            }
+            if (highlightEnabled && highlightStrength > 0 && probeMode != 3) {
+                float inset = Math.max(0.5f,highlightWidth * 0.35f);
+                RectF inner = new RectF(rect); inner.inset(inset,inset);
+                paint.setStyle(Paint.Style.STROKE);
+                paint.setStrokeWidth(Math.max(1f,highlightWidth));
+                paint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
+                    directionalLight ? new int[]{0xCCFFFFFF,0x66E8F4FF,0x22FFFFFF} : new int[]{0x88FFFFFF,0x88FFFFFF},
+                    null,android.graphics.Shader.TileMode.CLAMP));
+                paint.setAlpha(Math.round(highlightStrength * 255f / 100f));
+                canvas.drawRoundRect(inner,Math.max(0,radius-inset),Math.max(0,radius-inset),paint);
+            }
+            if (blurFusionLogs++ < 10) log("BLUR_FUSION_APPLIED drawable="+drawableTag(drawable)+" bounds="+r.toShortString()+" radius="+radius);
+        } finally { canvas.restoreToCount(save); }
+    }
+    private static void hookLayerBlurDrawableDraw(ClassLoader loader) {
+        try {
+            Class<?> type = Class.forName("com.android.launcher3.uioverrides.states.blurdrawable.LayerBlurDrawable",false,loader);
+            Method draw = type.getDeclaredMethod("draw",Canvas.class);
+            draw.setAccessible(true);
+            XposedBridge.hookMethod(draw,new XC_MethodHook(){
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (!(param.thisObject instanceof Drawable) || param.args == null || param.args.length < 1 || !(param.args[0] instanceof Canvas)) return;
+                    Drawable d=(Drawable)param.thisObject;
+                    synchronized(TRACKED_BLUR_BACKGROUNDS) { if (!TRACKED_BLUR_BACKGROUNDS.contains(d)) return; }
+                    try { drawBlurGlassOverlay(d,(Canvas)param.args[0]); }
+                    catch(Throwable t) { if(blurFusionLogs++<10)log("BLUR_FUSION_FAILED reason="+t.getClass().getSimpleName()); }
+                }
+            });
+            installed++;
+            log("BLUR_FUSION_HOOK_INSTALLED class="+type.getName());
+        } catch(Throwable t) { log("BLUR_FUSION_HOOK_UNAVAILABLE reason="+t.getClass().getSimpleName()); }
+    }
+
     private static int geometryLogs = 0;
     private static int nativeDrawLogs = 0;
     private static int contourTraceLogs = 0;
@@ -881,13 +955,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
-        log("V1.9.16 NATIVE_BLUR_EXPERIMENT_LOADED package=" + p.packageName + " process=" + p.processName);
+        log("V1.9.17 NATIVE_BLUR_EXPERIMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
             hook(find("com.android.systemui.qs.QSPanel", p.classLoader), "onLayout", layout, "QSPanel", false);
         } else {
             hookNativeDrawableDraw();
+            hookLayerBlurDrawableDraw(p.classLoader);
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookPreview(p.classLoader);
@@ -896,6 +971,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDecisionChain(p.classLoader);
             hookNativeBlurConditions(p.classLoader);
         }
-        log("V1.9.16 NATIVE_BLUR_EXPERIMENT_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
+        log("V1.9.17 NATIVE_BLUR_EXPERIMENT_READY package=" + p.packageName + " installed=" + installed + " failed=" + failed);
     }
 }
