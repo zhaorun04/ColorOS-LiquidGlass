@@ -314,6 +314,68 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
         }catch(Throwable t){log("FUSION_GEOMETRY_FAILED "+t.getClass().getSimpleName());}
     }
+    // V1.9.24: Feather only the material fill, not the OEM blur or icon content.
+    // The OEM contour is not available as a Path; a gradual inner fade prevents
+    // the independently drawn rounded-rect fill from producing a hard second edge.
+    private static final java.util.LinkedHashMap<String, android.graphics.Bitmap> EDGE_MASK_CACHE =
+        new java.util.LinkedHashMap<String, android.graphics.Bitmap>(12, 0.75f, true) {
+            @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, android.graphics.Bitmap> e) {
+                return size() > 8;
+            }
+        };
+    private static android.graphics.Bitmap materialEdgeMask(int width, int height, float radius, float feather) {
+        if (width <= 0 || height <= 0 || width > 1200 || height > 1200) return null;
+        String key = width+"x"+height+"/"+Math.round(radius*4)+"/"+Math.round(feather*4);
+        synchronized (EDGE_MASK_CACHE) {
+            android.graphics.Bitmap cached = EDGE_MASK_CACHE.get(key);
+            if (cached != null && !cached.isRecycled()) return cached;
+        }
+        android.graphics.Bitmap mask = android.graphics.Bitmap.createBitmap(width,height,android.graphics.Bitmap.Config.ARGB_8888);
+        int[] pixels = new int[width*height];
+        float r = Math.min(radius,Math.min(width,height)*0.5f);
+        float cx = width*0.5f, cy = height*0.5f;
+        float bx = width*0.5f-r, by = height*0.5f-r;
+        float soft = Math.max(3f,feather);
+        for (int y=0;y<height;y++) {
+            float py = Math.abs(y+0.5f-cy)-by;
+            for (int x=0;x<width;x++) {
+                float px = Math.abs(x+0.5f-cx)-bx;
+                float outside = (float)Math.hypot(Math.max(px,0f),Math.max(py,0f));
+                float inside = Math.min(Math.max(px,py),0f);
+                float signed = outside+inside-r;
+                float t = Math.max(0f,Math.min(1f,(-signed)/soft));
+                t=t*t*(3f-2f*t);
+                int alpha=Math.round(t*255f);
+                pixels[y*width+x]=(alpha<<24)|0x00FFFFFF;
+            }
+        }
+        mask.setPixels(pixels,0,width,0,0,width,height);
+        synchronized (EDGE_MASK_CACHE) { EDGE_MASK_CACHE.put(key,mask); }
+        return mask;
+    }
+    private static void drawFeatheredMaterial(Canvas canvas, RectF rect, float radius, float opacity) {
+        int width=Math.round(rect.width()), height=Math.round(rect.height());
+        float feather=Math.max(5f,Math.min(12f,Math.min(rect.width(),rect.height())*0.055f));
+        android.graphics.Bitmap mask=materialEdgeMask(width,height,radius,feather);
+        if (mask == null) return;
+        int layer=canvas.saveLayer(rect,null);
+        try {
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setColor(Color.argb(Math.round(34f*opacity),245,250,255));
+            canvas.drawRect(rect,p);
+            if (tintMode != 0 && tintStrength > 0 && probeMode != 2) {
+                p.setColor(tintColor());
+                p.setAlpha(Math.min(255,Math.round(tintStrength*opacity*1.5f)));
+                canvas.drawRect(rect,p);
+            }
+            p.reset();
+            p.setAntiAlias(true);
+            p.setFilterBitmap(true);
+            p.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN));
+            canvas.drawBitmap(mask,null,rect,p);
+            p.setXfermode(null);
+        } finally { canvas.restoreToCount(layer); }
+    }
     private static int folderFusionLogs = 0;
     private static final ThreadLocal<Boolean> FOLDER_FUSION_GUARD = new ThreadLocal<Boolean>();
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
@@ -375,17 +437,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             FOLDER_FUSION_GUARD.set(Boolean.TRUE);
             try {
                 if (!edgeOnly) {
-                    Path mask = new Path();
-                    mask.addRoundRect(rect,radius,radius,Path.Direction.CW);
-                    canvas.clipPath(mask);
-                    float opacity = glassAlpha / 255f;
-                    paint.setColor(Color.argb(Math.round(34f*opacity),245,250,255));
-                    canvas.drawRoundRect(rect,radius,radius,paint);
-                    if (tintMode != 0 && tintStrength > 0 && probeMode != 2) {
-                        paint.setColor(tintColor());
-                        paint.setAlpha(Math.round(tintStrength * opacity * 1.5f));
-                        canvas.drawRoundRect(rect,radius,radius,paint);
-                    }
+                    // No hard rounded-rect fill edge: fade to transparent before
+                    // reaching the OEM contour. Do not clip the Canvas here.
+                    drawFeatheredMaterial(canvas,rect,radius,glassAlpha/255f);
                 } else if (highlightEnabled && highlightStrength > 0 && probeMode != 3) {
                     float stroke = Math.max(1f,highlightWidth);
                     float inset = stroke * 0.5f;
@@ -403,7 +457,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " tint="+tintMode+" highlight="+highlightEnabled+" stroke="+highlightWidth+" OEM_RADIUS_UNCHANGED");
+                    " tint="+tintMode+" highlight="+highlightEnabled+" stroke="+highlightWidth+" OEM_RADIUS_UNCHANGED MATERIAL_EDGE_FEATHERED");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
