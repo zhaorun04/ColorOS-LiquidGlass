@@ -307,52 +307,87 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 + " reason=need_pre_folder_composited_frame_not_root_screenshot");
         } catch (Throwable t) { log("REFRACTION_FEASIBILITY_ERROR " + t.getClass().getSimpleName()); }
     }
-    // V1.9.43: bounded, read-only scroll coordinate observations. This is NOT
-    // wallpaper-offset tracking or a source of pre-folder backdrop pixels.
+    // V1.9.44: observe offsets submitted by Launcher to WallpaperManager.
+    // These are normalized requests, NOT proof of final compositor crop or pixels.
+    private static volatile float wallpaperRequestedX = Float.NaN;
+    private static volatile float wallpaperRequestedY = Float.NaN;
+    private static volatile long wallpaperOffsetTime = 0L;
+    private static int wallpaperOffsetLogs = 0;
     private static final java.util.Map<View, long[]> REFRACTION_MOTION =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, long[]>());
     private static int refractionMotionLogs = 0;
-    private static void inspectScrollCoordinates(View folder) {
-        if (!diagnostics || refractionMotionLogs >= 36 || !folder.isAttachedToWindow()) return;
+    private static void hookWallpaperOffsetRequests() {
         try {
-            long now = android.os.SystemClock.uptimeMillis();
-            int[] screen = new int[2];
-            folder.getLocationOnScreen(screen);
+            for (Method m : android.app.WallpaperManager.class.getDeclaredMethods()) {
+                if (!"setWallpaperOffsets".equals(m.getName())) continue;
+                Class<?>[] args = m.getParameterTypes();
+                if (args.length != 3 || args[1] != float.class || args[2] != float.class) continue;
+                XposedBridge.hookMethod(m, new XC_MethodHook() {
+                    @Override protected void beforeHookedMethod(MethodHookParam p) {
+                        if (!(p.args[1] instanceof Float) || !(p.args[2] instanceof Float)) return;
+                        float x=(Float)p.args[1], y=(Float)p.args[2];
+                        wallpaperRequestedX=x; wallpaperRequestedY=y;
+                        wallpaperOffsetTime=android.os.SystemClock.uptimeMillis();
+                        if (diagnostics && wallpaperOffsetLogs++ < 40)
+                            log("REFRACTION_WALLPAPER_OFFSET_REQUEST x="+x+" y="+y
+                                +" timestamp="+wallpaperOffsetTime+" source=WallpaperManager.setWallpaperOffsets");
+                    }
+                });
+                installed++;
+                log("REFRACTION_WALLPAPER_OFFSET_HOOK installed=true");
+                return;
+            }
+            log("REFRACTION_WALLPAPER_OFFSET_HOOK installed=false reason=method_not_found");
+        } catch (Throwable t) {
+            failed++;
+            log("REFRACTION_WALLPAPER_OFFSET_HOOK installed=false reason="+t.getClass().getSimpleName());
+        }
+    }
+    private static void inspectScrollCoordinates(View folder) {
+        if (!diagnostics || refractionMotionLogs >= 48 || !folder.isAttachedToWindow()) return;
+        try {
+            long now=android.os.SystemClock.uptimeMillis();
+            int[] screen=new int[2]; folder.getLocationOnScreen(screen);
+            int w=folder.getWidth(), h=folder.getHeight();
+            if (w<=0 || h<=0) return;
+            android.util.DisplayMetrics dm=folder.getResources().getDisplayMetrics();
+            int sw=dm.widthPixels, sh=dm.heightPixels;
+            boolean visible=screen[0]<sw && screen[1]<sh && screen[0]+w>0 && screen[1]+h>0;
+            boolean fullyVisible=screen[0]>=0 && screen[1]>=0 && screen[0]+w<=sw && screen[1]+h<=sh;
             long[] prev;
             synchronized (REFRACTION_MOTION) {
-                prev = REFRACTION_MOTION.get(folder);
-                if (prev != null && now - prev[0] < 350L) return;
-                if (prev != null && now - prev[0] < 1800L &&
-                    Math.abs(screen[0] - prev[1]) < 2 && Math.abs(screen[1] - prev[2]) < 2) return;
-                REFRACTION_MOTION.put(folder, new long[]{now, screen[0], screen[1]});
+                prev=REFRACTION_MOTION.get(folder);
+                if (prev!=null && now-prev[0]<300L) return;
+                if (prev!=null && now-prev[0]<1500L &&
+                    Math.abs(screen[0]-prev[1])<2 && Math.abs(screen[1]-prev[2])<2) return;
+                REFRACTION_MOTION.put(folder,new long[]{now,screen[0],screen[1]});
             }
-            int dx = prev == null ? 0 : screen[0] - (int) prev[1];
-            int dy = prev == null ? 0 : screen[1] - (int) prev[2];
-            View ancestor = folder;
-            StringBuilder chain = new StringBuilder();
-            for (int i = 0; i < 7 && ancestor != null; i++) {
-                if (i > 0) chain.append('>');
-                chain.append(ancestor.getClass().getSimpleName())
-                     .append('(').append(ancestor.getScrollX()).append(',')
-                     .append(ancestor.getScrollY()).append(')');
-                Object parent = ancestor.getParent();
-                ancestor = parent instanceof View ? (View) parent : null;
+            int dx=prev==null?0:screen[0]-(int)prev[1];
+            int dy=prev==null?0:screen[1]-(int)prev[2];
+            View ancestor=folder;
+            StringBuilder chain=new StringBuilder();
+            for(int i=0;i<7 && ancestor!=null;i++) {
+                if(i>0)chain.append('>');
+                chain.append(ancestor.getClass().getSimpleName()).append('(')
+                    .append(ancestor.getScrollX()).append(',').append(ancestor.getScrollY()).append(')');
+                Object parent=ancestor.getParent();
+                ancestor=parent instanceof View?(View)parent:null;
             }
             refractionMotionLogs++;
-            log("REFRACTION_SCROLL_SAMPLE screen=[" + screen[0] + "," + screen[1]
-                + "] delta=[" + dx + "," + dy + "] size="
-                + folder.getWidth() + "x" + folder.getHeight()
-                + " translation=[" + folder.getTranslationX() + "," + folder.getTranslationY() + "]"
-                + " ancestorScroll=" + chain.toString());
-            if (refractionMotionLogs == 1) {
-                log("REFRACTION_COORDINATE_LIMIT wallpaperOffset=UNVERIFIED"
-                    + " wallpaperCrop=UNVERIFIED wallpaperScale=UNVERIFIED"
-                    + " backdropPixels=UNAVAILABLE sampling=false"
-                    + " reason=screen_position_alone_cannot_map_wallpaper_pixels");
-            }
-        } catch (Throwable t) {
-            if (refractionMotionLogs++ < 36)
-                log("REFRACTION_SCROLL_ERROR " + t.getClass().getSimpleName());
+            log("REFRACTION_SCROLL_SAMPLE id="+Integer.toHexString(System.identityHashCode(folder))
+                +" screen=["+screen[0]+","+screen[1]+"] delta=["+dx+","+dy+"]"
+                +" size="+w+"x"+h+" viewport="+sw+"x"+sh
+                +" visible="+visible+" fullyVisible="+fullyVisible
+                +" wallpaperRequest=["+wallpaperRequestedX+","+wallpaperRequestedY+"]"
+                +" wallpaperRequestAgeMs="+(wallpaperOffsetTime==0?-1:now-wallpaperOffsetTime)
+                +" ancestorScroll="+chain);
+            if(refractionMotionLogs==1)
+                log("REFRACTION_COORDINATE_LIMIT wallpaperOffset=REQUEST_ONLY"
+                    +" wallpaperCrop=UNVERIFIED wallpaperScale=UNVERIFIED"
+                    +" backdropPixels=UNAVAILABLE sampling=false"
+                    +" reason=wallpaper_manager_requests_not_final_surface_transform");
+        } catch(Throwable t) {
+            if(refractionMotionLogs++<48)log("REFRACTION_SCROLL_ERROR "+t.getClass().getSimpleName());
         }
     }
     private static void applyNativeBackground(View v) {
@@ -1547,6 +1582,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
             hook(find("com.android.systemui.qs.QSPanel", p.classLoader), "onLayout", layout, "QSPanel", false);
         } else {
+            hookWallpaperOffsetRequests();
             hookNativeDrawableDraw();
             // V1.9.18: render from the confirmed preview drawBackground entry, not a nonexistent LayerBlurDrawable.draw override.
             hook(find("com.android.launcher3.folder.Folder", p.classLoader), "onAttachedToWindow", new Class<?>[0], "Folder", false);
