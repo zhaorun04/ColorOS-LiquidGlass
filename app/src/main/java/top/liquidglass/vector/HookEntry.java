@@ -45,7 +45,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // the background corner radius and is not a verified blur-strength API.
     private static volatile int blurRadiusPercent = 100; // legacy config ignored
     private static volatile int customBlurDp=14, refractionPercent=35, glassTintOpacity=18, customBlurMode=1;
-    private static volatile int dynamicSheenMode=0; // 0=off, 1=smooth, 2=original diagnostic
     private static volatile boolean clearRefraction=false; // false: frosted glass, true: clear refraction
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_FRAME;
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_SOURCE;
@@ -196,7 +195,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
             nativeAlphaProbe=false;wallpaperCompare=x[13]==1;REFRACTION_ENABLED=x[14]==1;
             if(v.length>=20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
             if(v.length>=21)clearRefraction="1".equals(v[20]);
-            dynamicSheenMode=v.length>=22?clampInt(Integer.parseInt(v[21]),0,2):0;
             configEverLoaded=true;
             if(previousRefraction!=REFRACTION_ENABLED){
                 REFRACTION_CONFIG_EPOCH++;
@@ -237,8 +235,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 wallpaperCompare=visualIndex>=0 && c.getInt(visualIndex)==1;
                 int clearIndex=c.getColumnIndex("clear_refraction");
                 clearRefraction=clearIndex>=0 && c.getInt(clearIndex)==1;
-                int sheenIndex=c.getColumnIndex("dynamic_sheen_mode");
-                dynamicSheenMode=sheenIndex>=0?clampInt(c.getInt(sheenIndex),0,2):0;
                 int refractIndex=c.getColumnIndex("real_refraction");
                 REFRACTION_ENABLED=refractIndex>=0 && c.getInt(refractIndex)==1;
                 highlightStrength=Math.max(0,Math.min(100,c.getInt(6)));
@@ -1681,7 +1677,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     return;
                 }
                 modified=local.lastModified();length=local.length();
-                if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
+                if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH){
+                    if(customBlurMode==1 && customBlurDp>0){
+                        android.util.DisplayMetrics metrics=app.getResources().getDisplayMetrics();
+                        blurredWallpaper(REFRACTION_FRAME,metrics.density,null);
+                    }
+                    return;
+                }
                 android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
                 opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
                 next=android.graphics.BitmapFactory.decodeFile(local.getAbsolutePath(),opts);
@@ -1758,7 +1760,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
         long opticalMotionRevision=-1L;
         long opticalLastMoveAt=0L;
         boolean opticalSettleScheduled=false;
-        float sheenProgress=0f; long sheenLastTick=0L; long sheenLastMove=0L;
     }
     private static DynamicRefraction dynamicState(final View view) {
         DynamicRefraction state=DYNAMIC_REFRACTION.get(view);
@@ -1775,7 +1776,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     float[] xy=dynamicScreenPosition(view,tracked);
                     if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>0.5f || Math.abs(xy[1]-tracked.lastY)>0.5f){
                         tracked.lastX=xy[0];tracked.lastY=xy[1];
-                        tracked.sheenLastMove=android.os.SystemClock.uptimeMillis();
                         view.invalidate();
                     }
                 }catch(Throwable ignored){}
@@ -1792,26 +1792,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // is deliberately left untouched, preserving V1.9.74 corner geometry.
     // V1.9.131: no motion-triggered invalidate loop. Wallpaper-position updates
     // are already handled by the pre-draw location observer.
-    private static float smoothHighlightProgress(final View view, final DynamicRefraction state) {
-        if(dynamicSheenMode==0 || !REFRACTION_ENABLED){state.sheenProgress=0f;return 0f;}
-        long now=android.os.SystemClock.uptimeMillis();
-        if(dynamicSheenMode==2)return now-state.sheenLastMove<120?1f:0f;
-        long elapsed=state.sheenLastTick==0?16:Math.min(100,Math.max(1,now-state.sheenLastTick));
-        state.sheenLastTick=now;
-        boolean moving=now-state.sheenLastMove<85;
-        float target=moving?1f:0f;
-        float tau=moving?180f:350f;
-        float factor=1f-(float)Math.exp(-elapsed/tau);
-        state.sheenProgress+= (target-state.sheenProgress)*factor;
-        if(state.sheenProgress<0.008f && !moving)state.sheenProgress=0f;
-        if((moving || state.sheenProgress>0f) && !state.opticalSettleScheduled){
-            state.opticalSettleScheduled=true;
-            view.postDelayed(new Runnable(){public void run(){state.opticalSettleScheduled=false;
-                if(view.isAttachedToWindow() && REFRACTION_ENABLED && dynamicSheenMode==1) view.postInvalidateOnAnimation();
-            }},48);
-        }
-        return state.sheenProgress;
-    }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
         view.transformMatrixToGlobal(state.transform);
@@ -1987,7 +1967,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // even at rest. Motion adds only a small bounded enhancement.
         "  float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
         "  float light=smoothstep(0.58,0.96,lum);\n"+
-        "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled*motionHighlight;\n"+
+        "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled;\n"+
         "  float motion=0.0; // No touch-triggered luminance jumps\n"+
         "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));\n"+
         "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
@@ -2085,7 +2065,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(REFRACTION_LOGS++<24)log("GLASS137_BLUR_READY radiusDp="+requested+" texture="+w+"x"+h);
                 }else result.recycle();
             }catch(Throwable t){log("GLASS126_BLUR_FAILED "+t.getClass().getSimpleName());}
-            finally{if(small!=null && !small.isRecycled())small.recycle();BLUR_PENDING=false;}
+            finally{
+                if(small!=null && !small.isRecycled())small.recycle();
+                synchronized(HookEntry.class){BLUR_PENDING=false;}
+                // A settings/wallpaper change while the worker was busy must not
+                // strand the new request until a later user gesture.
+                android.graphics.Bitmap current=REFRACTION_FRAME;
+                if(current!=null && !current.isRecycled() && customBlurMode==1 && customBlurDp>0
+                    && (CUSTOM_BLUR_SOURCE!=current || CUSTOM_BLUR_RADIUS!=customBlurDp
+                        || CUSTOM_BLUR_FRAME==null || CUSTOM_BLUR_FRAME.isRecycled())){
+                    blurredWallpaper(current,density,null);
+                }
+            }
         });
         return null;
     }
@@ -2200,8 +2191,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // stays locked to the real screen position on every frame.
                     state.continuousShader.setFloatUniform("stableOpticalMode",opticalAb==0?1.0f:0.0f);
                     state.continuousShader.setFloatUniform("clearRefraction",clearRefraction?1.0f:0.0f);
-                    state.continuousShader.setFloatUniform("opticalSheenEnabled",dynamicSheenMode==0?0.0f:1.0f); // diagnostic AGSL: isolate sheen from wallpaper sampling
-                    state.continuousShader.setFloatUniform("motionHighlight",smoothHighlightProgress(view,state)); // V1.9.131: optical lighting is position/brightness-driven, not touch-driven
+                    state.continuousShader.setFloatUniform("opticalSheenEnabled",1.0f); // constant material response, never a touch gate
+                    state.continuousShader.setFloatUniform("motionHighlight",0.0f); // legacy uniform disabled; no touch-driven sheen
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
@@ -3364,18 +3355,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // Keep checking until both configuration and wallpaper are ready.
                 // A frame alone is not proof that refraction is enabled.
                 restoreBootSnapshot(app);
-                if(REFRACTION_ENABLED && REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()){
-                    log("BOOT_REFRACTION_READY source=GLOBAL_SNAPSHOT attempts="+attempts);
+                android.graphics.Bitmap reference=REFRACTION_FRAME;
+                boolean frameReady=reference!=null && !reference.isRecycled();
+                boolean blurWanted=customBlurMode==1 && customBlurDp>0;
+                boolean blurReady=!blurWanted || (frameReady && CUSTOM_BLUR_SOURCE==reference
+                    && CUSTOM_BLUR_RADIUS==customBlurDp && CUSTOM_BLUR_FRAME!=null
+                    && !CUSTOM_BLUR_FRAME.isRecycled());
+                if(frameReady && blurWanted && !blurReady){
+                    blurredWallpaper(reference,app.getResources().getDisplayMetrics().density,null);
+                }
+                if(frameReady && blurReady){
+                    log("BOOT_MATERIAL_READY source=GLOBAL_SNAPSHOT attempts="+attempts);
                     invalidateGlassViews();
                     return;
                 }
-                if(++attempts>180){log("BOOT_PREWARM_TIMEOUT");return;}
+                if(++attempts>180){log("BOOT_PREWARM_TIMEOUT frame="+frameReady+" blur="+blurReady);return;}
                 // Retry also when the snapshot arrives later than Launcher attach.
-                if(REFRACTION_ENABLED || customBlurMode==1) scheduleReferenceLoad(app,null);
+                if(REFRACTION_ENABLED || blurWanted) scheduleReferenceLoad(app,null);
                 if(attempts==1 || attempts%15==0)
                     log("BOOT_PREWARM_WAIT attempt="+attempts+" enabled="+REFRACTION_ENABLED
                         +" loading="+REFRACTION_LOADING);
-                handler.postDelayed(this,1000L);
+                handler.postDelayed(this,frameReady?120L:250L);
             }
         };
         handler.post(task[0]);

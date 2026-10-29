@@ -66,15 +66,6 @@ public final class MainActivity extends Activity {
         });
         toggle("真实壁纸折射","real_refraction",false);
         toggle("清晰折射（关闭则为柔和磨砂折射）","clear_refraction",false);
-        TextView sheenLabel=text("动态光学高光（独立于壁纸折射）",13,false);current.addView(sheenLabel);
-        Spinner sheenMode=new Spinner(this);
-        String[] sheenModes={"关闭 · 推荐（保留折射）","平滑 · 渐入180ms / 渐出350ms","原始 · 诊断对照"};
-        sheenMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,sheenModes));
-        sheenMode.setSelection(Math.max(0,Math.min(2,prefs.getInt("dynamic_sheen_mode",0))));current.addView(sheenMode);
-        sheenMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){prefs.edit().putInt("dynamic_sheen_mode",pos).commit();}
-            public void onNothingSelected(android.widget.AdapterView<?> parent){}
-        });
         // Legacy native_alpha_probe is deliberately disabled: blur and material opacity are separate.
         prefs.edit().putBoolean("native_alpha_probe",false).apply();
         TextView blurInfo=text("自定义模糊使用壁纸采样，不模糊应用图标。系统模糊开关不再强制开启；ColorOS 自身仍可能启用原生模糊。",12,false);current.addView(blurInfo);

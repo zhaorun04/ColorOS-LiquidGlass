@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191390
-        versionName '1.9.139-refraction-sheen-decoupled'
+        versionCode 191400
+        versionName '1.9.140-static-optics-blur-readiness'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
