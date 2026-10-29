@@ -1708,27 +1708,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
         view.postInvalidate(); // Draw a stable refraction frame even before the first swipe
         return state;
     }
-    // Temporal smoothing lives in the actual AGSL drawing path, not the touch detector.
-    // Keep the static appearance unchanged. Movement temporarily reduces only the
-    // *additional sampled highlight*, then eases back to the original strength.
+    // V1.9.103: a slow optical highlight envelope rather than an on/off touch gate.
+    // The static material stays at 1.0; movement adds a subtle, slowly rising
+    // highlight, which then fades back smoothly. No touch-time hard jumps.
     private static float smoothedOpticalOpacity(View view, DynamicRefraction state) {
         long now=android.os.SystemClock.uptimeMillis();
         if(state.opticalMotionRevision!=wallpaperOffsetRevision){
             state.opticalMotionRevision=wallpaperOffsetRevision;
             state.opticalLastMoveAt=now;
         }
-        boolean moving=state.opticalLastMoveAt>0L && now-state.opticalLastMoveAt<115L;
-        float target=moving?0.72f:1f;
-        long dt=state.opticalUpdatedAt==0L?0L:Math.min(100L,Math.max(0L,now-state.opticalUpdatedAt));
+        // Hold the requested glow briefly so even a 1px flick can bloom gently.
+        boolean glowRequested=state.opticalLastMoveAt>0L && now-state.opticalLastMoveAt<350L;
+        float target=glowRequested?1.28f:1.0f;
+        long dt=state.opticalUpdatedAt==0L?0L:Math.min(64L,Math.max(0L,now-state.opticalUpdatedAt));
         state.opticalUpdatedAt=now;
         if(dt>0L){
-            float tau=moving?125f:310f;
+            float tau=glowRequested?450f:800f;
             float factor=1f-(float)Math.exp(-dt/tau);
             state.opticalOpacity+=(target-state.opticalOpacity)*factor;
         }
-        if(Math.abs(target-state.opticalOpacity)>0.008f && view.isAttachedToWindow())
+        if(Math.abs(target-state.opticalOpacity)>0.002f && view.isAttachedToWindow())
             view.postInvalidateDelayed(16L);
-        return Math.max(0.70f,Math.min(1f,state.opticalOpacity));
+        return Math.max(1f,Math.min(1.28f,state.opticalOpacity));
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
