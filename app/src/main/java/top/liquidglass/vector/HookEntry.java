@@ -1683,6 +1683,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         final Matrix transform=new Matrix(), shaderMatrix=new Matrix();
         final Paint samplePaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
         final Paint rimPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        final Paint cachedBlurPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+        final Matrix cachedBlurMatrix=new Matrix();
+        android.graphics.Bitmap cachedBlurBitmap;
+        android.graphics.BitmapShader cachedBlurShader;
+        final Paint cachedTintPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         final Path clip=new Path();
         android.graphics.BitmapShader shader;
         android.graphics.RuntimeShader continuousShader;
@@ -1754,7 +1759,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // delayed frame also crosses the MOVING -> SETTLED boundary even
             // when the motion envelope has already reached its target.
             if(Math.abs(target-state.opticalOpacity)>0.003f){
-                view.postInvalidateDelayed(16L);
+                view.postInvalidateDelayed(32L);
             }else if(active && !state.opticalSettleScheduled){
                 state.opticalSettleScheduled=true;
                 final DynamicRefraction scheduled=state;
@@ -1920,9 +1925,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // even at rest. Motion adds only a small bounded enhancement.
         "  float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
         "  float light=smoothstep(0.58,0.96,lum);\n"+
-        "  float ambient=0.022*light*(0.28+0.72*edgeSheen);\n"+
-        "  float motion=0.020*motionHighlight*light*edgeSheen;\n"+
-        "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.045)));\n"+
+        "  float ambient=0.070*light*(0.35+0.65*edgeSheen);\n"+
+        "  float motion=0.006*motionHighlight*light*edgeSheen;\n"+
+        "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.080)));\n"+
         "  color.a=half(0.65*temporalOpacity);return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -1940,7 +1945,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float edgeOpacity=0.115*edgeWeight*(1.0-0.75*bright);\n"+
         " float neutralOpacity=0.055*bright;\n"+
         " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
-        " float softSheen=(0.016+0.025*motionHighlight)*envelope*smoothstep(0.52,0.96,luminance);\n"+
+        " float softSheen=(0.035+0.004*motionHighlight)*envelope*smoothstep(0.52,0.96,luminance);\n"+
         " color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));\n"+
         " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
         " return color;\n"+
@@ -2140,18 +2145,23 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(customBlurMode==1 && customBlurDp>0){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
                 if(blurred!=null){
-                    Paint blurPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-                    blurPaint.setAlpha(REFRACTION_ENABLED && refractionPercent>0 ? 180 : 255);
-                    android.graphics.BitmapShader blurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
-                    Matrix bm=new Matrix();bm.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());bm.postTranslate(-left,-top);
-                    blurShader.setLocalMatrix(bm);blurPaint.setShader(blurShader);
-                    canvas.drawRoundRect(rect,contourRadius,contourRadius,blurPaint);
+                    if(state.cachedBlurBitmap!=blurred || state.cachedBlurShader==null){
+                        state.cachedBlurBitmap=blurred;
+                        state.cachedBlurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+                        state.cachedBlurPaint.setShader(state.cachedBlurShader);
+                    }
+                    state.cachedBlurPaint.setAlpha(REFRACTION_ENABLED && refractionPercent>0 ? 180 : 255);
+                    state.cachedBlurMatrix.reset();
+                    state.cachedBlurMatrix.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());
+                    state.cachedBlurMatrix.postTranslate(-left,-top);
+                    state.cachedBlurShader.setLocalMatrix(state.cachedBlurMatrix);
+                    canvas.drawRoundRect(rect,contourRadius,contourRadius,state.cachedBlurPaint);
                     if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<48)log("GLASS126_BLUR_DRAWN enabled="+REFRACTION_ENABLED+" radiusDp="+customBlurDp);
                 }
             }
             // Glass material is last, so AGSL cannot overwrite its opacity/style.
             if(glassTintOpacity>0){
-                Paint tintPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+                Paint tintPaint=state.cachedTintPaint;
                 int tint=tintColor();
                 tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
                 canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);
@@ -2244,7 +2254,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 float envelope=1f;
                 if(edgeOnly && probeMode==0 && highlightEnabled && highlightStrength>0){
                     DynamicRefraction animation=dynamicState(v);
-                    float motion=smoothHighlightProgress(v,animation);
                     envelope=1.0f; // keep the native outline static; motion sheen lives in AGSL only
                 }
                 drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
