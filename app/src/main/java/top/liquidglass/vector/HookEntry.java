@@ -1483,6 +1483,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } finally { canvas.restoreToCount(layer); }
     }
     private static void drawUnifiedMaterial(Canvas canvas, MaskCache cache, boolean edgeOnly) {
+        drawUnifiedMaterial(canvas,cache,edgeOnly,1f);
+    }
+    // V1.9.105: apply one temporal envelope to ALL native-shaped highlight
+    // passes, not an additional overlay. Keep mask geometry unchanged.
+    private static void drawUnifiedMaterial(Canvas canvas, MaskCache cache, boolean edgeOnly, float highlightEnvelope) {
         if(cache==null)return;
         boolean tint=tintMode!=0 && tintStrength>0 && probeMode!=2;
         boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
@@ -1497,7 +1502,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 canvas.drawBitmap(cache.mask,0,0,p);
             }
         } else if(shine) {
-            float strength=probeMode==2?1f:highlightStrength/100f;
+            float strength=probeMode==2?1f:(highlightStrength/100f)*Math.max(0f,Math.min(1f,highlightEnvelope));
             Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             if(probeMode==2){
                 p.setAlpha(205);
@@ -1675,6 +1680,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         android.graphics.Shader rimGradient;
         android.graphics.Bitmap source;
         float lastX=Float.NaN,lastY=Float.NaN;
+        // V1.9.106: per-folder time-filtered wallpaper sampling coordinates.
+        float opticalSampleX=Float.NaN, opticalSampleY=Float.NaN;
+        long opticalSampleAt=0L;
         android.view.ViewTreeObserver.OnPreDrawListener listener;
         int moveLogs;
         // Per-folder temporal response: smooth the optical overlay on real movement.
@@ -1717,7 +1725,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.opticalMotionRevision=wallpaperOffsetRevision;
             state.opticalLastMoveAt=now;
         }
-        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<240L;
+        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<650L;
         final float target=active?1f:0f;
         // Use elapsed real time rather than capping dt to 64ms: otherwise an
         // interrupted render loop can leave the animation apparently stuck.
@@ -1731,17 +1739,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(Math.abs(target-state.opticalOpacity)>0.003f && view.isAttachedToWindow())
             view.postInvalidateDelayed(16L);
         return Math.max(0f,Math.min(1f,state.opticalOpacity));
-    }
-    private static void drawAnimatedHighlight(View view,Canvas canvas,MaskCache cache){
-        if(view==null || cache==null || !highlightEnabled || highlightStrength<=0 || probeMode!=0)return;
-        DynamicRefraction state=dynamicState(view);
-        float progress=smoothHighlightProgress(view,state);
-        if(progress<=0.003f)return;
-        // Draw ONLY the extra moving glow; the base unified material is static.
-        // Reuse the existing OEM-aligned glow bitmap, not a new outline/path.
-        Paint glow=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-        glow.setAlpha(Math.min(95,Math.round(95f*progress*highlightStrength/100f)));
-        canvas.drawBitmap(cache.glow,0f,0f,glow);
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
@@ -1839,6 +1836,26 @@ public final class HookEntry implements IXposedHookLoadPackage {
         DynamicRefraction state=dynamicState(view);
         float[] xy=dynamicScreenPosition(view,state);
         float left=xy[0]+rect.left,top=xy[1]+rect.top;
+        // V1.9.106: the AGSL pass samples the wallpaper at the folder's
+        // screen position. During tiny gestures that position can jump between
+        // adjacent high-contrast wallpaper pixels on consecutive frames. Filter
+        // the sampling origin (not the folder's actual clipping geometry) so
+        // the optical highlight cannot jump instantly with every 1px touch.
+        final long sampleNow=android.os.SystemClock.uptimeMillis();
+        if(!Float.isFinite(state.opticalSampleX) || !Float.isFinite(state.opticalSampleY)
+                || state.opticalSampleAt==0L || sampleNow-state.opticalSampleAt>1500L){
+            state.opticalSampleX=left;
+            state.opticalSampleY=top;
+        }else{
+            final long dt=Math.max(0L,Math.min(80L,sampleNow-state.opticalSampleAt));
+            final float response=1f-(float)Math.exp(-dt/280f);
+            // Bound spatial lag on fast full-page swipes to avoid smearing.
+            state.opticalSampleX+=Math.max(-32f,Math.min(32f,left-state.opticalSampleX))*response;
+            state.opticalSampleY+=Math.max(-32f,Math.min(32f,top-state.opticalSampleY))*response;
+            if((Math.abs(left-state.opticalSampleX)>0.35f || Math.abs(top-state.opticalSampleY)>0.35f)
+                    && view.isAttachedToWindow())view.postInvalidateDelayed(16L);
+        }
+        state.opticalSampleAt=sampleNow;
         // V1.9.76: retain the refraction pass while ANY part of the folder
         // intersects the display. Requiring the whole rectangle to fit made
         // the highlight blink off as soon as a folder crossed a screen edge.
@@ -1866,7 +1883,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                     state.shaderMatrix.reset();
                     state.shaderMatrix.setScale(referenceScaleX,referenceScaleY);
-                    state.shaderMatrix.postTranslate(-left,-top);
+                    state.shaderMatrix.postTranslate(-state.opticalSampleX,-state.opticalSampleY);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
@@ -1898,7 +1915,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V1.9.74: the refraction pass must not draw a second outline.
             // The unified highlight renderer owns the complete edge treatment.
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
-                " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
+                " sampleX="+state.opticalSampleX+" sampleY="+state.opticalSampleY+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
     }
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
@@ -1962,8 +1979,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
             try {
                 if(!edgeOnly)drawReferenceRefraction(v,canvas,rect,radius);
                 canvas.translate(rect.left,rect.top);
-                drawUnifiedMaterial(canvas,mask,edgeOnly);
-                if(edgeOnly)drawAnimatedHighlight(v,canvas,mask);
+                // The exact original glow/edge/rim/specular passes now share
+                // one envelope. No separate overlay or abrupt full-strength pass.
+                float envelope=1f;
+                if(edgeOnly && probeMode==0 && highlightEnabled && highlightStrength>0){
+                    DynamicRefraction animation=dynamicState(v);
+                    float motion=smoothHighlightProgress(v,animation);
+                    envelope=0.55f+0.45f*motion;
+                }
+                drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
                     " maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
