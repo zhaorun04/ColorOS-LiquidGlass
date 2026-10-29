@@ -1685,16 +1685,49 @@ public final class HookEntry implements IXposedHookLoadPackage {
         state.points[1]+=state.screen[1]-state.window[1];
         return state.points;
     }
+    // V1.9.90: independently controlled temporary visibility diagnostics.
+    // 0=normal; 1=red pre-background / green post-background marker;
+    // 2=strong optical displacement. Read at most once per second.
+    private static volatile int refractionVisibilityTest=0;
+    private static volatile long refractionVisibilityReadAt=0;
+    private static final ThreadLocal<Boolean> REFRACTION_AFTER_OEM=new ThreadLocal<Boolean>();
+    private static int refractionTestLogs=0;
+    private static int currentRefractionVisibilityTest(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-refractionVisibilityReadAt>1000L){
+            refractionVisibilityReadAt=now;
+            try {
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int next=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_refraction_visibility_test",0);
+                    next=Math.max(0,Math.min(2,next));
+                    if(next!=refractionVisibilityTest){
+                        refractionVisibilityTest=next;
+                        log("REFRACTION_VISIBILITY_TEST mode="+next);
+                    }
+                }
+            }catch(Throwable t){if(refractionTestLogs++<5)log("REFRACTION_VISIBILITY_TEST_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return refractionVisibilityTest;
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
         "uniform float strength;\n"+
+        "uniform float diagnosticMode;\n"+
+        "uniform float passId;\n"+
         "half4 main(float2 p) {\n"+
         " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
         " float edge=abs(2.0*u-1.0);\n"+
         " float envelope=edge*edge*(3.0-2.0*edge);\n"+
         " float direction=1.0-2.0*smoothstep(0.47,0.53,u);\n"+
         " half4 color=wallpaper.eval(p+float2(direction*envelope*strength,0.0));\n"+
+        " if(diagnosticMode>0.5 && diagnosticMode<1.5){\n"+
+        "  float stripe=step(0.5,fract((p.x+p.y)*0.055));\n"+
+        "  return passId>1.5 ? half4(0.05,0.95,0.20,0.92) : half4(0.95,0.08+0.20*stripe,0.12,0.92);\n"+
+        " }\n"+
+        " if(diagnosticMode>1.5){color.a=half(0.65);return color;}\n"+
         // Keep optical displacement separate from the overlay opacity. The old
         // 0.439 edge alpha washed out both sides of the glass, especially on
         // bright wallpapers. Attenuate overlay opacity with sampled luminance.
@@ -1757,7 +1790,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
-                    state.continuousShader.setFloatUniform("strength",6.0f);
+                    int visibilityTest=currentRefractionVisibilityTest();
+                    state.continuousShader.setFloatUniform("strength",visibilityTest==2?22.0f:6.0f);
+                    state.continuousShader.setFloatUniform("diagnosticMode",(float)visibilityTest);
+                    state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
@@ -2322,7 +2358,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                             int save=targetCanvas.save();
                                             try {
                                                 targetCanvas.concat(localToCallback);
-                                                drawFolderIconFusion(activeIcon,targetCanvas,false);
+                                                REFRACTION_AFTER_OEM.set(Boolean.TRUE);
+                                                try { drawFolderIconFusion(activeIcon,targetCanvas,false); }
+                                                finally { REFRACTION_AFTER_OEM.remove(); }
                                                 if(compositionLogs++<24)log("REFRACTION_COMPOSITION mode=AFTER_OEM_BACKGROUND beforeChildren=true");
                                             } finally { targetCanvas.restoreToCount(save); }
                                         } else {

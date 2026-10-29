@@ -35,7 +35,7 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.82",23);
+        label("ColorOS Liquid Glass V1.9.90",23);
         label("设置自动保存到本机；LSPosed 作用域启用时，重启手机或桌面后自动恢复，无需手动打开应用。",14);
         label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
