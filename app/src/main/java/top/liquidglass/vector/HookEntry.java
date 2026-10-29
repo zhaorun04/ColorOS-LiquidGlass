@@ -1787,10 +1787,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(frame==null||frame.isRecycled())return;
         android.util.DisplayMetrics dm=view.getResources().getDisplayMetrics();
         int sw=dm.widthPixels,sh=dm.heightPixels;
-        if(frame.getWidth()!=sw || frame.getHeight()!=sh){
-            if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=DISPLAY_MISMATCH frame="+frame.getWidth()+"x"+frame.getHeight()+" display="+sw+"x"+sh);
-            return;
-        }
+        // V1.9.99: wallpaper screenshot may be captured at a lower logical
+        // resolution than Launcher. This is not an invalid frame: sample it
+        // through a scaled BitmapShader rather than skipping refraction.
+        final float referenceScaleX=(float)sw/(float)frame.getWidth();
+        final float referenceScaleY=(float)sh/(float)frame.getHeight();
+        if((frame.getWidth()!=sw || frame.getHeight()!=sh) && REFRACTION_LOGS++<12)
+            log("REFRACTION_FRAME status=SCALED frame="+frame.getWidth()+"x"+frame.getHeight()+" display="+sw+"x"+sh+" scale="+referenceScaleX+","+referenceScaleY);
         DynamicRefraction state=dynamicState(view);
         float[] xy=dynamicScreenPosition(view,state);
         float left=xy[0]+rect.left,top=xy[1]+rect.top;
@@ -1820,7 +1823,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
                     }
                     state.shaderMatrix.reset();
-                    state.shaderMatrix.setTranslate(-left,-top);
+                    state.shaderMatrix.setScale(referenceScaleX,referenceScaleY);
+                    state.shaderMatrix.postTranslate(-left,-top);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
