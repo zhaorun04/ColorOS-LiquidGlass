@@ -1677,6 +1677,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float lastX=Float.NaN,lastY=Float.NaN;
         android.view.ViewTreeObserver.OnPreDrawListener listener;
         int moveLogs;
+        // Per-folder temporal response: smooth the optical overlay on real movement.
+        float opticalOpacity=1f;
+        long opticalUpdatedAt=0L;
+        long opticalMotionRevision=-1L;
+        long opticalLastMoveAt=0L;
     }
     private static DynamicRefraction dynamicState(final View view) {
         DynamicRefraction state=DYNAMIC_REFRACTION.get(view);
@@ -1702,6 +1707,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
         DYNAMIC_REFRACTION.put(view,state);
         view.postInvalidate(); // Draw a stable refraction frame even before the first swipe
         return state;
+    }
+    // Temporal smoothing lives in the actual AGSL drawing path, not the touch detector.
+    // Keep the static appearance unchanged. Movement temporarily reduces only the
+    // *additional sampled highlight*, then eases back to the original strength.
+    private static float smoothedOpticalOpacity(View view, DynamicRefraction state) {
+        long now=android.os.SystemClock.uptimeMillis();
+        if(state.opticalMotionRevision!=wallpaperOffsetRevision){
+            state.opticalMotionRevision=wallpaperOffsetRevision;
+            state.opticalLastMoveAt=now;
+        }
+        boolean moving=state.opticalLastMoveAt>0L && now-state.opticalLastMoveAt<115L;
+        float target=moving?0.72f:1f;
+        long dt=state.opticalUpdatedAt==0L?0L:Math.min(100L,Math.max(0L,now-state.opticalUpdatedAt));
+        state.opticalUpdatedAt=now;
+        if(dt>0L){
+            float tau=moving?125f:310f;
+            float factor=1f-(float)Math.exp(-dt/tau);
+            state.opticalOpacity+=(target-state.opticalOpacity)*factor;
+        }
+        if(Math.abs(target-state.opticalOpacity)>0.008f && view.isAttachedToWindow())
+            view.postInvalidateDelayed(16L);
+        return Math.max(0.70f,Math.min(1f,state.opticalOpacity));
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
@@ -1752,6 +1779,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float strength;\n"+
         "uniform float diagnosticMode;\n"+
         "uniform float passId;\n"+
+        "uniform float temporalOpacity;\n"+
         "half4 main(float2 p) {\n"+
         " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
         " float edge=abs(2.0*u-1.0);\n"+
@@ -1762,7 +1790,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float stripe=step(0.5,fract((p.x+p.y)*0.055));\n"+
         "  return passId>1.5 ? half4(0.05,0.95,0.20,0.92) : half4(0.95,0.08+0.20*stripe,0.12,0.92);\n"+
         " }\n"+
-        " if(diagnosticMode>1.5){color.a=half(0.65);return color;}\n"+
+        " if(diagnosticMode>1.5){color.a=half(0.65*temporalOpacity);return color;}\n"+
         // Keep optical displacement separate from the overlay opacity. The old
         // 0.439 edge alpha washed out both sides of the glass, especially on
         // bright wallpapers. Attenuate overlay opacity with sampled luminance.
@@ -1778,7 +1806,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float edgeOpacity=0.075*edgeWeight*(1.0-0.85*bright);\n"+
         " float neutralOpacity=0.10*bright;\n"+
         " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
-        " color.a=half(clamp(midOpacity+edgeOpacity+neutralOpacity,0.0,0.16));\n"+
+        " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.16));\n"+
         " return color;\n"+
         "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
@@ -1836,6 +1864,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("strength",shaderMode==2?22.0f:6.0f);
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
+                    state.continuousShader.setFloatUniform("temporalOpacity",smoothedOpticalOpacity(view,state));
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
