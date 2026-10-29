@@ -1887,8 +1887,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return sampleIsolationMode;
     }
-    // V1.9.133 optical A/B: 0=stable ambient, 1=disable optical sheen,
-    // 2=disable AGSL refraction. Cached to avoid Settings IPC on every draw.
+    // V1.9.134: default 0 uses the field-proven flicker-free native material path.
+    // 1 enables legacy AGSL for diagnosis only; 2 remains the original no-AGSL control.
+    // The unified edge highlight stays continuously rendered in all modes.
     private static volatile int OPTICAL_AB_133=0;
     private static volatile long OPTICAL_AB_READ_AT=0L;
     private static int opticalAb133(){
@@ -2108,8 +2109,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V1.9.70: one hardware-accelerated draw with continuous per-pixel
             // displacement. No per-strip matrix mutation or 48 draw commands.
             boolean continuousDrawn=false;
-            int opticalAb=opticalAb133();
-            if(opticalAb!=2 && REFRACTION_ENABLED && refractionPercent>0 && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            int opticalAb=opticalAb133(); // 0/2: stable native path; 1: legacy AGSL comparison
+            if(opticalAb==1 && REFRACTION_ENABLED && refractionPercent>0 && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2136,7 +2137,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     // Only the motion sheen is time-smoothed. Wallpaper sampling
                     // stays locked to the real screen position on every frame.
-                    state.continuousShader.setFloatUniform("opticalSheenEnabled",opticalAb==1?0.0f:1.0f);
+                    state.continuousShader.setFloatUniform("opticalSheenEnabled",0.0f); // diagnostic AGSL: isolate sheen from wallpaper sampling
                     state.continuousShader.setFloatUniform("motionHighlight",0.0f); // V1.9.131: optical lighting is position/brightness-driven, not touch-driven
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
@@ -2151,7 +2152,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=SHADER_FAILED reason="+t.getClass().getName()+" detail="+String.valueOf(t.getMessage()));}
                 }
             }
-            if(REFRACTION_ENABLED && opticalAb!=2 && !continuousDrawn){
+            if(REFRACTION_ENABLED && opticalAb==1 && !continuousDrawn){
                 // No banded fallback: the former 12-strip implementation caused
                 // visible vertical seams. Keep the native folder blur intact.
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
