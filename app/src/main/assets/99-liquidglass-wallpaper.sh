@@ -103,13 +103,21 @@ sync_once() {
   rm -f "$TMP"
 }
 sync_launcher_reference() {
-  [ -f "$SRC" ] && [ -d "$LAUNCHERDIR" ] || return
-  LUID=$(stat -c %u /data/user/0/com.android.launcher 2>/dev/null)
-  case "$LUID" in ''|*[!0-9]*) return;; esac
+  [ -f "$SRC" ] || { echo "$(date) launcher reference failed: source missing" >> "$LOG"; return; }
+  LAUNCHERBASE=/data/user/0/com.android.launcher
+  [ -d "$LAUNCHERBASE" ] || { echo "$(date) launcher reference waiting: launcher data missing" >> "$LOG"; return; }
+  LUID=$(stat -c %u "$LAUNCHERBASE" 2>/dev/null)
+  LGID=$(stat -c %g "$LAUNCHERBASE" 2>/dev/null)
+  case "$LUID:$LGID" in *[!0-9:]*|:*) echo "$(date) launcher reference failed: invalid owner" >> "$LOG"; return;; esac
+  if [ ! -d "$LAUNCHERDIR" ]; then
+    mkdir -p "$LAUNCHERDIR" || { echo "$(date) launcher reference failed: mkdir" >> "$LOG"; return; }
+    chown "$LUID:$LGID" "$LAUNCHERDIR" && chmod 700 "$LAUNCHERDIR"
+    restorecon -R "$LAUNCHERDIR" 2>/dev/null
+  fi
   BEFORE=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
   [ -n "$BEFORE" ] || return
   PREV=$(cat "$LAUNCHERSIG" 2>/dev/null)
-  [ "$BEFORE" != "$PREV" ] || return
+  if [ "$BEFORE" = "$PREV" ] && [ -s "$LAUNCHERDST" ]; then return; fi
   sleep 2
   AFTER=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
   [ "$BEFORE" = "$AFTER" ] || return
@@ -117,14 +125,18 @@ sync_launcher_reference() {
   if cp "$SRC" "$TMP" 2>/dev/null && [ "$(stat -c %s "$TMP" 2>/dev/null)" -gt 1024 ]; then
     FINAL=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
     if [ "$FINAL" = "$AFTER" ]; then
-      chown "$LUID:$LUID" "$TMP" && chmod 600 "$TMP"
+      chown "$LUID:$LGID" "$TMP" && chmod 600 "$TMP"
       restorecon "$TMP" 2>/dev/null
       if mv -f "$TMP" "$LAUNCHERDST"; then
         printf '%s' "$FINAL" > "$LAUNCHERSIG"
-        chown "$LUID:$LUID" "$LAUNCHERSIG"
+        chown "$LUID:$LGID" "$LAUNCHERSIG"
         chmod 600 "$LAUNCHERSIG"
         restorecon "$LAUNCHERDST" "$LAUNCHERSIG" 2>/dev/null
-        echo "$(date) launcher reference synced $FINAL" >> "$LOG"
+        if [ -s "$LAUNCHERDST" ]; then
+          echo "$(date) launcher reference synced $FINAL" >> "$LOG"
+        else
+          echo "$(date) launcher reference failed: missing after move" >> "$LOG"
+        fi
       fi
     fi
   fi

@@ -172,6 +172,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         long now = android.os.SystemClock.uptimeMillis();
         if (now-lastRead < 1500) return;
         lastRead=now;
+        // V1.9.97: Launcher never cold-starts the module ContentProvider.
+        // ColorOS blocks that startup during boot; use the root-published snapshot.
+        if ("com.android.launcher".equals(context.getPackageName())) {
+            restoreBootSnapshot(context);
+            return;
+        }
         try (Cursor c = context.getContentResolver().query(CONFIG,null,null,null,null)) {
             if(c!=null && c.moveToFirst()) {
                 lastRead=now;
@@ -2769,8 +2775,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         task[0]=new Runnable(){
             int attempts=0;
             @Override public void run(){
-                if(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()){
-                    log("BOOT_PREWARM_READY attempts="+attempts);
+                // Keep checking until both configuration and wallpaper are ready.
+                // A frame alone is not proof that refraction is enabled.
+                restoreBootSnapshot(app);
+                if(REFRACTION_ENABLED && REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()){
+                    log("BOOT_REFRACTION_READY source=GLOBAL_SNAPSHOT attempts="+attempts);
                     invalidateGlassViews();
                     return;
                 }
@@ -2802,7 +2811,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     launcherContext=app;
                     // Settings.Global is local to system_server and does not need
                     // the ColorOS-blocked third-party ContentProvider to start.
-                    restoreBootSnapshot(app);
+                    boolean bootApplied=restoreBootSnapshot(app);
+                    log("BOOT_CONFIG_SOURCE=GLOBAL_SNAPSHOT applied="+bootApplied+" loaded="+configEverLoaded+" refraction="+REFRACTION_ENABLED);
                     // The first reference may not exist yet; retry on subsequent draws.
                     REFRACTION_LAST_CHECK=0L;
                     final android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
