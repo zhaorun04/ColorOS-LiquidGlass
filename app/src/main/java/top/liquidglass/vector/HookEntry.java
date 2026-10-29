@@ -1737,14 +1737,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.opticalMotionRevision=wallpaperOffsetRevision;
             state.opticalLastMoveAt=now;
         }
-        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<650L;
+        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<180L;
         final float target=active?1f:0f;
         // Use elapsed real time rather than capping dt to 64ms: otherwise an
         // interrupted render loop can leave the animation apparently stuck.
         long elapsed=state.opticalUpdatedAt==0L?0L:Math.max(0L,now-state.opticalUpdatedAt);
         state.opticalUpdatedAt=now;
         if(elapsed>0L){
-            float tau=active?600f:1200f;
+            float tau=active?180f:400f;
             float step=1f-(float)Math.exp(-Math.min(elapsed,1000L)/tau);
             state.opticalOpacity+=(target-state.opticalOpacity)*step;
         }
@@ -1913,7 +1913,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // V1.9.81: near-white wallpaper requires contrast compensation, not
         // just transparent refraction (the OEM blur underneath can be white).
         // Continuous luminance response prevents abrupt changes while swiping.
-        " float bright=smoothstep(0.60,0.94,luminance);\n"+
+        " float bright=smoothstep(0.48,0.96,luminance);\n"+
         // A persistent low-opacity refracted sample across the entire glass,
         // plus a stronger but bounded optical edge. Never depend on motion.
         " float edgeWeight=envelope*envelope;\n"+
@@ -1921,36 +1921,45 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float edgeOpacity=0.115*edgeWeight*(1.0-0.75*bright);\n"+
         " float neutralOpacity=0.055*bright;\n"+
         " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
+        " float softSheen=motionHighlight*0.045*envelope*smoothstep(0.42,0.96,luminance);\n"+
+        " color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));\n"+
         " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
         " return color;\n"+
         "}\n";
     private static int clampInt(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
-    // Cached low-resolution two-pass box blur of the wallpaper, never of the icons.
-    // Blur radius is in physical pixels converted from dp and scaled to the cache.
+    // V1.9.125: three-pass separable box filter approximates a Gaussian kernel.
+    // Cache per wallpaper frame/radius; never blur the icon canvas.
     private static synchronized android.graphics.Bitmap blurredWallpaper(android.graphics.Bitmap src,float density){
         if(customBlurDp<=0 || customBlurMode!=1)return null;
         if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==customBlurDp && CUSTOM_BLUR_FRAME!=null && !CUSTOM_BLUR_FRAME.isRecycled())return CUSTOM_BLUR_FRAME;
+        android.graphics.Bitmap small=null;
         try{
-            final int factor=6,w=Math.max(1,src.getWidth()/factor),h=Math.max(1,src.getHeight()/factor);
-            android.graphics.Bitmap small=android.graphics.Bitmap.createScaledBitmap(src,w,h,true);
-            int[] a=new int[w*h],b=new int[w*h],out=new int[w*h];small.getPixels(a,0,w,0,0,w,h);
-            int r=Math.max(1,Math.min(16,Math.round(customBlurDp*density/factor)));
-            for(int y=0;y<h;y++)for(int x=0;x<w;x++){
-                int rr=0,gg=0,bb=0,n=0;
-                for(int k=-r;k<=r;k++){int c=a[y*w+Math.max(0,Math.min(w-1,x+k))];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
-                b[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
-            }
-            for(int y=0;y<h;y++)for(int x=0;x<w;x++){
-                int rr=0,gg=0,bb=0,n=0;
-                for(int k=-r;k<=r;k++){int c=b[Math.max(0,Math.min(h-1,y+k))*w+x];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
-                out[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
+            final int factor=4,w=Math.max(1,src.getWidth()/factor),h=Math.max(1,src.getHeight()/factor);
+            small=android.graphics.Bitmap.createScaledBitmap(src,w,h,true);
+            int[] a=new int[w*h],b=new int[w*h];small.getPixels(a,0,w,0,0,w,h);
+            // Radius grows smoothly with dp; three smaller passes avoid a harsh box edge.
+            int r=Math.max(1,Math.min(22,Math.round(customBlurDp*density/(factor*1.7f))));
+            for(int pass=0;pass<3;pass++){
+                for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+                    int rr=0,gg=0,bb=0,n=0;
+                    for(int k=-r;k<=r;k++){int c=a[y*w+Math.max(0,Math.min(w-1,x+k))];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
+                    b[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
+                }
+                for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+                    int rr=0,gg=0,bb=0,n=0;
+                    for(int k=-r;k<=r;k++){int c=b[Math.max(0,Math.min(h-1,y+k))*w+x];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
+                    a[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
+                }
             }
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
-            result.setPixels(out,0,w,0,0,w,h);small.recycle();
+            result.setPixels(a,0,w,0,0,w,h);
+            android.graphics.Bitmap previous=CUSTOM_BLUR_FRAME;
             CUSTOM_BLUR_FRAME=result;CUSTOM_BLUR_SOURCE=src;CUSTOM_BLUR_RADIUS=customBlurDp;
-            log("CUSTOM_BLUR_READY radiusDp="+customBlurDp+" texture="+w+"x"+h);
+            if(previous!=null && previous!=result && !previous.isRecycled())previous.recycle();
+            log("CUSTOM_BLUR125_READY radiusDp="+customBlurDp+" passes=3 radius="+r+" texture="+w+"x"+h);
             return result;
-        }catch(Throwable t){log("CUSTOM_BLUR_FAILED "+t.getClass().getSimpleName());return null;}
+        }catch(Throwable t){log("CUSTOM_BLUR125_FAILED "+t.getClass().getSimpleName());return null;}
+        finally{if(small!=null && small!=src && !small.isRecycled())small.recycle();}
     }
     private static final java.util.concurrent.atomic.AtomicInteger GLASS_PIPELINE_DIAGNOSTICS = new java.util.concurrent.atomic.AtomicInteger();
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
