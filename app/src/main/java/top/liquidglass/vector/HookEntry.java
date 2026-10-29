@@ -1887,6 +1887,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return sampleIsolationMode;
     }
+    // V1.9.133 optical A/B: 0=stable ambient, 1=disable optical sheen,
+    // 2=disable AGSL refraction. Cached to avoid Settings IPC on every draw.
+    private static volatile int OPTICAL_AB_133=0;
+    private static volatile long OPTICAL_AB_READ_AT=0L;
+    private static int opticalAb133(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-OPTICAL_AB_READ_AT<2000L)return OPTICAL_AB_133;
+        OPTICAL_AB_READ_AT=now;
+        try{
+            int mode=android.provider.Settings.Global.getInt(
+                android.app.AndroidAppHelper.currentApplication().getContentResolver(),
+                "liquidglass_optical_ab_133",0);
+            OPTICAL_AB_133=Math.max(0,Math.min(2,mode));
+        }catch(Throwable ignored){}
+        return OPTICAL_AB_133;
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -1895,6 +1911,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
         "uniform float motionHighlight;\n"+
+        "uniform float opticalSheenEnabled;\n"+
         "uniform float sampleIsolation;\n"+
         "uniform float4 screenClip;\n"+
         "half4 main(float2 p) {\n"+
@@ -1922,9 +1939,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // even at rest. Motion adds only a small bounded enhancement.
         "  float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
         "  float light=smoothstep(0.58,0.96,lum);\n"+
-        "  float ambient=0.070*light*(0.35+0.65*edgeSheen);\n"+
+        "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled;\n"+
         "  float motion=0.0; // No touch-triggered luminance jumps\n"+
-        "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.080)));\n"+
+        "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));\n"+
         "  color.a=half(0.65*temporalOpacity);return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -1941,7 +1958,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float midOpacity=0.115*(1.0-0.55*bright);\n"+
         " float edgeOpacity=0.115*edgeWeight*(1.0-0.75*bright);\n"+
         " float neutralOpacity=0.055*bright;\n"+
-        " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
+        " // No forced dark tint on bright wallpaper; preserve source colors.\n"+
         " float softSheen=0.035*envelope*smoothstep(0.52,0.96,luminance);\n"+
         " color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));\n"+
         " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
@@ -2089,7 +2106,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V1.9.70: one hardware-accelerated draw with continuous per-pixel
             // displacement. No per-strip matrix mutation or 48 draw commands.
             boolean continuousDrawn=false;
-            if(REFRACTION_ENABLED && refractionPercent>0 && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            int opticalAb=opticalAb133();
+            if(opticalAb!=2 && REFRACTION_ENABLED && refractionPercent>0 && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2116,6 +2134,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     // Only the motion sheen is time-smoothed. Wallpaper sampling
                     // stays locked to the real screen position on every frame.
+                    state.continuousShader.setFloatUniform("opticalSheenEnabled",opticalAb==1?0.0f:1.0f);
                     state.continuousShader.setFloatUniform("motionHighlight",0.0f); // V1.9.131: optical lighting is position/brightness-driven, not touch-driven
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
@@ -2130,7 +2149,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=SHADER_FAILED reason="+t.getClass().getName()+" detail="+String.valueOf(t.getMessage()));}
                 }
             }
-            if(REFRACTION_ENABLED && !continuousDrawn){
+            if(REFRACTION_ENABLED && opticalAb!=2 && !continuousDrawn){
                 // No banded fallback: the former 12-strip implementation caused
                 // visible vertical seams. Keep the native folder blur intact.
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
