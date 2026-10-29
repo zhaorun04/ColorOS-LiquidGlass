@@ -1597,7 +1597,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         scheduleReferenceLoad(view.getContext().getApplicationContext(), view);
     }
     private static void scheduleReferenceLoad(final android.content.Context context, final View view) {
-        if (!REFRACTION_ENABLED || REFRACTION_LOADING) return;
+        if (!glassEnabled || REFRACTION_LOADING || (customBlurMode!=1 && !REFRACTION_ENABLED)) return;
         long now=android.os.SystemClock.uptimeMillis();
         // On boot the Launcher-owned wallpaper file can arrive after the first draw.
         // Retry rapidly until the first valid frame exists; use the longer interval
@@ -1927,47 +1927,81 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " return color;\n"+
         "}\n";
     private static int clampInt(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
-    // V1.9.125: three-pass separable box filter approximates a Gaussian kernel.
-    // Cache per wallpaper frame/radius; never blur the icon canvas.
-    private static synchronized android.graphics.Bitmap blurredWallpaper(android.graphics.Bitmap src,float density){
-        if(customBlurDp<=0 || customBlurMode!=1)return null;
-        if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==customBlurDp && CUSTOM_BLUR_FRAME!=null && !CUSTOM_BLUR_FRAME.isRecycled())return CUSTOM_BLUR_FRAME;
-        android.graphics.Bitmap small=null;
-        try{
-            final int factor=4,w=Math.max(1,src.getWidth()/factor),h=Math.max(1,src.getHeight()/factor);
-            small=android.graphics.Bitmap.createScaledBitmap(src,w,h,true);
-            int[] a=new int[w*h],b=new int[w*h];small.getPixels(a,0,w,0,0,w,h);
-            // Radius grows smoothly with dp; three smaller passes avoid a harsh box edge.
-            int r=Math.max(1,Math.min(22,Math.round(customBlurDp*density/(factor*1.7f))));
-            for(int pass=0;pass<3;pass++){
-                for(int y=0;y<h;y++)for(int x=0;x<w;x++){
-                    int rr=0,gg=0,bb=0,n=0;
-                    for(int k=-r;k<=r;k++){int c=a[y*w+Math.max(0,Math.min(w-1,x+k))];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
-                    b[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
+    // V1.9.126: expensive blur work never runs on Launcher's drawing thread.
+    // One worker, one in-flight request, cached results. Old bitmaps are not
+    // recycled during a frame because the RenderThread may still reference them.
+    private static final java.util.concurrent.ExecutorService BLUR_WORKER =
+        java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+            Thread t=new Thread(r,"LiquidGlass-Blur126");t.setDaemon(true);t.setPriority(Thread.MIN_PRIORITY);return t;
+        });
+    private static volatile boolean BLUR_PENDING=false;
+    private static android.graphics.Bitmap blurredWallpaper(final android.graphics.Bitmap src,final float density,final View view){
+        final int requested=customBlurDp;
+        if(requested<=0 || customBlurMode!=1)return null;
+        android.graphics.Bitmap cached=CUSTOM_BLUR_FRAME;
+        if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==requested && cached!=null && !cached.isRecycled())return cached;
+        synchronized(HookEntry.class){
+            if(BLUR_PENDING)return null;
+            BLUR_PENDING=true;
+        }
+        BLUR_WORKER.execute(() -> {
+            android.graphics.Bitmap small=null;
+            try{
+                final int factor=4,w=Math.max(1,src.getWidth()/factor),h=Math.max(1,src.getHeight()/factor);
+                small=android.graphics.Bitmap.createScaledBitmap(src,w,h,true);
+                int[] a=new int[w*h],b=new int[w*h];small.getPixels(a,0,w,0,0,w,h);
+                int r=Math.max(1,Math.min(22,Math.round(requested*density/(factor*1.7f))));
+                // O(width*height) sliding-window box filters, rather than
+                // O(width*height*radius) nested kernel loops on the UI thread.
+                for(int pass=0;pass<3;pass++){
+                    for(int y=0;y<h;y++){
+                        int rr=0,gg=0,bb=0;
+                        for(int k=-r;k<=r;k++){int c=a[y*w+Math.max(0,Math.min(w-1,k))];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;}
+                        int count=2*r+1;
+                        for(int x=0;x<w;x++){
+                            b[y*w+x]=0xff000000|((rr/count)<<16)|((gg/count)<<8)|(bb/count);
+                            int remove=a[y*w+Math.max(0,x-r)],add=a[y*w+Math.min(w-1,x+r+1)];
+                            rr+=((add>>16)&255)-((remove>>16)&255);
+                            gg+=((add>>8)&255)-((remove>>8)&255);bb+=(add&255)-(remove&255);
+                        }
+                    }
+                    for(int x=0;x<w;x++){
+                        int rr=0,gg=0,bb=0;
+                        for(int k=-r;k<=r;k++){int c=b[Math.max(0,Math.min(h-1,k))*w+x];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;}
+                        int count=2*r+1;
+                        for(int y=0;y<h;y++){
+                            a[y*w+x]=0xff000000|((rr/count)<<16)|((gg/count)<<8)|(bb/count);
+                            int remove=b[Math.max(0,y-r)*w+x],add=b[Math.min(h-1,y+r+1)*w+x];
+                            rr+=((add>>16)&255)-((remove>>16)&255);
+                            gg+=((add>>8)&255)-((remove>>8)&255);bb+=(add&255)-(remove&255);
+                        }
+                    }
                 }
-                for(int y=0;y<h;y++)for(int x=0;x<w;x++){
-                    int rr=0,gg=0,bb=0,n=0;
-                    for(int k=-r;k<=r;k++){int c=b[Math.max(0,Math.min(h-1,y+k))*w+x];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
-                    a[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
-                }
-            }
-            android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
-            result.setPixels(a,0,w,0,0,w,h);
-            android.graphics.Bitmap previous=CUSTOM_BLUR_FRAME;
-            CUSTOM_BLUR_FRAME=result;CUSTOM_BLUR_SOURCE=src;CUSTOM_BLUR_RADIUS=customBlurDp;
-            if(previous!=null && previous!=result && !previous.isRecycled())previous.recycle();
-            log("CUSTOM_BLUR125_READY radiusDp="+customBlurDp+" passes=3 radius="+r+" texture="+w+"x"+h);
-            return result;
-        }catch(Throwable t){log("CUSTOM_BLUR125_FAILED "+t.getClass().getSimpleName());return null;}
-        finally{if(small!=null && small!=src && !small.isRecycled())small.recycle();}
+                android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+                result.setPixels(a,0,w,0,0,w,h);
+                if(customBlurDp==requested && customBlurMode==1 && REFRACTION_FRAME==src){
+                    CUSTOM_BLUR_FRAME=result;CUSTOM_BLUR_SOURCE=src;CUSTOM_BLUR_RADIUS=requested;
+                    if(view!=null)view.postInvalidate();
+                    log("GLASS126_BLUR_READY radiusDp="+requested+" texture="+w+"x"+h);
+                }else result.recycle();
+            }catch(Throwable t){log("GLASS126_BLUR_FAILED "+t.getClass().getSimpleName());}
+            finally{if(small!=null && !small.isRecycled())small.recycle();BLUR_PENDING=false;}
+        });
+        return null;
     }
     private static final java.util.concurrent.atomic.AtomicInteger GLASS_PIPELINE_DIAGNOSTICS = new java.util.concurrent.atomic.AtomicInteger();
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
-        if(!REFRACTION_ENABLED || rect.width()<80 || rect.height()<80)return;
+        if(rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
         android.graphics.Bitmap frame=REFRACTION_FRAME;
         if(frame==null||frame.isRecycled()){
             if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<32)log("GLASS119_PIPELINE stage=FRAME_UNAVAILABLE mode="+customBlurMode+" radiusDp="+customBlurDp+" frameNull="+(frame==null));
+            if(glassTintOpacity>0){
+                Paint fallback=new Paint(Paint.ANTI_ALIAS_FLAG);
+                int tint=tintColor();
+                fallback.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
+                canvas.drawRoundRect(rect,radius,radius,fallback);
+            }
             return;
         }
         android.util.DisplayMetrics dm=view.getResources().getDisplayMetrics();
@@ -2031,23 +2065,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.clip.reset();state.clip.addRoundRect(rect,contourRadius,contourRadius,Path.Direction.CW);
             canvas.clipPath(state.clip);
             if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<32)log("GLASS119_PIPELINE stage=DRAW_ENTER mode="+customBlurMode+" radiusDp="+customBlurDp+" refractPercent="+refractionPercent+" tintPercent="+glassTintOpacity+" frame="+frame.getWidth()+"x"+frame.getHeight()+" hardware="+canvas.isHardwareAccelerated());
-            if(customBlurMode==1 && customBlurDp>0){
-                android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density);
-                if(blurred!=null){
-                    Paint blurPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
-                    android.graphics.BitmapShader blurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
-                    Matrix bm=new Matrix();bm.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());bm.postTranslate(-left,-top);
-                    blurShader.setLocalMatrix(bm);blurPaint.setShader(blurShader);
-                    canvas.drawRoundRect(rect,contourRadius,contourRadius,blurPaint);
-                    if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<48)log("GLASS119_PIPELINE stage=BLUR_DRAWN radiusDp="+customBlurDp+" bitmap="+blurred.getWidth()+"x"+blurred.getHeight());
-                }
-            }
-            if(glassTintOpacity>0){Paint tintPaint=new Paint(Paint.ANTI_ALIAS_FLAG);tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),235,242,250));canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);}
-
             // V1.9.70: one hardware-accelerated draw with continuous per-pixel
             // displacement. No per-strip matrix mutation or 48 draw commands.
             boolean continuousDrawn=false;
-            if(canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            if(REFRACTION_ENABLED && refractionPercent>0 && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2089,12 +2110,33 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=SHADER_FAILED reason="+t.getClass().getName()+" detail="+String.valueOf(t.getMessage()));}
                 }
             }
-            if(!continuousDrawn){
+            if(REFRACTION_ENABLED && !continuousDrawn){
                 // No banded fallback: the former 12-strip implementation caused
                 // visible vertical seams. Keep the native folder blur intact.
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
             }
             state.samplePaint.setShader(null);
+            // Independent background blur and tint: always visible with refraction OFF.
+            // With refraction ON, retain some optical detail beneath the blur.
+            if(customBlurMode==1 && customBlurDp>0){
+                android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
+                if(blurred!=null){
+                    Paint blurPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                    blurPaint.setAlpha(REFRACTION_ENABLED && refractionPercent>0 ? 180 : 255);
+                    android.graphics.BitmapShader blurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+                    Matrix bm=new Matrix();bm.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());bm.postTranslate(-left,-top);
+                    blurShader.setLocalMatrix(bm);blurPaint.setShader(blurShader);
+                    canvas.drawRoundRect(rect,contourRadius,contourRadius,blurPaint);
+                    if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<48)log("GLASS126_BLUR_DRAWN enabled="+REFRACTION_ENABLED+" radiusDp="+customBlurDp);
+                }
+            }
+            // Glass material is last, so AGSL cannot overwrite its opacity/style.
+            if(glassTintOpacity>0){
+                Paint tintPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+                int tint=tintColor();
+                tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
+                canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);
+            }
             // V1.9.74: the refraction pass must not draw a second outline.
             // The unified highlight renderer owns the complete edge treatment.
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
@@ -3208,7 +3250,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 if(++attempts>180){log("BOOT_PREWARM_TIMEOUT");return;}
                 // Retry also when the snapshot arrives later than Launcher attach.
-                if(REFRACTION_ENABLED) scheduleReferenceLoad(app,null);
+                if(REFRACTION_ENABLED || customBlurMode==1) scheduleReferenceLoad(app,null);
                 if(attempts==1 || attempts%15==0)
                     log("BOOT_PREWARM_WAIT attempt="+attempts+" enabled="+REFRACTION_ENABLED
                         +" loading="+REFRACTION_LOADING);
