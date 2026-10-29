@@ -1680,9 +1680,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
         android.graphics.Shader rimGradient;
         android.graphics.Bitmap source;
         float lastX=Float.NaN,lastY=Float.NaN;
-        // V1.9.106: per-folder time-filtered wallpaper sampling coordinates.
-        float opticalSampleX=Float.NaN, opticalSampleY=Float.NaN;
-        long opticalSampleAt=0L;
         android.view.ViewTreeObserver.OnPreDrawListener listener;
         int moveLogs;
         // Per-folder temporal response: smooth the optical overlay on real movement.
@@ -1790,6 +1787,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float diagnosticMode;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
+        "uniform float motionHighlight;\n"+
         "half4 main(float2 p) {\n"+
         " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
         " float edge=abs(2.0*u-1.0);\n"+
@@ -1800,7 +1798,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float stripe=step(0.5,fract((p.x+p.y)*0.055));\n"+
         "  return passId>1.5 ? half4(0.05,0.95,0.20,0.92) : half4(0.95,0.08+0.20*stripe,0.12,0.92);\n"+
         " }\n"+
-        " if(diagnosticMode>1.5){color.a=half(0.65*temporalOpacity);return color;}\n"+
+        // Mode 2 retains the exact wallpaper sample, with a separately animated
+        // additive sheen. No smoothing or interpolation of sample coordinates.
+        " if(diagnosticMode>1.5){\n"+
+        "  float edgeSheen=pow(clamp(abs(2.0*u-1.0),0.0,1.0),3.0);\n"+
+        "  float sheen=0.11*motionHighlight*edgeSheen;\n"+
+        "  color.rgb=mix(color.rgb,half3(1.0),half(sheen));\n"+
+        "  color.a=half(0.65*temporalOpacity);return color;\n"+
+        " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
         // 0.439 edge alpha washed out both sides of the glass, especially on
         // bright wallpapers. Attenuate overlay opacity with sampled luminance.
@@ -1836,26 +1841,6 @@ public final class HookEntry implements IXposedHookLoadPackage {
         DynamicRefraction state=dynamicState(view);
         float[] xy=dynamicScreenPosition(view,state);
         float left=xy[0]+rect.left,top=xy[1]+rect.top;
-        // V1.9.106: the AGSL pass samples the wallpaper at the folder's
-        // screen position. During tiny gestures that position can jump between
-        // adjacent high-contrast wallpaper pixels on consecutive frames. Filter
-        // the sampling origin (not the folder's actual clipping geometry) so
-        // the optical highlight cannot jump instantly with every 1px touch.
-        final long sampleNow=android.os.SystemClock.uptimeMillis();
-        if(!Float.isFinite(state.opticalSampleX) || !Float.isFinite(state.opticalSampleY)
-                || state.opticalSampleAt==0L || sampleNow-state.opticalSampleAt>1500L){
-            state.opticalSampleX=left;
-            state.opticalSampleY=top;
-        }else{
-            final long dt=Math.max(0L,Math.min(80L,sampleNow-state.opticalSampleAt));
-            final float response=1f-(float)Math.exp(-dt/280f);
-            // Bound spatial lag on fast full-page swipes to avoid smearing.
-            state.opticalSampleX+=Math.max(-32f,Math.min(32f,left-state.opticalSampleX))*response;
-            state.opticalSampleY+=Math.max(-32f,Math.min(32f,top-state.opticalSampleY))*response;
-            if((Math.abs(left-state.opticalSampleX)>0.35f || Math.abs(top-state.opticalSampleY)>0.35f)
-                    && view.isAttachedToWindow())view.postInvalidateDelayed(16L);
-        }
-        state.opticalSampleAt=sampleNow;
         // V1.9.76: retain the refraction pass while ANY part of the folder
         // intersects the display. Requiring the whole rectangle to fit made
         // the highlight blink off as soon as a folder crossed a screen edge.
@@ -1883,7 +1868,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                     state.shaderMatrix.reset();
                     state.shaderMatrix.setScale(referenceScaleX,referenceScaleY);
-                    state.shaderMatrix.postTranslate(-state.opticalSampleX,-state.opticalSampleY);
+                    state.shaderMatrix.postTranslate(-left,-top);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
@@ -1894,6 +1879,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("strength",shaderMode==2?22.0f:6.0f);
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
+                    // Only the motion sheen is time-smoothed. Wallpaper sampling
+                    // stays locked to the real screen position on every frame.
+                    float motionHighlight=smoothHighlightProgress(view,state);
+                    state.continuousShader.setFloatUniform("motionHighlight",motionHighlight);
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
@@ -1915,7 +1904,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V1.9.74: the refraction pass must not draw a second outline.
             // The unified highlight renderer owns the complete edge treatment.
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
-                " sampleX="+state.opticalSampleX+" sampleY="+state.opticalSampleY+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
+                " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
     }
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
@@ -1985,7 +1974,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(edgeOnly && probeMode==0 && highlightEnabled && highlightStrength>0){
                     DynamicRefraction animation=dynamicState(v);
                     float motion=smoothHighlightProgress(v,animation);
-                    envelope=0.55f+0.45f*motion;
+                    envelope=1.0f; // keep the native outline static; motion sheen lives in AGSL only
                 }
                 drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
