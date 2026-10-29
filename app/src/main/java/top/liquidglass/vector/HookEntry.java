@@ -2987,6 +2987,26 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
     }
 
+    // V1.9.121: opt-in A/B test of the original ColorOS material switch.
+    // Mode 0 observes OEM return; mode 1 restores the historical forced-true path.
+    private static volatile int materialSwitchAB=0;
+    private static volatile long materialSwitchReadAt=0L;
+    private static int currentMaterialSwitchAB(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-materialSwitchReadAt>1000L){
+            materialSwitchReadAt=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int mode=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                            "liquidglass_material_switch_ab",0)==1?1:0;
+                    if(mode!=materialSwitchAB){materialSwitchAB=mode;
+                        log("GLASS121_MATERIAL_AB mode="+mode);}
+                }
+            }catch(Throwable t){log("GLASS121_MATERIAL_AB_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return materialSwitchAB;
+    }
     // V1.9.15: read-only, targeted native blur condition tracing. No return-value changes.
     private static final java.util.Set<String> CONDITION_ONCE =
             java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
@@ -3041,9 +3061,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                         && "com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties".equals(method.getDeclaringClass().getName())) {
                                     // This experiment intentionally changes ONLY the one observed accessor.
                                     // It never changes system properties, other applications or global blur state.
-                                    // V1.9.118: observe only; never force OEM blur on.
-                                    if(EXPERIMENT_ONCE.add("material-switch-original"))
-                                        log("NATIVE_BLUR_SWITCH original="+safeValue(value)+" override=none");
+                                    int mode=currentMaterialSwitchAB();
+                                    boolean forced=mode==1 && glassEnabled && Boolean.FALSE.equals(value);
+                                    if(forced) p.setResult(Boolean.TRUE);
+                                    String abKey="material-switch-"+mode+"-"+safeValue(value);
+                                    if(EXPERIMENT_ONCE.add(abKey))
+                                        log("GLASS121_MATERIAL_SWITCH mode="+mode
+                                                +" original="+safeValue(value)
+                                                +" final="+safeValue(p.getResult())
+                                                +" forced="+forced);
                                 }
                                 String key=signature+"="+safeValue(value)+"->"+safeValue(p.getResult());
                                 if(CONDITION_ONCE.size()>=64 || !CONDITION_ONCE.add(key))return;
