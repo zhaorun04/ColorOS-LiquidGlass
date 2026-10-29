@@ -1780,6 +1780,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return refractionVisibilityTest;
     }
+    // V1.9.109: independent optical displacement A/B test. 0 = no horizontal
+    // displacement, 1 = original 22px displacement. Sampling tracks the screen
+    // in both cases; no coordinate interpolation or additional motion delay.
+    private static volatile int displacementIsolationMode = 1;
+    private static volatile long displacementIsolationReadAt = 0L;
+    private static int currentDisplacementIsolationMode(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-displacementIsolationReadAt>1000L){
+            displacementIsolationReadAt=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int mode=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_refraction_displacement_test",1);
+                    mode=mode==0?0:1;
+                    if(mode!=displacementIsolationMode){
+                        displacementIsolationMode=mode;
+                        log("REFRACTION_DISPLACEMENT_TEST mode="+mode+
+                            " (0=NO_DISPLACEMENT,1=ORIGINAL)");
+                    }
+                }
+            }catch(Throwable t){log("REFRACTION_DISPLACEMENT_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return displacementIsolationMode;
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -1876,7 +1901,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V1.9.93: mode 0 uses the exact proven mode-2 optical profile.
                     // Keep the requested mode 1/3 diagnostics available.
                     int shaderMode=(visibilityTest==0?2:visibilityTest);
-                    state.continuousShader.setFloatUniform("strength",shaderMode==2?22.0f:6.0f);
+                    int displacementMode=currentDisplacementIsolationMode();
+                    state.continuousShader.setFloatUniform("strength",displacementMode==0?0.0f:(shaderMode==2?22.0f:6.0f));
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     // Only the motion sheen is time-smoothed. Wallpaper sampling
@@ -1888,7 +1914,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
-                    if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" shaderMode="+shaderMode+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
+                    if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" shaderMode="+shaderMode+" displacementMode="+displacementMode+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
                 }catch(Throwable t){
                     state.continuousUnavailable=true;
