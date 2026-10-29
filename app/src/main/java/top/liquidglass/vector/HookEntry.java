@@ -1674,6 +1674,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
         final Paint rimPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
         final Path clip=new Path();
         android.graphics.BitmapShader shader;
+        // V1.9.114: an independent shader for only the motion-brightness excess.
+        // The real-time wallpaper shader above always follows the current position.
+        android.graphics.BitmapShader heldHighlightShader;
+        final Matrix heldHighlightMatrix=new Matrix();
+        android.graphics.Bitmap heldHighlightSource;
+        float heldHighlightX=Float.NaN,heldHighlightY=Float.NaN;
+        float heldHighlightScore=-1f;
+        boolean heldHighlightReady=false;
+        long positionMotionSequence=0L, evaluatedPositionMotionSequence=-1L;
+        long heldOffsetRevision=-1L;
+        long glowDiagnosticAt=0L;
         android.graphics.RuntimeShader continuousShader;
         boolean continuousUnavailable;
         boolean shaderStatusLogged;
@@ -1704,8 +1715,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!REFRACTION_ENABLED || REFRACTION_FRAME==null || !view.isAttachedToWindow())return true;
                 try {
                     float[] xy=dynamicScreenPosition(view,tracked);
-                    if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>.25f || Math.abs(xy[1]-tracked.lastY)>.25f){
+                    boolean first=Float.isNaN(tracked.lastX) || Float.isNaN(tracked.lastY);
+                    boolean moved=!first && (Math.abs(xy[0]-tracked.lastX)>.25f || Math.abs(xy[1]-tracked.lastY)>.25f);
+                    if(first || moved){
                         tracked.lastX=xy[0];tracked.lastY=xy[1];
+                        if(moved){
+                            long now=android.os.SystemClock.uptimeMillis();
+                            // Start a new optical peak after a substantial idle gap.
+                            // Do not reset the saved peak on a final 1px snap-back.
+                            if(now-tracked.opticalLastMoveAt>350L){
+                                tracked.heldHighlightScore=-1f;
+                                tracked.heldHighlightReady=false;
+                            }
+                            tracked.opticalLastMoveAt=now;
+                            tracked.positionMotionSequence++;
+                        }
                         view.invalidate();
                     }
                 }catch(Throwable ignored){}
@@ -1726,7 +1750,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.opticalMotionRevision=wallpaperOffsetRevision;
             state.opticalLastMoveAt=now;
         }
-        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<650L;
+        // V1.9.114: respond to actual folder motion and wallpaper offset requests.
+        // The previous 650ms hold made brief gestures behave as sustained motion.
+        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<120L;
         final float target=active?1f:0f;
         // Use elapsed real time rather than capping dt to 64ms: otherwise an
         // interrupted render loop can leave the animation apparently stuck.
@@ -1860,8 +1886,55 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return sampleIsolationMode;
     }
+    // V1.9.114: independent A/B gate, sampled on the same one-second cadence
+    // as the existing diagnostic switches. 0=original, 1=brightness split.
+    private static volatile int refractionMotionGlowTest=1;
+    private static volatile long refractionMotionGlowReadAt=0L;
+    private static int refractionMotionGlowLogs=0;
+    private static int currentMotionGlowTest(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-refractionMotionGlowReadAt>1000L){
+            refractionMotionGlowReadAt=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int mode=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_refraction_motion_glow_test",1);
+                    mode=mode==0?0:1;
+                    if(mode!=refractionMotionGlowTest){
+                        refractionMotionGlowTest=mode;
+                        log("REFRACTION_GLOW_114 mode="+mode);
+                    }
+                }
+            }catch(Throwable t){if(refractionMotionGlowLogs++<4)log("REFRACTION_GLOW_114_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return refractionMotionGlowTest;
+    }
+    // A 3x3 low-cost brightness probe detects the brightest position during a
+    // gesture. It is NOT used to delay the main wallpaper sampling coordinates.
+    private static float highlightAreaLuminance(android.graphics.Bitmap bitmap,float left,float top,
+        RectF rect,float displayToBitmapX,float displayToBitmapY){
+        if(bitmap==null || bitmap.isRecycled())return 0f;
+        try{
+            float total=0f,max=0f;
+            for(int yi=0;yi<3;yi++)for(int xi=0;xi<3;xi++){
+                float sx=(left+rect.width()*(0.16f+0.34f*xi))*displayToBitmapX;
+                float sy=(top+rect.height()*(0.16f+0.34f*yi))*displayToBitmapY;
+                int px=Math.max(0,Math.min(bitmap.getWidth()-1,Math.round(sx)));
+                int py=Math.max(0,Math.min(bitmap.getHeight()-1,Math.round(sy)));
+                int rgb=bitmap.getPixel(px,py);
+                float lum=(0.2126f*android.graphics.Color.red(rgb)+
+                    0.7152f*android.graphics.Color.green(rgb)+
+                    0.0722f*android.graphics.Color.blue(rgb))/255f;
+                total+=lum;max=Math.max(max,lum);
+            }
+            return 0.70f*(total/9f)+0.30f*max;
+        }catch(Throwable ignored){return 0f;}
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
+        "uniform shader heldHighlight;\n"+
+        "uniform float motionGlowEnabled;\n"+
         "uniform float4 bounds;\n"+
         "uniform float strength;\n"+
         "uniform float diagnosticMode;\n"+
@@ -1890,9 +1963,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // Mode 2 retains the exact wallpaper sample, with a separately animated
         // additive sheen. No smoothing or interpolation of sample coordinates.
         " if(diagnosticMode>1.5){\n"+
-        "  float edgeSheen=pow(clamp(abs(2.0*u-1.0),0.0,1.0),3.0);\n"+
-        "  float sheen=0.0; // V1.9.108 diagnostic: disable AGSL added sheen only\n"+
-        "  color.rgb=mix(color.rgb,half3(1.0),half(sheen));\n"+
+        "  if(motionGlowEnabled>0.5 && sampleIsolation<0.5){\n"+
+        // Keep the REAL-TIME sampled RGB for the base. Cap only its strongest
+        // luminance peaks; a separately held sample supplies the optical excess.
+        "    float luma=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
+        "    float baseScale=luma>0.60?0.60/max(luma,0.001):1.0;\n"+
+        "    half3 baseColor=color.rgb*half(baseScale);\n"+
+        "    half4 peakColor=heldHighlight.eval(samplingPoint);\n"+
+        "    float peakLuma=dot(float3(peakColor.rgb),float3(0.2126,0.7152,0.0722));\n"+
+        "    float peakScale=peakLuma>0.60?0.60/max(peakLuma,0.001):1.0;\n"+
+        "    half3 excess=peakColor.rgb*half(1.0-peakScale);\n"+
+        "    color.rgb=clamp(baseColor+excess*half(motionHighlight),half3(0.0),half3(1.0));\n"+
+        "  }\n"+
         "  color.a=half(0.65*temporalOpacity);return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -1970,6 +2052,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(state.source!=frame){
             state.source=frame;
             state.shader=new android.graphics.BitmapShader(frame,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+            state.heldHighlightSource=null;
+            state.heldHighlightReady=false;
+            state.heldHighlightScore=-1f;
         }
         int save=canvas.save();
         try {
@@ -1991,6 +2076,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.shaderMatrix.postTranslate(-left,-top);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
+                    // The held shader is only used for the bright excess. Its
+                    // matrix is independently pinned at the brightest recorded
+                    // sampling position until the extra light fades away.
+                    if(state.heldHighlightSource!=frame || state.heldHighlightShader==null){
+                        state.heldHighlightShader=new android.graphics.BitmapShader(frame,
+                            android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+                        state.heldHighlightSource=frame;
+                        state.heldHighlightReady=false;
+                        state.heldHighlightScore=-1f;
+                    }
+                    boolean sampleChanged=state.evaluatedPositionMotionSequence!=state.positionMotionSequence ||
+                        state.heldOffsetRevision!=wallpaperOffsetRevision;
+                    if(!state.heldHighlightReady || sampleChanged){
+                        float score=highlightAreaLuminance(frame,left,top,rect,1f/referenceScaleX,1f/referenceScaleY);
+                        if(!state.heldHighlightReady || score>state.heldHighlightScore+0.004f){
+                            state.heldHighlightX=left;
+                            state.heldHighlightY=top;
+                            state.heldHighlightScore=score;
+                            state.heldHighlightReady=true;
+                            state.heldHighlightMatrix.reset();
+                            state.heldHighlightMatrix.setScale(referenceScaleX,referenceScaleY);
+                            state.heldHighlightMatrix.postTranslate(-state.heldHighlightX,-state.heldHighlightY);
+                            state.heldHighlightShader.setLocalMatrix(state.heldHighlightMatrix);
+                        }
+                        state.evaluatedPositionMotionSequence=state.positionMotionSequence;
+                        state.heldOffsetRevision=wallpaperOffsetRevision;
+                    }
+                    state.continuousShader.setInputShader("heldHighlight",state.heldHighlightShader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
                     int visibilityTest=currentRefractionVisibilityTest();
                     // V1.9.93: mode 0 uses the exact proven mode-2 optical profile.
@@ -2001,6 +2114,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     int samplingDiagnostic=currentSampleIsolationMode();
                     state.continuousShader.setFloatUniform("sampleIsolation",(float)samplingDiagnostic);
+                    int motionGlowMode=currentMotionGlowTest();
+                    state.continuousShader.setFloatUniform("motionGlowEnabled",(float)motionGlowMode);
                     // Same local p-space as wallpaper.eval(), but bounded by
                     // the actual display rectangle. Only mode 2 clamps p.
                     state.continuousShader.setFloatUniform("screenClip",0.5f-left,0.5f-top,
@@ -2010,7 +2125,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // stays locked to the real screen position on every frame.
                     float motionHighlight=smoothHighlightProgress(view,state);
                     state.continuousShader.setFloatUniform("motionHighlight",motionHighlight);
-                    state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
+                    state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // base refraction stays fully active
+                    long glowNow=android.os.SystemClock.uptimeMillis();
+                    if(motionGlowMode==1 && diagnostics && glowNow-state.glowDiagnosticAt>250L){
+                        state.glowDiagnosticAt=glowNow;
+                        log("REFRACTION_GLOW_114 id="+System.identityHashCode(view)+
+                            " envelope="+motionHighlight+" peakScore="+state.heldHighlightScore+
+                            " heldXY="+state.heldHighlightX+","+state.heldHighlightY+
+                            " liveXY="+left+","+top+
+                            " moving="+(state.opticalLastMoveAt>0 && glowNow-state.opticalLastMoveAt<120L));
+                    }
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
