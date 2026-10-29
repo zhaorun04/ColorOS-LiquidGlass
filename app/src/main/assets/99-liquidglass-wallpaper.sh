@@ -1,5 +1,6 @@
 #!/system/bin/sh
-# V1.9.80: inotify event-driven sync, with 5-minute metadata-only fallback.
+# V1.9.100: fast event-driven sync and 4-second metadata fallback.
+# Source is checked twice before atomic replacement; never expose partial copies.
 # Android toybox inotifyd is optional; fallback works without it.
 PKG=top.liquidglass.vector
 SRC=/data/system/users/0/wallpaper_screenshot.png
@@ -82,7 +83,7 @@ sync_once() {
   PREV=$(cat "$SIGFILE" 2>/dev/null)
   [ "$BEFORE" != "$PREV" ] || return
   # Debounce writes and verify that the source has stabilized.
-  sleep 2
+  sleep 0.2
   AFTER=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
   [ "$BEFORE" = "$AFTER" ] || return
   TMP="$DSTDIR/.wallpaper_reference.new.$$"
@@ -118,7 +119,7 @@ sync_launcher_reference() {
   [ -n "$BEFORE" ] || return
   PREV=$(cat "$LAUNCHERSIG" 2>/dev/null)
   if [ "$BEFORE" = "$PREV" ] && [ -s "$LAUNCHERDST" ]; then return; fi
-  sleep 2
+  sleep 0.2
   AFTER=$(stat -c '%s:%Y' "$SRC" 2>/dev/null)
   [ "$BEFORE" = "$AFTER" ] || return
   TMP="$LAUNCHERDIR/.liquidglass_wallpaper.new.$$"
@@ -151,27 +152,27 @@ sync_once
 TICKS=0
 BOOT_TICKS=0
 while true; do
-  if [ "$BOOT_TICKS" -lt 90 ]; then sleep 2; else sleep 5; fi
+  if [ "$BOOT_TICKS" -lt 180 ]; then sleep 1; else sleep 2; fi
   sync_config
   TICKS=$((TICKS + 1))
   if [ -e "$TRIGGER" ]; then
     rm -f "$TRIGGER"
-    sync_once
     sync_launcher_reference
-  elif [ "$BOOT_TICKS" -lt 90 ]; then
+    sync_once
+  elif [ "$BOOT_TICKS" -lt 180 ]; then
     # During the first three minutes, missing paths must not defer
     # synchronization to the normal five-minute maintenance cycle.
     [ -s "$LAUNCHERDST" ] || sync_launcher_reference
     [ -s "$DST" ] || sync_once
     # If the source changed across reboot, signatures will be refreshed.
-    if [ $((BOOT_TICKS % 5)) -eq 0 ]; then
+    if [ $((BOOT_TICKS % 2)) -eq 0 ]; then
       sync_launcher_reference
       sync_once
     fi
-  elif [ "$TICKS" -ge 60 ]; then
-    sync_once
+  elif [ "$TICKS" -ge 2 ]; then
     sync_launcher_reference
+    sync_once
   fi
-  [ "$TICKS" -ge 60 ] && TICKS=0
-  [ "$BOOT_TICKS" -lt 90 ] && BOOT_TICKS=$((BOOT_TICKS + 1))
+  [ "$TICKS" -ge 2 ] && TICKS=0
+  [ "$BOOT_TICKS" -lt 180 ] && BOOT_TICKS=$((BOOT_TICKS + 1))
 done

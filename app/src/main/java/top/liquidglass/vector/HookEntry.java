@@ -1586,7 +1586,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // On boot the Launcher-owned wallpaper file can arrive after the first draw.
         // Retry rapidly until the first valid frame exists; use the longer interval
         // only after the frame is ready, to avoid steady-state disk churn.
-        long retryMs=REFRACTION_FRAME==null ? 1200L : 30000L;
+        // Metadata checks run on the worker thread; hot wallpaper changes should not wait 30s.
+        long retryMs=REFRACTION_FRAME==null ? 600L : 1000L;
         if(now-REFRACTION_LAST_CHECK<retryMs)return;
         REFRACTION_LAST_CHECK=now;
         REFRACTION_LOADING=true;
