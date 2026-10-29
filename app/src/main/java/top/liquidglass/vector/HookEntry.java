@@ -1571,6 +1571,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile boolean REFRACTION_ENABLED;
     private static int REFRACTION_LOGS;
     private static void scheduleReferenceLoad(final View view) {
+        scheduleReferenceLoad(view.getContext().getApplicationContext(), view);
+    }
+    private static void scheduleReferenceLoad(final android.content.Context context, final View view) {
         if (!REFRACTION_ENABLED || REFRACTION_LOADING) return;
         long now=android.os.SystemClock.uptimeMillis();
         // On boot the Launcher-owned wallpaper file can arrive after the first draw.
@@ -1580,7 +1583,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(now-REFRACTION_LAST_CHECK<retryMs)return;
         REFRACTION_LAST_CHECK=now;
         REFRACTION_LOADING=true;
-        final android.content.Context app=view.getContext().getApplicationContext();
+        final android.content.Context app=context;
         new Thread(new Runnable(){public void run(){
             android.graphics.Bitmap next=null;
             try {
@@ -1629,7 +1632,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                         if(root!=null)root.invalidate();
                                     }
                             }
-                            if(view.isAttachedToWindow()){
+                            if(view!=null && view.isAttachedToWindow()){
                                 view.invalidate();
                                 // Parent render-node caches may not redraw the child until scroll.
                                 android.view.ViewParent parent=view.getParent();
@@ -2758,6 +2761,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
         log("BOOT_CONFIG_INVALIDATED tracked="+DYNAMIC_REFRACTION.size());
     }
 
+    // V1.9.96: proactively decode the wallpaper reference at Launcher startup,
+    // independent of FolderIcon drawing/touch. Stop once ready; bounded retries.
+    private static void prewarmBootRefraction(final android.content.Context app,
+                                               final android.os.Handler handler) {
+        final Runnable[] task=new Runnable[1];
+        task[0]=new Runnable(){
+            int attempts=0;
+            @Override public void run(){
+                if(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()){
+                    log("BOOT_PREWARM_READY attempts="+attempts);
+                    invalidateGlassViews();
+                    return;
+                }
+                if(++attempts>180){log("BOOT_PREWARM_TIMEOUT");return;}
+                // Retry also when the snapshot arrives later than Launcher attach.
+                if(REFRACTION_ENABLED) scheduleReferenceLoad(app,null);
+                if(attempts==1 || attempts%15==0)
+                    log("BOOT_PREWARM_WAIT attempt="+attempts+" enabled="+REFRACTION_ENABLED
+                        +" loading="+REFRACTION_LOADING);
+                handler.postDelayed(this,1000L);
+            }
+        };
+        handler.post(task[0]);
+    }
+
     // Restore persisted settings as soon as the hooked process obtains a Context.
     // This is not a background service: LSPosed installs it when Launcher starts.
     private static void hookBootConfigRestore() {
@@ -2793,6 +2821,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         }
                     };
                     restore.run();
+                    prewarmBootRefraction(app,handler);
                     try {
                         app.getContentResolver().registerContentObserver(CONFIG,false,new android.database.ContentObserver(handler){
                             @Override public void onChange(boolean selfChange){

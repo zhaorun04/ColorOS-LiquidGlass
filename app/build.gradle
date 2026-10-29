@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 1995
-        versionName '1.9.95-auto-root-helper'
+        versionName '1.9.96-boot-prewarm'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
