@@ -84,12 +84,38 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try { return Class.forName(name, false, loader); }
         catch (Throwable t) { log("CLASS_UNAVAILABLE name=" + name + " reason=" + t.getClass().getSimpleName()); return null; }
     }
+    // V1.9.132: reflection metadata is stable for the lifetime of a Launcher
+    // class loader. Cache it once rather than walking class hierarchies on draw.
+    private static final java.util.concurrent.ConcurrentHashMap<Class<?>,
+        java.util.concurrent.ConcurrentHashMap<String,Field>> FIELD_CACHE =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<Class<?>,Method> BG_GETTERS =
+        new java.util.concurrent.ConcurrentHashMap<>();
     private static Field field(Class<?> type, String name) throws NoSuchFieldException {
-        for (Class<?> c = type; c != null; c = c.getSuperclass()) {
-            try { Field f = c.getDeclaredField(name); f.setAccessible(true); return f; }
-            catch (NoSuchFieldException ignored) {}
+        java.util.concurrent.ConcurrentHashMap<String,Field> fields=FIELD_CACHE.get(type);
+        if(fields!=null){Field cached=fields.get(name);if(cached!=null)return cached;}
+        for(Class<?> c=type;c!=null;c=c.getSuperclass()){
+            try {
+                Field found=c.getDeclaredField(name);
+                found.setAccessible(true);
+                if(fields==null){
+                    java.util.concurrent.ConcurrentHashMap<String,Field> fresh=new java.util.concurrent.ConcurrentHashMap<>();
+                    java.util.concurrent.ConcurrentHashMap<String,Field> previous=FIELD_CACHE.putIfAbsent(type,fresh);
+                    fields=previous==null?fresh:previous;
+                }
+                Field previous=fields.putIfAbsent(name,found);
+                return previous==null?found:previous;
+            }catch(NoSuchFieldException ignored){}
         }
         throw new NoSuchFieldException(name);
+    }
+    private static Method backgroundGetter(Class<?> type) throws NoSuchMethodException {
+        Method cached=BG_GETTERS.get(type);
+        if(cached!=null)return cached;
+        Method found=type.getDeclaredMethod("getBgDrawable");
+        found.setAccessible(true);
+        Method previous=BG_GETTERS.putIfAbsent(type,found);
+        return previous==null?found:previous;
     }
     private static void inspect(String label, Object object) {
         if (!(object instanceof View)) return;
@@ -1393,11 +1419,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // V1.9.28: preserve all four straight edges; correct only the corner curve.
     // This is a geometry experiment, not an exact OEM LayerBlurDrawable alpha mask.
     private static final float BLUR_CORNER_RADIUS_DELTA_PX = 0f;
+    private static volatile MaskCache LAST_SHAPE_MASK;
+    private static volatile int LAST_SHAPE_W=-1,LAST_SHAPE_H=-1,LAST_SHAPE_RADIUS=-1,LAST_SHAPE_WIDTH=-1;
     private static MaskCache blurShapeMask(int w,int h,float radius) {
-        String key=w+"x"+h+"/"+Math.round(radius*100)+"/"+highlightWidth+"/cornerDelta"+BLUR_CORNER_RADIUS_DELTA_PX;
+        int radiusKey=Math.round(radius*100);
+        int widthKey=highlightWidth;
+        MaskCache hot=LAST_SHAPE_MASK;
+        if(hot!=null && LAST_SHAPE_W==w && LAST_SHAPE_H==h &&
+            LAST_SHAPE_RADIUS==radiusKey && LAST_SHAPE_WIDTH==widthKey)return hot;
+        String key=w+"x"+h+"/"+radiusKey+"/"+widthKey+"/cornerDelta"+BLUR_CORNER_RADIUS_DELTA_PX;
         synchronized(BLUR_SHAPE_MASKS) {
             MaskCache cached=BLUR_SHAPE_MASKS.get(key);
-            if(cached!=null)return cached;
+            if(cached!=null){
+                LAST_SHAPE_W=w;LAST_SHAPE_H=h;LAST_SHAPE_RADIUS=radiusKey;
+                LAST_SHAPE_WIDTH=widthKey;LAST_SHAPE_MASK=cached;
+                return cached;
+            }
         }
         if(w<8||h<8||w>1400||h>1400)return null;
         try {
@@ -1646,23 +1683,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 for(View trackedView:DYNAMIC_REFRACTION.keySet())
                                     if(trackedView!=null && trackedView.isAttachedToWindow()){
                                         trackedView.invalidate();
-                                        View root=trackedView.getRootView();
-                                        if(root!=null)root.invalidate();
                                     }
                             }
                             if(view!=null && view.isAttachedToWindow()){
                                 view.invalidate();
-                                // Parent render-node caches may not redraw the child until scroll.
-                                android.view.ViewParent parent=view.getParent();
-                                int depth=0;
-                                while(parent instanceof View && depth++<12){
-                                    ((View)parent).invalidate();
-                                    parent=parent.getParent();
-                                }
-                                View parentRoot=view.getRootView();
-                                if(parentRoot!=null)parentRoot.invalidate();
-                                view.postInvalidateDelayed(120L);
-                                view.postInvalidateDelayed(420L);
+                                // A new wallpaper frame is a one-shot update, not a
+                                // reason to invalidate the entire workspace repeatedly.
                             }
                         }
                     });
@@ -2149,8 +2175,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         try {
             Object preview = field(v.getClass(), "mBackground").get(v);
             if (preview == null) { if(glass123GateLogs++<40)log("GLASS123_GATE reason=preview_null edge="+edgeOnly); return; }
-            Method getter = preview.getClass().getDeclaredMethod("getBgDrawable");
-            getter.setAccessible(true);
+            Method getter = backgroundGetter(preview.getClass());
             Object value = getter.invoke(preview);
             if (!(value instanceof Drawable)) { if(glass123GateLogs++<40)log("GLASS124_GATE reason=not_drawable edge="+edgeOnly); return; }
             // V1.9.124: ColorOS 15 can expose a GradientDrawable instead of
@@ -2159,7 +2184,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             final boolean nativeBlurDrawable=value.getClass().getName().endsWith(".LayerBlurDrawable");
             if(glass123GateLogs++<40)log("GLASS124_GATE accepted="+value.getClass().getName()+" nativeBlur="+nativeBlurDrawable+" edge="+edgeOnly);
             if(glass123GateLogs++<40)log("GLASS124_GATE reason=passed edge="+edgeOnly+" frameReady="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()));
-            if (!edgeOnly) inspectFusionGeometry(v,preview,(Drawable)value);
+            if (diagnostics && !edgeOnly) inspectFusionGeometry(v,preview,(Drawable)value);
             // V1.9.21: native blur bounds are in preview-local coordinates; the
             // preview offsets translate them into FolderIcon's Canvas coordinates.
             // Never use FolderIcon's full dimensions (they include the label).
@@ -2212,6 +2237,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             float w = rect.width(), h = rect.height();
             radius = Math.min(radius, Math.min(w,h)*0.5f);
+            // Surface material is optional; the wallpaper/tint pass remains independent.
+            // Edge mask is still required for enabled highlights.
             MaskCache mask=blurShapeMask(Math.round(w),Math.round(h),radius);
             if(mask==null)return;
             int save=canvas.save();
@@ -2381,9 +2408,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         ACTIVE_FOLDER_ICON.set(v);
                         PREVIEW_SURFACE_DRAWN.set(Boolean.FALSE);
                         EARLY_SURFACE_DRAWN.set(Boolean.FALSE);
-                        Matrix folderMatrix=new Matrix();
+                        Matrix folderMatrix=FOLDER_CANVAS_MATRIX.get();
+                        if(folderMatrix==null){folderMatrix=new Matrix();FOLDER_CANVAS_MATRIX.set(folderMatrix);}
                         ((Canvas)p.args[0]).getMatrix(folderMatrix);
-                        FOLDER_CANVAS_MATRIX.set(folderMatrix);
                         // V1.9.87: restore the known-working surface entry point.
                         // The OEM preview hook is not guaranteed to run inside dispatchDraw.
                         // V1.9.89: Always preserve the proven pre-background draw.

@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 19131
-        versionName '1.9.131-static-optics-frame-budget'
+        versionCode 19132
+        versionName '1.9.132-global-frame-overhead'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
