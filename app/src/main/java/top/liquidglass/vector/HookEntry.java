@@ -1908,11 +1908,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // A persistent low-opacity refracted sample across the entire glass,
         // plus a stronger but bounded optical edge. Never depend on motion.
         " float edgeWeight=envelope*envelope;\n"+
-        " float midOpacity=0.065*(1.0-0.65*bright);\n"+
-        " float edgeOpacity=0.075*edgeWeight*(1.0-0.85*bright);\n"+
-        " float neutralOpacity=0.10*bright;\n"+
+        " float midOpacity=0.115*(1.0-0.55*bright);\n"+
+        " float edgeOpacity=0.115*edgeWeight*(1.0-0.75*bright);\n"+
+        " float neutralOpacity=0.055*bright;\n"+
         " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
-        " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.16));\n"+
+        " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
         " return color;\n"+
         "}\n";
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
@@ -2208,7 +2208,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     try {
                         if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                             // Do not draw the surface here: it would cover app icons.
-                            if(currentCompositionIsolationMode()!=2) drawPostDispatchRefractionIconSafe((View)p.thisObject,(Canvas)p.args[0]);
+                            // V1.9.116: the OEM drawBackground callback is the only pass that
+                            // can paint after native blur and before app icons. Never draw a
+                            // second surface on top of children when that pass succeeded.
+                            // For launchers without this callback, retain the clipped fallback.
+                            if(currentCompositionIsolationMode()!=2 &&
+                               !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()))
+                                drawPostDispatchRefractionIconSafe((View)p.thisObject,(Canvas)p.args[0]);
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int probe=currentRefractionVisibilityTest();
                             // V1.9.93: do not add the post-dispatch overlay in normal mode.
@@ -2632,7 +2638,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 View activeIcon=ACTIVE_FOLDER_ICON.get();
                                 if(currentCompositionIsolationMode()!=1 && targetCanvas!=null && activeIcon!=null &&
                                         !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
-                                    PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
+                                    // Mark successful only after a usable callback canvas/matrix.
                                     // Draw again AFTER the OEM background when a valid
                                     // callback Canvas exists. The earlier surface may have
                                     // been occluded by the OEM background, so it is not a
@@ -2653,6 +2659,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                                 REFRACTION_AFTER_OEM.set(Boolean.TRUE);
                                                 try { drawFolderIconFusion(activeIcon,targetCanvas,false); }
                                                 finally { REFRACTION_AFTER_OEM.remove(); }
+                                                PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
                                                 if(compositionLogs++<24)log("REFRACTION_COMPOSITION mode=AFTER_OEM_BACKGROUND beforeChildren=true");
                                             } finally { targetCanvas.restoreToCount(save); }
                                         } else {
