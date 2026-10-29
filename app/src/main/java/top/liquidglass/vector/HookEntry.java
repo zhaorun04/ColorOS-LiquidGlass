@@ -227,7 +227,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static int tintColor() {
         if(tintMode==1)return Color.rgb(225,240,255);
         if(tintMode==2)return Color.rgb(185,192,202);
-        return Color.rgb(40,50,65);
+        return Color.rgb(245,248,252);
     }
     // V1.9.35: read-only, bounded native blur parameter probe. Never mutate OEM blur state.
     private static void inspectBlurParameters(Object child) {
@@ -1193,7 +1193,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
             // Verified native blur drawable alpha control. This does not change blur radius.
-            int alpha=isBlur ? original : (glassEnabled?requested:original);
+            int alpha=isBlur ? original : (glassEnabled && customBlurMode!=2 ? 0 : (glassEnabled?requested:original));
             // V1.9.114: keep OEM blur drawable opacity untouched. The glass
             // alpha slider must never silently weaken the underlying blur.
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
@@ -1500,16 +1500,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // passes, not an additional overlay. Keep mask geometry unchanged.
     private static void drawUnifiedMaterial(Canvas canvas, MaskCache cache, boolean edgeOnly, float highlightEnvelope) {
         if(cache==null)return;
-        boolean tint=tintMode!=0 && tintStrength>0 && probeMode!=2;
+        boolean tint=tintMode!=0 && tintStrength>0 && glassTintOpacity>0 && probeMode!=2;
         boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
         if(!edgeOnly) {
-            if(probeMode==0)drawOpticalGlass(canvas,cache);
+            if(probeMode==0 && glassTintOpacity>0)drawOpticalGlass(canvas,cache);
             if(tint){
                 Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
                 int c=tintColor();
                 p.setColorFilter(new android.graphics.PorterDuffColorFilter(
                     Color.rgb(Color.red(c),Color.green(c),Color.blue(c)),android.graphics.PorterDuff.Mode.SRC_IN));
-                p.setAlpha(Math.round(160f*tintStrength/90f));
+                p.setAlpha(Math.round(160f*tintStrength/90f*glassTintOpacity/100f));
                 canvas.drawBitmap(cache.mask,0,0,p);
             }
         } else if(shine) {
@@ -2020,7 +2020,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // Compare matrix-derived position with Android's screen location and
         // record abrupt sampling jumps during touch down/move/up.
         long coordNow=android.os.SystemClock.uptimeMillis();
-        if(state.coordLogCount<240 && coordNow-state.coordLogAt>=65L){
+        if(diagnostics && state.coordLogCount<240 && coordNow-state.coordLogAt>=65L){
             state.coordLogAt=coordNow;
             state.coordLogCount++;
             int[] loc=new int[2];
@@ -2201,7 +2201,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 offsetX + sourceBounds.right, offsetY + sourceBounds.bottom);
             // V1.9.115: avoid antialiased glow extending beyond OEM drawable bounds.
             // Keep refraction and edge on the same inset contour.
-            final float geometryInset = 1.0f;
+            final float geometryInset = 0.0f;
             if(rect.width() > 2f*geometryInset && rect.height() > 2f*geometryInset) {
                 rect.inset(geometryInset, geometryInset);
                 radius = Math.max(0f, radius-geometryInset);
@@ -2231,7 +2231,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " geometryInsetPx=1 maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
+                    " geometryInsetPx=0 maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
@@ -2678,8 +2678,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // flags, no synthetic round-rect. The OEM alpha mask remains the sole shape.
     // This is a physically-inspired glass sheen, NOT a true backdrop blur.
     private static void drawOpticalGlass(Canvas canvas, MaskCache cache) {
-        if (cache == null || cache.w < 8 || cache.h < 8) return;
-        int layer = canvas.saveLayer(0, 0, cache.w, cache.h, null);
+        if (cache == null || cache.w < 8 || cache.h < 8 || glassTintOpacity <= 0) return;
+        Paint layerOpacity = new Paint(Paint.ANTI_ALIAS_FLAG);
+        layerOpacity.setAlpha(Math.round(255f * Math.min(1f, glassTintOpacity / 30f)));
+        int layer = canvas.saveLayer(0, 0, cache.w, cache.h, layerOpacity);
         try {
             Paint glass = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
             // Low opacity central illumination and darker lower edge add depth

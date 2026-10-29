@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.118  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.127  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
@@ -84,14 +84,15 @@ public final class MainActivity extends Activity {
         });
         slider("色调强度","tint_strength",30,0,90);
         action("应用清透玻璃预设",()->{
-            prefs.edit().putBoolean("enabled",true).putInt("alpha",95).putInt("tint",0).putInt("tint_strength",20)
-                .putBoolean("highlight",true).putInt("highlight_strength",55).putInt("highlight_width",2)
+            prefs.edit().putBoolean("enabled",true).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0)
+                .putInt("glass_tint_opacity",0).putInt("custom_blur_dp",4).putInt("custom_blur_mode",1).putInt("refraction_percent",45)
+                .putBoolean("highlight",true).putInt("highlight_strength",45).putInt("highlight_width",2)
                 .putBoolean("directional_light",true).putBoolean("native_alpha_probe",false).putBoolean("real_refraction",true)
                 .putInt("probe_mode",0).commit();recreate();
         });
-        action("恢复液态玻璃推荐参数 (14 / 35 / 18 / 30)",()->{
+        action("恢复液态玻璃推荐参数 (14 / 35 / 12 / 30)",()->{
             prefs.edit().putInt("custom_blur_dp",14).putInt("refraction_percent",35)
-                .putInt("glass_tint_opacity",18).putInt("highlight_strength",30)
+                .putInt("glass_tint_opacity",12).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0).putInt("highlight_strength",30)
                 .putInt("custom_blur_mode",1).putBoolean("real_refraction",true)
                 .putBoolean("highlight",true).putBoolean("enabled",true).commit();recreate();
         });
