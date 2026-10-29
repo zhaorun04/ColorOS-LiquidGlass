@@ -49,12 +49,14 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.101  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.114  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","保留当前折射、圆角和原生模糊。设置保存后返回桌面查看。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("背景不透明度（越小越通透）","alpha",210,40,255);
         toggle("真实壁纸折射","real_refraction",false);
-        toggle("原生模糊背景随透明度联动","native_alpha_probe",true);
+        // Legacy native_alpha_probe is deliberately disabled: blur and material opacity are separate.
+        prefs.edit().putBoolean("native_alpha_probe",false).apply();
+        TextView blurInfo=text("原生模糊层独立保留：透明度滑块不再改变模糊 Drawable 的透明度。模糊强度仍由系统控制。",12,false);current.addView(blurInfo);
         section("柔和高光","静态圆角高光与光学轮廓；不改变已验证的描边几何。");
         toggle("启用柔和高光描边","highlight",false);
         slider("高光强度","highlight_strength",35,0,100);
@@ -73,7 +75,7 @@ public final class MainActivity extends Activity {
         action("应用清透玻璃预设",()->{
             prefs.edit().putBoolean("enabled",true).putInt("alpha",95).putInt("tint",0).putInt("tint_strength",20)
                 .putBoolean("highlight",true).putInt("highlight_strength",55).putInt("highlight_width",2)
-                .putBoolean("directional_light",true).putBoolean("native_alpha_probe",true).putBoolean("real_refraction",true)
+                .putBoolean("directional_light",true).putBoolean("native_alpha_probe",false).putBoolean("real_refraction",true)
                 .putInt("probe_mode",0).commit();recreate();
         });
         section("维护与状态","高级实验已从首页隐藏，保留必要的 Root 脚本更新与日志开关。");

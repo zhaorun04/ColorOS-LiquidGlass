@@ -1184,7 +1184,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
             // Verified native blur drawable alpha control. This does not change blur radius.
-            int alpha=isBlur ? (glassEnabled && nativeAlphaProbe ? requested : original) : (glassEnabled?requested:original);
+            int alpha=isBlur ? original : (glassEnabled?requested:original);
+            // V1.9.114: keep OEM blur drawable opacity untouched. The glass
+            // alpha slider must never silently weaken the underlying blur.
             if(d.getAlpha()!=alpha)d.setAlpha(alpha);
             // V1.9.4 tint is painted directly on the native Canvas after background.draw.
             // Clear any legacy color filter previously applied by V1.9.3.
