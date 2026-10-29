@@ -866,7 +866,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("REFRACTION_REFERENCE_PROBE status=UNAVAILABLE reason="+t.getClass().getSimpleName());
         }
         inspectWallpaperLayerAccessibility(folder);
-        log("REFRACTION_REFERENCE_FEASIBILITY status=NO_INDEPENDENT_WALLPAPER_FRAME"
+        log("REFRACTION_REFERENCE_FEASIBILITY status=LAUNCHER_REFERENCE_FILE_SEPARATELY_CHECKED"
             +" screenshotAttempted=false screenCaptureAttempted=false"
             +" wallpaperServiceHookAttempted=false compositorCrop=UNKNOWN compositorScale=UNKNOWN"
             +" modelVerified=false refractionEnabled=false");
@@ -2298,8 +2298,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // Independent Canvas marker: does not rely on wallpaper, AGSL, or OEM callback.
                         // Red is drawn BEFORE OEM/children; green is drawn AFTER OEM/children.
                         if(currentRefractionVisibilityTest()==1)drawRefractionProbeMarker(v,(Canvas)p.args[0],false);
-                        EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
-                        if (surfaceOrderLogs++ < 20) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE fallback=always");
+                        // V1.9.120: dispatchDraw is entered after View.draw has drawn its
+                        // background and before children are painted. This is the stable
+                        // folder-background composition slot even when the OEM preview
+                        // drawBackground callback is not invoked by this launcher build.
+                        // Do not use a post-children overlay: it washes out icons.
+                        if(currentCompositionIsolationMode()!=2 && glassEnabled){
+                            REFRACTION_AFTER_OEM.set(Boolean.TRUE);
+                            try { drawFolderIconFusion(v,(Canvas)p.args[0],false); }
+                            finally { REFRACTION_AFTER_OEM.remove(); }
+                            EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
+                            if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<64)
+                                log("GLASS120_COMPOSITION stage=BEFORE_CHILDREN backgroundAlreadyDrawn=true frameReady="+
+                                    (REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled())+
+                                    " mode="+customBlurMode+" radiusDp="+customBlurDp);
+                        }
+                        if (surfaceOrderLogs++ < 20) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_CHILDREN backgroundPass=true");
                     }
                 }
                 @Override protected void afterHookedMethod(MethodHookParam p) {
@@ -2310,9 +2324,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             // can paint after native blur and before app icons. Never draw a
                             // second surface on top of children when that pass succeeded.
                             // For launchers without this callback, retain the clipped fallback.
-                            if(currentCompositionIsolationMode()!=2 &&
-                               !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()))
-                                drawPostDispatchRefractionIconSafe((View)p.thisObject,(Canvas)p.args[0]);
+                            // V1.9.120: never redraw glass after children in normal mode.
+                            // The pre-children pass owns the complete rounded surface.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int probe=currentRefractionVisibilityTest();
                             // V1.9.93: do not add the post-dispatch overlay in normal mode.
@@ -2735,7 +2748,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 // and before FolderIcon's children. Motion must not toggle the pass.
                                 View activeIcon=ACTIVE_FOLDER_ICON.get();
                                 if(currentCompositionIsolationMode()!=1 && targetCanvas!=null && activeIcon!=null &&
-                                        !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
+                                        !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get()) &&
+                                        !Boolean.TRUE.equals(EARLY_SURFACE_DRAWN.get())) {
                                     // Mark successful only after a usable callback canvas/matrix.
                                     // Draw again AFTER the OEM background when a valid
                                     // callback Canvas exists. The earlier surface may have
