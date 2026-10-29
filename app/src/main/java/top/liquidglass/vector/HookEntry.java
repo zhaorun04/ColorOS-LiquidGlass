@@ -1802,7 +1802,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // additive sheen. No smoothing or interpolation of sample coordinates.
         " if(diagnosticMode>1.5){\n"+
         "  float edgeSheen=pow(clamp(abs(2.0*u-1.0),0.0,1.0),3.0);\n"+
-        "  float sheen=0.11*motionHighlight*edgeSheen;\n"+
+        "  float sheen=0.0; // V1.9.108 diagnostic: disable AGSL added sheen only\n"+
         "  color.rgb=mix(color.rgb,half3(1.0),half(sheen));\n"+
         "  color.a=half(0.65*temporalOpacity);return color;\n"+
         " }\n"+
