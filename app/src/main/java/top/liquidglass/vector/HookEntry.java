@@ -665,7 +665,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         float x=(Float)p.args[1], y=(Float)p.args[2];
                         long now=android.os.SystemClock.uptimeMillis();
                         boolean changed=Float.isNaN(wallpaperRequestedX) || Float.isNaN(wallpaperRequestedY)
-                            || Math.abs(x-wallpaperRequestedX)>0.0001f || Math.abs(y-wallpaperRequestedY)>0.0001f;
+                            || Math.abs(x-wallpaperRequestedX)>0.0015f || Math.abs(y-wallpaperRequestedY)>0.0015f;
                         wallpaperRequestedX=x; wallpaperRequestedY=y;
                         wallpaperOffsetTime=now;
                         if (changed) { wallpaperLastMotionTime=now; wallpaperOffsetRevision++; }

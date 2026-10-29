@@ -3,166 +3,85 @@ package top.liquidglass.vector;
 import android.app.Activity;
 import android.os.Bundle;
 import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.content.SharedPreferences;
+import android.view.View;
 import android.widget.*;
 
+/** V1.9.101: clean settings surface; legacy preferences remain intact. */
 public final class MainActivity extends Activity {
     private SharedPreferences prefs;
-    private LinearLayout root;
-    private TextView label(String s, int size) {
-        TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(Color.rgb(35,45,55));
-        t.setPadding(0,16,0,12);root.addView(t);return t;
+    private LinearLayout body;
+    private final int ink=0xFF172635, muted=0xFF657587, blue=0xFF2979E5;
+    private GradientDrawable bg(int color,int radius){GradientDrawable d=new GradientDrawable();d.setColor(color);d.setCornerRadius(dp(radius));return d;}
+    private int dp(float v){return (int)(v*getResources().getDisplayMetrics().density+.5f);}
+    private TextView text(String value,int size,boolean bold){TextView t=new TextView(this);t.setText(value);t.setTextSize(size);t.setTextColor(bold?ink:muted);if(bold)t.setTypeface(null,Typeface.BOLD);return t;}
+    private LinearLayout column(){LinearLayout l=new LinearLayout(this);l.setOrientation(1);return l;}
+    private void section(String title,String desc){
+        LinearLayout card=column();card.setPadding(dp(18),dp(16),dp(18),dp(16));card.setBackground(bg(Color.WHITE,22));
+        LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,0,0,dp(14));body.addView(card,lp);
+        TextView heading=text(title,18,true);card.addView(heading);
+        if(desc!=null&&!desc.isEmpty()){TextView sub=text(desc,12,false);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.setMargins(0,dp(5),0,dp(12));card.addView(sub,p);}
+        current=card;
     }
-    private Switch toggle(String title,String key,boolean def) {
-        Switch s=new Switch(this);s.setText(title);s.setTextSize(16);s.setPadding(0,12,0,12);
-        s.setChecked(prefs.getBoolean(key,def));root.addView(s);
-        s.setOnCheckedChangeListener((v,on)->prefs.edit().putBoolean(key,on).commit());return s;
+    private LinearLayout current;
+    private void toggle(String label,String key,boolean def){
+        Switch s=new Switch(this);s.setText(label);s.setTextColor(ink);s.setTextSize(14);s.setPadding(0,dp(8),0,dp(8));s.setChecked(prefs.getBoolean(key,def));
+        s.setOnCheckedChangeListener((v,checked)->prefs.edit().putBoolean(key,checked).commit());current.addView(s);
     }
-    private SeekBar slider(String title,String key,int def,int min,int max) {
-        TextView t=label(title+": "+prefs.getInt(key,def)+" / "+max,15);
-        SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(Math.max(0,Math.min(max-min,prefs.getInt(key,def)-min)));
-        root.addView(bar);
+    private void slider(String label,String key,int def,int min,int max){
+        TextView caption=text("",13,false);current.addView(caption);
+        SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(Math.max(0,Math.min(max-min,prefs.getInt(key,def)-min)));current.addView(bar);
+        Runnable update=()->caption.setText(label+"  ·  "+(bar.getProgress()+min));update.run();
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar b,int p,boolean from){int value=p+min;t.setText(title+": "+value+" / "+max);if(from)prefs.edit().putInt(key,value).apply();}
-            public void onStartTrackingTouch(SeekBar b){} public void onStopTrackingTouch(SeekBar b){prefs.edit().putInt(key,b.getProgress()+min).commit();}
-        });return bar;
-    }
-    @Override protected void onPause(){
-        super.onPause();
-        getContentResolver().notifyChange(GlassConfigProvider.URI,null);
-    }
-    @Override public void onCreate(Bundle b) {
-        super.onCreate(b);prefs=getSharedPreferences("glass",0);
-        ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.97",23);
-        label("设置自动保存到本机；LSPosed 作用域启用时，重启手机或桌面后自动恢复，无需手动打开应用。",14);
-        label("Root 辅助脚本：安装或升级 APK 后自动尝试同步；首次授权请在此页面确认。",14);
-        TextView helperStatus=label("正在检查 Root 脚本…",14);
-        Button helperUpdate=new Button(this);helperUpdate.setText("检查并更新 Root 辅助脚本");root.addView(helperUpdate);
-        Runnable checkHelper=()->RootHelperUpdater.runAsync(this,helperStatus::setText);
-        helperUpdate.setOnClickListener(v->{helperStatus.setText("正在申请 Root 权限并更新…");checkHelper.run();});
-        checkHelper.run();
-        label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
-        Switch enabled=toggle("启用文件夹材质实验","enabled",false);
-        label("透明度（数值越小越透明）",18);
-        SeekBar normal=slider("统一文件夹不透明度","alpha",210,40,255);
-        label("玻璃色调（实验功能）",18);
-        String[] options={"原生（推荐）","冷白","浅灰","深色"};
-        Spinner tint=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,options);
-        tint.setAdapter(adapter);tint.setSelection(Math.max(0,Math.min(3,prefs.getInt("tint",0))));root.addView(tint);
-        SeekBar tintStrength=slider("色调强度","tint_strength",30,0,90);
-        tintStrength.setEnabled(prefs.getInt("tint",0)!=0);
-        tint.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> p,android.view.View v,int pos,long id){prefs.edit().putInt("tint",pos).apply();tintStrength.setEnabled(pos!=0);}
-            public void onNothingSelected(android.widget.AdapterView<?> p){}
+            public void onProgressChanged(SeekBar b,int progress,boolean fromUser){update.run();if(fromUser)prefs.edit().putInt(key,progress+min).apply();}
+            public void onStartTrackingTouch(SeekBar b){}
+            public void onStopTrackingTouch(SeekBar b){prefs.edit().putInt(key,b.getProgress()+min).commit();}
         });
-        Switch highlight=toggle("柔和高光描边（默认关闭）","highlight",false);
-        SeekBar highlightStrength=slider("柔和高光强度","highlight_strength",35,0,100);
-        SeekBar highlightWidth=slider("高光内扩宽度（像素）","highlight_width",2,1,5);
-        Switch directional=toggle("方向性反射（左上亮、右下柔）","directional_light",true);
-        label("背景图层诊断模式（切换后返回桌面等待约 2 秒）",18);
-        String[] probeOptions={"0 · 正常材质","1 · 仅原生背景（关闭高光与叠色）","2 · 红色轮廓对照（仅用于短时测试）","3 · 仅色调（关闭高光）"};
-        Spinner probe=new Spinner(this);
-        probe.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,probeOptions));
-        probe.setSelection(Math.max(0,Math.min(3,prefs.getInt("probe_mode",0))));root.addView(probe);
-        probe.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> parent,android.view.View view,int pos,long id){prefs.edit().putInt("probe_mode",pos).apply();}
+    }
+    private void action(String label,Runnable run){
+        Button b=new Button(this);b.setAllCaps(false);b.setText(label);b.setTextColor(blue);b.setOnClickListener(v->run.run());current.addView(b,new LinearLayout.LayoutParams(-1,dp(52)));
+    }
+    @Override protected void onPause(){super.onPause();getContentResolver().notifyChange(GlassConfigProvider.URI,null);}
+    @Override public void onCreate(Bundle saved){
+        super.onCreate(saved);prefs=getSharedPreferences("glass",0);
+        ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
+        body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
+        TextView heading=text("Liquid Glass",28,true);body.addView(heading);
+        TextView version=text("V1.9.101  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        section("玻璃效果","保留当前折射、圆角和原生模糊。设置保存后返回桌面查看。");
+        toggle("启用桌面文件夹玻璃", "enabled",false);
+        slider("背景不透明度（越小越通透）","alpha",210,40,255);
+        toggle("真实壁纸折射","real_refraction",false);
+        toggle("原生模糊背景随透明度联动","native_alpha_probe",true);
+        section("柔和高光","静态圆角高光与光学轮廓；不改变已验证的描边几何。");
+        toggle("启用柔和高光描边","highlight",false);
+        slider("高光强度","highlight_strength",35,0,100);
+        slider("描边宽度（像素）","highlight_width",2,1,5);
+        toggle("方向性反射","directional_light",true);
+        section("视觉风格","保留必要的色调控制；移除旧版诊断和无效实验入口。");
+        TextView tintLabel=text("色调",13,false);current.addView(tintLabel);
+        Spinner tint=new Spinner(this);String[] names={"原生 · 推荐","冷白","浅灰","深色"};
+        tint.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));
+        tint.setSelection(Math.max(0,Math.min(3,prefs.getInt("tint",0))));current.addView(tint);
+        tint.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){prefs.edit().putInt("tint",pos).apply();}
             public void onNothingSelected(android.widget.AdapterView<?> parent){}
         });
-        label("建议在模式 0 测试高光宽度 1～5 与方向性反射。模式 2 的红线是几何对照，不是正式外观。",13);
-        label("V1.9.28 的圆角校正已保留；本版不改变圆角几何。",14);
-        label("原生模糊强度暂不可调：旧滑块误修改圆角半径，已停用。",14);
-        label("V1.9.63：保留V1.9.45光学外观；保留动态映射诊断；详细诊断开启时仅一次尝试读取壁纸原图3个像素，验证读取能力；不绘制、不保存图像、不启用真实折射。",13);
-        label("模糊可见度通过 Drawable Alpha 调节，不等于真正改变模糊半径。",13);
-        label("原生模糊背景透明度",18);
-        final Switch nativeAlpha=toggle("透明度滑块同时控制原生模糊背景","native_alpha_probe",true);
-        label("已在 V1.9.29 真机验证有效。控制模糊层可见度，不是模糊半径。",13);
-        label("一键视觉预设（首次应用时保存当前设置）",18);
-        final String[] presetKeys={"enabled","alpha","tint","tint_strength","highlight","highlight_strength","highlight_width","directional_light","probe_mode","native_alpha_probe","native_blur_experiment_enabled","native_blur_experiment"};
-        final boolean[] presetBool={true,false,false,false,true,false,false,true,false,true,true,false};
-        final Runnable savePresetBackup=()->{
-            if(prefs.getBoolean("preset_backup_valid",false))return;
-            SharedPreferences.Editor e=prefs.edit();
-            for(int i=0;i<presetKeys.length;i++){
-                String k=presetKeys[i];
-                if(presetBool[i])e.putBoolean("preset_backup_"+k,prefs.getBoolean(k,false));
-                else e.putInt("preset_backup_"+k,prefs.getInt(k,0));
-            }
-            e.putBoolean("preset_backup_valid",true).commit();
-        };
-        final Switch[] nativeExpUi=new Switch[1];
-        final Runnable syncPresetUi=()->{
-            enabled.setChecked(prefs.getBoolean("enabled",false));
-            normal.setProgress(Math.max(0,prefs.getInt("alpha",210)-40));
-            tint.setSelection(prefs.getInt("tint",0));
-            tintStrength.setProgress(prefs.getInt("tint_strength",30));
-            highlight.setChecked(prefs.getBoolean("highlight",false));
-            highlightStrength.setProgress(prefs.getInt("highlight_strength",35));
-            highlightWidth.setProgress(Math.max(0,prefs.getInt("highlight_width",2)-1));
-            directional.setChecked(prefs.getBoolean("directional_light",true));
-            probe.setSelection(prefs.getInt("probe_mode",0));
-            nativeAlpha.setChecked(prefs.getBoolean("native_alpha_probe",true));
-            if(nativeExpUi[0]!=null)nativeExpUi[0].setChecked(prefs.getBoolean("native_blur_experiment_enabled",false));
-        };
-        Button clearPreset=new Button(this);clearPreset.setText("应用清透液态玻璃预设");root.addView(clearPreset);
-        clearPreset.setOnClickListener(v->{
-            savePresetBackup.run();
-            prefs.edit().putBoolean("enabled",true).putInt("alpha",95)
-                .putInt("tint",0).putInt("tint_strength",20)
-                .putBoolean("highlight",true).putInt("highlight_strength",55)
-                .putInt("highlight_width",2).putBoolean("directional_light",true)
-                .putInt("probe_mode",0).putBoolean("native_alpha_probe",true).apply();
-            enabled.setChecked(true);normal.setProgress(95-40);tint.setSelection(0);
-            tintStrength.setProgress(20);highlight.setChecked(true);
-            highlightStrength.setProgress(55);highlightWidth.setProgress(1);
-            directional.setChecked(true);probe.setSelection(0);nativeAlpha.setChecked(true);
-            Toast.makeText(this,"已应用清透预设；原生模糊开关保持原设置，返回桌面查看效果",Toast.LENGTH_LONG).show();
+        slider("色调强度","tint_strength",30,0,90);
+        action("应用清透玻璃预设",()->{
+            prefs.edit().putBoolean("enabled",true).putInt("alpha",95).putInt("tint",0).putInt("tint_strength",20)
+                .putBoolean("highlight",true).putInt("highlight_strength",55).putInt("highlight_width",2)
+                .putBoolean("directional_light",true).putBoolean("native_alpha_probe",true).putBoolean("real_refraction",true)
+                .putInt("probe_mode",0).commit();recreate();
         });
-        Button restorePreset=new Button(this);restorePreset.setText("恢复应用预设前的设置");root.addView(restorePreset);
-        restorePreset.setOnClickListener(v->{
-            if(!prefs.getBoolean("preset_backup_valid",false)){
-                Toast.makeText(this,"暂无预设前的设置备份",Toast.LENGTH_SHORT).show();return;
-            }
-            SharedPreferences.Editor e=prefs.edit();
-            for(int i=0;i<presetKeys.length;i++){
-                String k=presetKeys[i];
-                if(presetBool[i])e.putBoolean(k,prefs.getBoolean("preset_backup_"+k,false));
-                else e.putInt(k,prefs.getInt("preset_backup_"+k,0));
-                e.remove("preset_backup_"+k);
-            }
-            e.remove("preset_backup_valid").commit();
-            syncPresetUi.run();
-            Toast.makeText(this,"已恢复预设前设置；若原生模糊状态改变请重启桌面",Toast.LENGTH_LONG).show();
-        });
-        label("预设：背景不透明度 95/255、原生色调、高光 55/100、宽度 2 px。原生模糊默认保留当前开关。",13);
-        label("ColorOS 原生模糊：随玻璃总开关自动启用，无需单独设置",18);
-        final Switch nativeExp=toggle("原生模糊（由玻璃总开关自动控制）","native_blur_experiment_enabled",true);
-        nativeExp.setEnabled(false);
-        Button presetWithBlur=new Button(this);presetWithBlur.setText("应用清透预设并开启原生模糊");root.addView(presetWithBlur);
-        presetWithBlur.setOnClickListener(v->{
-            clearPreset.performClick();
-            nativeExp.setChecked(true);
-            prefs.edit().putBoolean("native_blur_experiment_enabled",true).putInt("native_blur_experiment",1).commit();
-            Toast.makeText(this,"已开启原生模糊实验；请重启桌面使其生效",Toast.LENGTH_LONG).show();
-        });
-        nativeExpUi[0]=nativeExp;
-        // Store the integer mode consumed by the provider, not the checkbox key.
-        // Native blur is bound to the master glass toggle in the Launcher hook.
-        label("模糊仅覆盖已确认的 Launcher 材质开关访问器；其他 OEM 模糊条件仍由系统控制。",13);
-        Switch diag=toggle("详细诊断日志（排查时开启）","diagnostics",false);
-        toggle("旧版文件夹内对照图（建议关闭）","wallpaper_compare",false);
-        toggle("V1.9.66 实际壁纸像素边缘折射（需先用 Root 导入参考帧）","real_refraction",false);
-        label("V1.9.63 建议关闭旧版对照，使用独立校准页面；不会遮挡桌面文件夹图标。",13);
-        Button calibrate=new Button(this);calibrate.setText("打开独立壁纸坐标校准页面（实验）");root.addView(calibrate);
-        calibrate.setOnClickListener(v->startActivity(new android.content.Intent(this,WallpaperCalibrationActivity.class)));
-        label("校准页面在壁纸前显示透明背景和两个原图采样块，可调整采样屏幕位置、壁纸偏移与候选模型。系统可能对独立 Activity 使用不同的壁纸偏移；因此只能目视比较，不能自动验证 Launcher 实际变换。",13);
-        Button reset=new Button(this);reset.setText("恢复原生外观并重置设置");root.addView(reset);
-        reset.setOnClickListener(v->{prefs.edit().putBoolean("enabled",false).putInt("alpha",210)
-            .putInt("tint",0).putInt("tint_strength",30).putBoolean("highlight",false).putInt("highlight_strength",35).putInt("highlight_width",2).putBoolean("directional_light",true).putInt("probe_mode",0).putInt("native_blur_experiment",0).putInt("blur_radius_percent",100).putBoolean("native_blur_experiment_enabled",false).putBoolean("native_alpha_probe",false).putBoolean("wallpaper_compare",false).putBoolean("real_refraction",false).apply();
-            nativeAlpha.setChecked(false);enabled.setChecked(false);normal.setProgress(170);tint.setSelection(0);tintStrength.setProgress(30);highlight.setChecked(false);highlightStrength.setProgress(35);highlightWidth.setProgress(1);directional.setChecked(true);probe.setSelection(0);
-            Toast.makeText(this,"已关闭实验；若旧背景未恢复，请重启桌面",Toast.LENGTH_LONG).show();});
-        label("提示：色调现在使用原生背景 Alpha 遮罩；原生模式下色调强度不可调。关闭实验后若外观未立即恢复，可重启桌面。开启诊断日志后，返回桌面观察文件夹并导出 Vector 日志，搜索 BLUR_PROBE 与 NATIVE_BLUR_CALL。探测不会主动启用模糊。",13);
+        section("维护与状态","高级实验已从首页隐藏，保留必要的 Root 脚本更新与日志开关。");
+        TextView status=text("检查 Root 辅助脚本中…",12,false);current.addView(status);
+        action("检查并更新 Root 辅助脚本",()->RootHelperUpdater.runAsync(this,status::setText));
+        toggle("详细诊断日志","diagnostics",false);
+        TextView foot=text("提示：旧版校准、对照图和诊断模式不再显示在首页，已有数据不会自动删除。",12,false);body.addView(foot);
         setContentView(scroll);
+        RootHelperUpdater.runAsync(this,status::setText);
     }
 }
