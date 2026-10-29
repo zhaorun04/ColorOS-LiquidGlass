@@ -152,11 +152,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
             String raw=android.provider.Settings.Global.getString(context.getContentResolver(),BOOT_SNAPSHOT_KEY);
             if(raw==null || !raw.startsWith("LG1|"))return false;
             String[] v=raw.split("\\|",-1);
-            if(v.length!=16 && v.length!=20)return false;
+            if(v.length!=16 && v.length!=20){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
             // Parse all fields first: never partially apply a corrupt snapshot.
             int[] x=new int[15];
             for(int i=0;i<x.length;i++)x[i]=Integer.parseInt(v[i+1]);
-            if(x[1]<40||x[1]>255||x[6]<0||x[6]>100||x[8]<1||x[8]>5)return false;
+            if(x[0]<0||x[0]>1||x[1]<0||x[1]>255||x[2]<0||x[2]>3||x[3]<0||x[3]>90||x[6]<0||x[6]>100||x[8]<1||x[8]>5){log("BOOT_SNAPSHOT_REJECT reason=range alpha="+x[1]+" tint="+x[2]);return false;}
             glassEnabled=x[0]==1;glassAlpha=x[1];tintMode=x[2];tintStrength=x[3];
             highlightEnabled=x[4]==1;diagnostics=x[5]==1;highlightStrength=x[6];
             probeMode=x[7];highlightWidth=x[8];directionalLight=x[9]==1;
@@ -3307,6 +3307,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             }
                         });
                     } catch(Throwable t){log("CONFIG_OBSERVER_FAILED "+t.getClass().getSimpleName());}
+                    // V1.9.128: Settings.Global is the Launcher source of truth.
+                    // Observe the snapshot itself: provider notifications do not cross
+                    // the root helper's Settings.Global write boundary.
+                    try {
+                        app.getContentResolver().registerContentObserver(
+                            android.provider.Settings.Global.getUriFor(BOOT_SNAPSHOT_KEY),false,
+                            new android.database.ContentObserver(handler){
+                                @Override public void onChange(boolean selfChange){
+                                    new Thread(()->{
+                                        boolean changed=restoreBootSnapshot(app);
+                                        if(changed)handler.post(()->invalidateGlassViews());
+                                    },"LiquidGlass-SnapshotChanged").start();
+                                }
+                            });
+                        log("BOOT_SNAPSHOT_OBSERVER_READY");
+                    }catch(Throwable t){log("BOOT_SNAPSHOT_OBSERVER_FAILED "+t.getClass().getSimpleName());}
                     handler.postDelayed(restore,2000L);
                     handler.postDelayed(restore,8000L);
                     handler.postDelayed(restore,25000L);
