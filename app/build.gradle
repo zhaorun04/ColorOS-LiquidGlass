@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 1995
-        versionName '1.9.97-boot-standalone'
+        versionCode 1998
+        versionName '1.9.98-boot-reference-fix'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

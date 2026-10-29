@@ -1574,6 +1574,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile long REFRACTION_FRAME_MODIFIED = -1L;
     private static volatile long REFRACTION_FRAME_LENGTH = -1L;
     private static volatile boolean REFRACTION_LOADING;
+    private static final java.util.Map<View, Boolean> BOOT_FOLDER_VIEWS = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, Boolean>());
     private static volatile boolean REFRACTION_ENABLED;
     private static int REFRACTION_LOGS;
     private static void scheduleReferenceLoad(final View view) {
@@ -1595,41 +1596,35 @@ public final class HookEntry implements IXposedHookLoadPackage {
             try {
                 // Prefer a Launcher-owned reference: ColorOS blocks cold-starting
                 // the module ContentProvider from Launcher at boot.
+                // V1.9.98: Never call the blocked module provider from Launcher.
+                // A missing file must be retried after CE unlock, not treated as a provider failure.
                 java.io.File local=new java.io.File(app.getFilesDir(),"liquidglass_wallpaper_reference.jpg");
-                long modified=-1L,length=-1L;
-                if(local.isFile() && local.length()>1024L){
-                    modified=local.lastModified();length=local.length();
-                    if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
-                    android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
-                    opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
-                    next=android.graphics.BitmapFactory.decodeFile(local.getAbsolutePath(),opts);
-                    if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME_SOURCE launcher_private");
-                } else {
-                    // Legacy fallback when the Root helper has not run yet.
-                    android.net.Uri uri=android.net.Uri.parse("content://top.liquidglass.vector.config/wallpaper_reference");
-                    android.os.Bundle info=app.getContentResolver().call(uri,"referenceInfo",null,null);
-                    if(info==null || !"OK".equals(info.getString("status")))return;
-                    modified=info.getLong("modified",-1L);length=info.getLong("length",-1L);
-                    if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
-                    try(android.os.ParcelFileDescriptor fd=app.getContentResolver().openFileDescriptor(uri,"r")){
-                        if(fd!=null){
-                            android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
-                            opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
-                            next=android.graphics.BitmapFactory.decodeFileDescriptor(fd.getFileDescriptor(),null,opts);
-                        }
-                    }
-                    if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME_SOURCE provider_fallback");
+                if(!local.isFile()){
+                    java.io.File alternate=new java.io.File("/data/user/0/com.android.launcher/files/liquidglass_wallpaper_reference.jpg");
+                    if(alternate.isFile())local=alternate;
                 }
+                long modified=-1L,length=-1L;
+                if(!local.isFile() || local.length()<=1024L){
+                    if(REFRACTION_LOGS++<24)log("BOOT_REFERENCE_WAIT path="+local.getAbsolutePath()+" exists="+local.exists());
+                    return;
+                }
+                modified=local.lastModified();length=local.length();
+                if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH)return;
+                android.graphics.BitmapFactory.Options opts=new android.graphics.BitmapFactory.Options();
+                opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
+                next=android.graphics.BitmapFactory.decodeFile(local.getAbsolutePath(),opts);
+                if(REFRACTION_LOGS++<24)log("BOOT_REFERENCE_DECODE path="+local.getAbsolutePath()+" decoded="+(next!=null));
                 final long loadedModified=modified,loadedLength=length;
                 if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
                     REFRACTION_FRAME=next;
-                    if(REFRACTION_LOGS++<12)log("BOOT_REFRACTION_READY source=wallpaper_reference");
+                    if(REFRACTION_LOGS++<24)log("BOOT_REFRACTION_READY source=launcher_private_wallpaper_reference");
                     REFRACTION_FRAME_MODIFIED=loadedModified;
                     REFRACTION_FRAME_LENGTH=loadedLength;
                     // The first reference frame arrives off-thread. Force one draw even
                     // when the icon is stationary and hardware-render-node cached.
                     new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable(){
                         @Override public void run(){
+                            invalidateGlassViews();
                             synchronized(DYNAMIC_REFRACTION){
                                 for(View trackedView:DYNAMIC_REFRACTION.keySet())
                                     if(trackedView!=null && trackedView.isAttachedToWindow()){
@@ -1658,7 +1653,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 } else {
                     if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=INVALID_OR_MISSING");
                 }
-            }catch(Throwable t){if(REFRACTION_LOGS++<12)log("REFRACTION_FRAME status=UNAVAILABLE reason="+t.getClass().getSimpleName());}
+            }catch(Throwable t){if(REFRACTION_LOGS++<24)log("REFRACTION_FRAME status=UNAVAILABLE reason="+t.getClass().getSimpleName()+" detail="+String.valueOf(t.getMessage()));}
             finally{REFRACTION_LOADING=false;}
         }},"LiquidGlass-Wallpaper-Reference").start();
     }
@@ -1990,6 +1985,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 @Override protected void beforeHookedMethod(MethodHookParam p) {
                     if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                         View v=(View)p.thisObject;
+                        BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
                         refresh(v);
                         ACTIVE_FOLDER_ICON.set(v);
                         PREVIEW_SURFACE_DRAWN.set(Boolean.FALSE);
@@ -2764,7 +2760,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
         }
-        log("BOOT_CONFIG_INVALIDATED tracked="+DYNAMIC_REFRACTION.size());
+        int folderCount=0;
+        synchronized(BOOT_FOLDER_VIEWS){
+            for(View folder:BOOT_FOLDER_VIEWS.keySet()){
+                if(folder!=null && folder.isAttachedToWindow()){
+                    folderCount++;
+                    folder.invalidate();
+                    android.view.ViewParent parent=folder.getParent();
+                    int depth=0;
+                    while(parent instanceof View && depth++<12){((View)parent).invalidate();parent=parent.getParent();}
+                }
+            }
+        }
+        log("BOOT_CONFIG_INVALIDATED tracked="+DYNAMIC_REFRACTION.size()+" folders="+folderCount);
     }
 
     // V1.9.96: proactively decode the wallpaper reference at Launcher startup,
