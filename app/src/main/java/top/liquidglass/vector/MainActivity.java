@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.138  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.139  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
@@ -66,6 +66,15 @@ public final class MainActivity extends Activity {
         });
         toggle("真实壁纸折射","real_refraction",false);
         toggle("清晰折射（关闭则为柔和磨砂折射）","clear_refraction",false);
+        TextView sheenLabel=text("动态光学高光（独立于壁纸折射）",13,false);current.addView(sheenLabel);
+        Spinner sheenMode=new Spinner(this);
+        String[] sheenModes={"关闭 · 推荐（保留折射）","平滑 · 渐入180ms / 渐出350ms","原始 · 诊断对照"};
+        sheenMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,sheenModes));
+        sheenMode.setSelection(Math.max(0,Math.min(2,prefs.getInt("dynamic_sheen_mode",0))));current.addView(sheenMode);
+        sheenMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){prefs.edit().putInt("dynamic_sheen_mode",pos).commit();}
+            public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
         // Legacy native_alpha_probe is deliberately disabled: blur and material opacity are separate.
         prefs.edit().putBoolean("native_alpha_probe",false).apply();
         TextView blurInfo=text("自定义模糊使用壁纸采样，不模糊应用图标。系统模糊开关不再强制开启；ColorOS 自身仍可能启用原生模糊。",12,false);current.addView(blurInfo);

@@ -60,9 +60,9 @@ config_value() { v=$(xml_value "$1"); case "$v" in ''|*[!0-9-]*) echo "$2";; *) 
 sync_config() {
   [ -s "$PREF" ] || return
   grep -q 'name="enabled"' "$PREF" 2>/dev/null || return
-  # The first item is the schema marker; 20 fields match HookEntry.restoreBootSnapshot().
+  # The first item is the schema marker; 21 fields match HookEntry.restoreBootSnapshot().
   SNAP="LG1"
-  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:0' 'custom_blur_dp:14' 'refraction_percent:35' 'glass_tint_opacity:18' 'custom_blur_mode:1' 'clear_refraction:0'; do
+  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:0' 'custom_blur_dp:14' 'refraction_percent:35' 'glass_tint_opacity:18' 'custom_blur_mode:1' 'clear_refraction:0' 'dynamic_sheen_mode:0'; do
     key=${entry%%:*}; fallback=${entry#*:}
     SNAP="$SNAP|$(config_value "$key" "$fallback")"
   done
