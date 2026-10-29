@@ -1740,14 +1740,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(state!=null)return state;
         state=new DynamicRefraction();
         final DynamicRefraction tracked=state;
+        // V1.9.135: custom wallpaper blur must track folder motion even when AGSL refraction is OFF.
         // A parent translation can move a hardware-cached child without dispatchDraw.
         // Only invalidate on actual screen-coordinate change, never every frame.
         tracked.listener=new android.view.ViewTreeObserver.OnPreDrawListener(){
             @Override public boolean onPreDraw(){
-                if(!REFRACTION_ENABLED || REFRACTION_FRAME==null || !view.isAttachedToWindow())return true;
+                if(!(REFRACTION_ENABLED || (customBlurMode==1 && customBlurDp>0)) || REFRACTION_FRAME==null || !view.isAttachedToWindow())return true;
                 try {
                     float[] xy=dynamicScreenPosition(view,tracked);
-                    if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>1.0f || Math.abs(xy[1]-tracked.lastY)>1.0f){
+                    if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>0.5f || Math.abs(xy[1]-tracked.lastY)>0.5f){
                         tracked.lastX=xy[0];tracked.lastY=xy[1];
                         view.invalidate();
                     }
@@ -1945,6 +1946,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled;\n"+
         "  float motion=0.0; // No touch-triggered luminance jumps\n"+
         "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));\n"+
+        "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
         "  color.a=half((stableOpticalMode>0.5?0.18:0.65)*temporalOpacity);return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
