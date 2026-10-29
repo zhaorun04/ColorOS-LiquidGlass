@@ -1682,6 +1682,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float lastX=Float.NaN,lastY=Float.NaN;
         android.view.ViewTreeObserver.OnPreDrawListener listener;
         int moveLogs;
+        long coordLogAt=0L;
+        int coordLogCount=0;
+        float prevSampleX=Float.NaN,prevSampleY=Float.NaN;
+        float prevLocationX=Float.NaN,prevLocationY=Float.NaN;
         // Per-folder temporal response: smooth the optical overlay on real movement.
         float opticalOpacity=0f;
         long opticalUpdatedAt=0L;
@@ -1914,6 +1918,37 @@ public final class HookEntry implements IXposedHookLoadPackage {
         DynamicRefraction state=dynamicState(view);
         float[] xy=dynamicScreenPosition(view,state);
         float left=xy[0]+rect.left,top=xy[1]+rect.top;
+        // V1.9.112: diagnostic only. No sampling delay, no alpha changes.
+        // Compare matrix-derived position with Android's screen location and
+        // record abrupt sampling jumps during touch down/move/up.
+        long coordNow=android.os.SystemClock.uptimeMillis();
+        if(state.coordLogCount<240 && coordNow-state.coordLogAt>=65L){
+            state.coordLogAt=coordNow;
+            state.coordLogCount++;
+            int[] loc=new int[2];
+            view.getLocationOnScreen(loc);
+            float dx=Float.isNaN(state.prevSampleX)?0f:left-state.prevSampleX;
+            float dy=Float.isNaN(state.prevSampleY)?0f:top-state.prevSampleY;
+            float lx=Float.isNaN(state.prevLocationX)?0f:loc[0]-state.prevLocationX;
+            float ly=Float.isNaN(state.prevLocationY)?0f:loc[1]-state.prevLocationY;
+            android.view.ViewParent vp=view.getParent();
+            String parent=vp instanceof View?vp.getClass().getSimpleName():"none";
+            log("REFRACTION_COORD_112 id="+System.identityHashCode(view)+
+                " t="+coordNow+" matrixXY="+xy[0]+","+xy[1]+
+                " locationXY="+loc[0]+","+loc[1]+
+                " sampleXY="+left+","+top+
+                " sampleDelta="+dx+","+dy+
+                " locationDelta="+lx+","+ly+
+                " matrixVsLocation="+(xy[0]-loc[0])+","+(xy[1]-loc[1])+
+                " translation="+view.getTranslationX()+","+view.getTranslationY()+
+                " scroll="+view.getScrollX()+","+view.getScrollY()+
+                " parent="+parent+
+                " frame="+System.identityHashCode(frame)+
+                " refStamp="+REFRACTION_FRAME_MODIFIED+
+                " size="+frame.getWidth()+"x"+frame.getHeight());
+            state.prevSampleX=left;state.prevSampleY=top;
+            state.prevLocationX=loc[0];state.prevLocationY=loc[1];
+        }
         // V1.9.76: retain the refraction pass while ANY part of the folder
         // intersects the display. Requiring the whole rectangle to fit made
         // the highlight blink off as soon as a folder crossed a screen edge.
