@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191370
-        versionName '1.9.137-blur-prewarm'
+        versionCode 191380
+        versionName '1.9.138-refraction-switch-gate'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

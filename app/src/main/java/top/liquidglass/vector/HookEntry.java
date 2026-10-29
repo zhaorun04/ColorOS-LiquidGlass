@@ -174,6 +174,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // which OplusAppStartupManager blocks on affected devices.
     private static final String BOOT_SNAPSHOT_KEY = "liquidglass_boot_snapshot_v1";
     private static volatile String lastBootSnapshot = "";
+    // Separate the user switch from the independent blur/wallpaper sampling pipeline.
+    private static volatile long REFRACTION_CONFIG_EPOCH = 0L;
+    private static volatile int REFRACTION_SWITCH_LOGS = 0;
     private static boolean restoreBootSnapshot(android.content.Context context) {
         try {
             String raw=android.provider.Settings.Global.getString(context.getContentResolver(),BOOT_SNAPSHOT_KEY);
@@ -184,14 +187,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
             int[] x=new int[15];
             for(int i=0;i<x.length;i++)x[i]=Integer.parseInt(v[i+1]);
             if(x[0]<0||x[0]>1||x[1]<0||x[1]>255||x[2]<0||x[2]>3||x[3]<0||x[3]>90||x[6]<0||x[6]>100||x[8]<1||x[8]>5){log("BOOT_SNAPSHOT_REJECT reason=range alpha="+x[1]+" tint="+x[2]);return false;}
+            boolean previousRefraction=REFRACTION_ENABLED;
             glassEnabled=x[0]==1;glassAlpha=x[1];tintMode=x[2];tintStrength=x[3];
             highlightEnabled=x[4]==1;diagnostics=x[5]==1;highlightStrength=x[6];
             probeMode=x[7];highlightWidth=x[8];directionalLight=x[9]==1;
             nativeBlurExperiment=0;blurRadiusPercent=x[11];
             nativeAlphaProbe=false;wallpaperCompare=x[13]==1;REFRACTION_ENABLED=x[14]==1;
-            if(v.length==20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
-            clearRefraction=v.length>=21 && "1".equals(v[20]);
+            if(v.length>=20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
+            if(v.length>=21)clearRefraction="1".equals(v[20]);
             configEverLoaded=true;
+            if(previousRefraction!=REFRACTION_ENABLED){
+                REFRACTION_CONFIG_EPOCH++;
+                if(REFRACTION_SWITCH_LOGS++<40)log("REFRACTION_SWITCH_138 enabled="+REFRACTION_ENABLED+
+                    " epoch="+REFRACTION_CONFIG_EPOCH+" blurMode="+customBlurMode+
+                    " customBlurDp="+customBlurDp+" clear="+clearRefraction);
+            }
             if(!raw.equals(lastBootSnapshot)){
                 lastBootSnapshot=raw;
                 log("BOOT_SNAPSHOT_APPLIED enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
@@ -242,7 +252,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 ci=c.getColumnIndex("glass_tint_opacity");if(ci>=0)glassTintOpacity=clampInt(c.getInt(ci),0,100);
                 ci=c.getColumnIndex("custom_blur_mode");if(ci>=0)customBlurMode=clampInt(c.getInt(ci),0,2);
                 String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
-                summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare;
+                summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare+" customBlurDp="+customBlurDp+" refractionPercent="+refractionPercent+" glassTintOpacity="+glassTintOpacity+" customBlurMode="+customBlurMode+" clearRefraction="+clearRefraction;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
         } catch(Throwable t) { if(alphaLogs++<8) log("CONFIG_READ_FAILED reason="+t.getClass().getSimpleName()); }
@@ -2135,7 +2145,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // displacement. No per-strip matrix mutation or 48 draw commands.
             boolean continuousDrawn=false;
             int opticalAb=opticalAb133(); // 0: stable refractive AGSL; 1: legacy comparison; 2: no AGSL
-            if(opticalAb!=2 && REFRACTION_ENABLED && refractionPercent>0 && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            // Strict master switch: clear-refraction and blur must never activate AGSL.
+            final boolean refractionActive=REFRACTION_ENABLED && refractionPercent>0;
+            if(opticalAb!=2 && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2179,7 +2191,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=SHADER_FAILED reason="+t.getClass().getName()+" detail="+String.valueOf(t.getMessage()));}
                 }
             }
-            if(REFRACTION_ENABLED && opticalAb!=2 && !continuousDrawn){
+            if(refractionActive && opticalAb!=2 && !continuousDrawn){
                 // No banded fallback: the former 12-strip implementation caused
                 // visible vertical seams. Keep the native folder blur intact.
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
@@ -2195,7 +2207,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         state.cachedBlurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
                         state.cachedBlurPaint.setShader(state.cachedBlurShader);
                     }
-                    state.cachedBlurPaint.setAlpha(REFRACTION_ENABLED && refractionPercent>0 ? (clearRefraction?145:235) : 255);
+                    state.cachedBlurPaint.setAlpha(refractionActive ? (clearRefraction?145:235) : 255);
                     state.cachedBlurMatrix.reset();
                     state.cachedBlurMatrix.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());
                     state.cachedBlurMatrix.postTranslate(-left,-top);
@@ -2219,6 +2231,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             // V1.9.74: the refraction pass must not draw a second outline.
             // The unified highlight renderer owns the complete edge treatment.
+            if(state.moveLogs++<18)log("REFRACTION_GATE_138 active="+refractionActive+
+                " agslDrawn="+continuousDrawn+" configEpoch="+REFRACTION_CONFIG_EPOCH+
+                " blurDp="+customBlurDp+" tintOpacity="+glassTintOpacity);
             if(state.moveLogs++<18)log("REFRACTION_DYNAMIC_SAMPLE viewScreenX="+xy[0]+" viewScreenY="+xy[1]+
                 " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
