@@ -1244,6 +1244,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if (blurFusionLogs++ < 10) log("BLUR_FUSION_APPLIED drawable="+drawableTag(drawable)+" bounds="+r.toShortString()+" radius="+radius);
         } finally { canvas.restoreToCount(save); }
     }
+    // V1.9.91: inspect the real Drawable.draw implementation; do not assume
+    // LayerBlurDrawable declares draw(Canvas), and do not modify its output.
+    private static void probeBlurDrawImplementation(ClassLoader loader){
+        try{
+            Class<?> type=Class.forName("com.android.launcher3.uioverrides.states.blurdrawable.LayerBlurDrawable",false,loader);
+            Method method=type.getMethod("draw",Canvas.class);
+            log("BLUR_DRAW_IMPLEMENTATION owner="+method.getDeclaringClass().getName()+" signature="+method.toGenericString());
+            // This diagnostic hook is read-only and counts actual draw invocations.
+            XposedBridge.hookMethod(method,new XC_MethodHook(){
+                int calls=0;
+                @Override protected void beforeHookedMethod(MethodHookParam param){
+                    if(calls++>=32)return;
+                    boolean tracked=false;
+                    if(param.thisObject instanceof Drawable){
+                        synchronized(TRACKED_BLUR_BACKGROUNDS){tracked=TRACKED_BLUR_BACKGROUNDS.contains(param.thisObject);}
+                    }
+                    log("BLUR_DRAW_ACTUAL class="+param.thisObject.getClass().getName()+" tracked="+tracked+" insideFolderDispatch="+(ACTIVE_FOLDER_ICON.get()!=null));
+                }
+            });
+        }catch(Throwable t){log("BLUR_DRAW_IMPLEMENTATION_UNAVAILABLE reason="+t.getClass().getSimpleName());}
+    }
     private static void hookLayerBlurDrawableDraw(ClassLoader loader) {
         try {
             Class<?> type = Class.forName("com.android.launcher3.uioverrides.states.blurdrawable.LayerBlurDrawable",false,loader);
@@ -1687,11 +1708,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     // V1.9.90: independently controlled temporary visibility diagnostics.
     // 0=normal; 1=red pre-background / green post-background marker;
-    // 2=strong optical displacement. Read at most once per second.
+    // 2=strong optical displacement; 3=post-dispatch AGSL visibility probe. Read at most once per second.
     private static volatile int refractionVisibilityTest=0;
     private static volatile long refractionVisibilityReadAt=0;
     private static final ThreadLocal<Boolean> REFRACTION_AFTER_OEM=new ThreadLocal<Boolean>();
     private static int refractionTestLogs=0;
+    private static int refractionReadLogs=0;
+    private static int refractionPassLogs=0;
+    private static int refractionMarkerLogs=0;
     private static int currentRefractionVisibilityTest(){
         long now=android.os.SystemClock.uptimeMillis();
         if(now-refractionVisibilityReadAt>1000L){
@@ -1701,7 +1725,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(c!=null){
                     int next=android.provider.Settings.Global.getInt(c.getContentResolver(),
                         "liquidglass_refraction_visibility_test",0);
-                    next=Math.max(0,Math.min(2,next));
+                    next=Math.max(0,Math.min(3,next));
+                    if(refractionReadLogs++<16)log("REFRACTION_TEST_READ raw="+android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_refraction_visibility_test",0)+" effective="+next+" context="+c.getPackageName());
                     if(next!=refractionVisibilityTest){
                         refractionVisibilityTest=next;
                         log("REFRACTION_VISIBILITY_TEST mode="+next);
@@ -1798,6 +1823,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
+                    if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
                 }catch(Throwable t){
                     state.continuousUnavailable=true;
@@ -1899,6 +1925,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> EARLY_SURFACE_DRAWN = new ThreadLocal<Boolean>();
     private static final ThreadLocal<Matrix> FOLDER_CANVAS_MATRIX = new ThreadLocal<Matrix>();
     private static int compositionLogs = 0;
+    private static void drawRefractionProbeMarker(View v,Canvas canvas,boolean after){
+        // A simple opaque stripe to prove Canvas visibility independently of RuntimeShader.
+        // Top left of the FolderIcon View; this marker is diagnostic only.
+        int save=canvas.save();
+        try{
+            Paint marker=new Paint(Paint.ANTI_ALIAS_FLAG);
+            marker.setColor(after?0xFF00E83A:0xFFFF2040);
+            float left=after?26f:2f;
+            canvas.drawRect(left,2f,left+20f,22f,marker);
+            if(refractionMarkerLogs++<24)log("REFRACTION_CANVAS_MARKER phase="+(after?"AFTER_DISPATCH":"BEFORE_DISPATCH")+" hardware="+canvas.isHardwareAccelerated()+" size="+v.getWidth()+"x"+v.getHeight());
+        }finally{canvas.restoreToCount(save);}
+    }
     private static void hookFolderIconCanvasFusion(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
         if (c == null) return;
@@ -1922,6 +1960,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // A callback observed in a previous frame does not prove that
                         // it will run or successfully composite in this frame.
                         drawFolderIconFusion(v, (Canvas)p.args[0], false);
+                        // Independent Canvas marker: does not rely on wallpaper, AGSL, or OEM callback.
+                        // Red is drawn BEFORE OEM/children; green is drawn AFTER OEM/children.
+                        if(currentRefractionVisibilityTest()==1)drawRefractionProbeMarker(v,(Canvas)p.args[0],false);
                         EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
                         if (surfaceOrderLogs++ < 20) log("REFRACTION_LAYER_ORDER mode=DISPATCH_BEFORE_SURFACE fallback=always");
                     }
@@ -1931,6 +1972,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                             // Do not draw the surface here: it would cover app icons.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
+                            int probe=currentRefractionVisibilityTest();
+                            if(probe==1)drawRefractionProbeMarker((View)p.thisObject,(Canvas)p.args[0],true);
+                            if(probe==3){
+                                // Diagnostic ONLY: draw AGSL after all FolderIcon children.
+                                // May temporarily cover icons. Never active in normal mode.
+                                REFRACTION_AFTER_OEM.set(Boolean.TRUE);
+                                try{drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],false);}
+                                finally{REFRACTION_AFTER_OEM.remove();}
+                                if(refractionMarkerLogs++<20)log("REFRACTION_POST_DISPATCH_PROBE mode=3 executed=true");
+                            }
                             boolean callback=Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get());
                             View icon=(View)p.thisObject;
                             if (!callback && compositionLogs++ < 24)
@@ -2751,6 +2802,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hookDynamicFolderLifecycle(folderClass);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookFolderIconCanvasFusion(p.classLoader);
+            probeBlurDrawImplementation(p.classLoader);
             hookPreview(p.classLoader);
             traceBlurMethods(p.classLoader);
             hookFolderConditions(p.classLoader);
