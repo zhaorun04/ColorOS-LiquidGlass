@@ -61,3 +61,9 @@ V1.9.118 实验性自定义壁纸模糊
 - 配置快照扩展为 LG1 + 19 字段，需更新 Root 辅助脚本。
 - 自定义模糊只适用于静态壁纸快照；动态壁纸、图标保护和真实 OEM 图层顺序需实机验证。
 - 未经过 APK 编译和设备测试，首次安装请备份旧版。
+
+
+V1.9.119｜渲染链分阶段诊断版
+本版不强制放行未经验证的壁纸映射，也不声称已修复壁纸裁剪。
+新增 GLASS119_PIPELINE 日志：FRAME_UNAVAILABLE、DRAW_ENTER、BLUR_DRAWN、AGSL_DRAWN，用于区分纹理未加载、模糊未绘制和着色器未执行。
+注意：REFRACTION_SAMPLING_GATE 是元数据诊断，不直接控制 drawReferenceRefraction 的采样权限。

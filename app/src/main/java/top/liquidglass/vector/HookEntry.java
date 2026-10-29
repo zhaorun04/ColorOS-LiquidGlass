@@ -1952,11 +1952,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return result;
         }catch(Throwable t){log("CUSTOM_BLUR_FAILED "+t.getClass().getSimpleName());return null;}
     }
+    private static final java.util.concurrent.atomic.AtomicInteger GLASS_PIPELINE_DIAGNOSTICS = new java.util.concurrent.atomic.AtomicInteger();
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(!REFRACTION_ENABLED || rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
         android.graphics.Bitmap frame=REFRACTION_FRAME;
-        if(frame==null||frame.isRecycled())return;
+        if(frame==null||frame.isRecycled()){
+            if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<32)log("GLASS119_PIPELINE stage=FRAME_UNAVAILABLE mode="+customBlurMode+" radiusDp="+customBlurDp+" frameNull="+(frame==null));
+            return;
+        }
         android.util.DisplayMetrics dm=view.getResources().getDisplayMetrics();
         int sw=dm.widthPixels,sh=dm.heightPixels;
         // V1.9.99: wallpaper screenshot may be captured at a lower logical
@@ -2017,6 +2021,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float contourRadius=Math.min(Math.min(rect.width(),rect.height())*0.5f,radius+BLUR_CORNER_RADIUS_DELTA_PX);
             state.clip.reset();state.clip.addRoundRect(rect,contourRadius,contourRadius,Path.Direction.CW);
             canvas.clipPath(state.clip);
+            if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<32)log("GLASS119_PIPELINE stage=DRAW_ENTER mode="+customBlurMode+" radiusDp="+customBlurDp+" refractPercent="+refractionPercent+" tintPercent="+glassTintOpacity+" frame="+frame.getWidth()+"x"+frame.getHeight()+" hardware="+canvas.isHardwareAccelerated());
             if(customBlurMode==1 && customBlurDp>0){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density);
                 if(blurred!=null){
@@ -2025,6 +2030,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     Matrix bm=new Matrix();bm.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());bm.postTranslate(-left,-top);
                     blurShader.setLocalMatrix(bm);blurPaint.setShader(blurShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,blurPaint);
+                    if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<48)log("GLASS119_PIPELINE stage=BLUR_DRAWN radiusDp="+customBlurDp+" bitmap="+blurred.getWidth()+"x"+blurred.getHeight());
                 }
             }
             if(glassTintOpacity>0){Paint tintPaint=new Paint(Paint.ANTI_ALIAS_FLAG);tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),235,242,250));canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);}
@@ -2066,6 +2072,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
+                    if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<64)log("GLASS119_PIPELINE stage=AGSL_DRAWN mode="+customBlurMode+" shaderMode="+shaderMode+" displacementMode="+displacementMode);
                     if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" shaderMode="+shaderMode+" displacementMode="+displacementMode+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
                 }catch(Throwable t){
