@@ -1721,7 +1721,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!REFRACTION_ENABLED || REFRACTION_FRAME==null || !view.isAttachedToWindow())return true;
                 try {
                     float[] xy=dynamicScreenPosition(view,tracked);
-                    if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>.25f || Math.abs(xy[1]-tracked.lastY)>.25f){
+                    if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>1.0f || Math.abs(xy[1]-tracked.lastY)>1.0f){
                         tracked.lastX=xy[0];tracked.lastY=xy[1];
                         view.invalidate();
                     }
@@ -1737,39 +1737,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // V1.9.104: a single per-folder animation envelope shared by the optical
     // sampling pass and the extra native-shaped highlight. Static edge lighting
     // is deliberately left untouched, preserving V1.9.74 corner geometry.
+    // V1.9.131: no motion-triggered invalidate loop. Wallpaper-position updates
+    // are already handled by the pre-draw location observer.
     private static float smoothHighlightProgress(View view, DynamicRefraction state) {
-        final long now=android.os.SystemClock.uptimeMillis();
-        if(state.opticalMotionRevision!=wallpaperOffsetRevision){
-            state.opticalMotionRevision=wallpaperOffsetRevision;
-            state.opticalLastMoveAt=now;
-        }
-        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<180L;
-        final float target=active?1f:0f;
-        // Use elapsed real time rather than capping dt to 64ms: otherwise an
-        // interrupted render loop can leave the animation apparently stuck.
-        long elapsed=state.opticalUpdatedAt==0L?0L:Math.max(0L,now-state.opticalUpdatedAt);
-        state.opticalUpdatedAt=now;
-        if(elapsed>0L){
-            float tau=active?180f:400f;
-            float step=1f-(float)Math.exp(-Math.min(elapsed,1000L)/tau);
-            state.opticalOpacity+=(target-state.opticalOpacity)*step;
-        }
-        if(view.isAttachedToWindow()){
-            // Keep drawing only while the envelope is converging. A single
-            // delayed frame also crosses the MOVING -> SETTLED boundary even
-            // when the motion envelope has already reached its target.
-            if(Math.abs(target-state.opticalOpacity)>0.003f){
-                view.postInvalidateDelayed(32L);
-            }else if(active && !state.opticalSettleScheduled){
-                state.opticalSettleScheduled=true;
-                final DynamicRefraction scheduled=state;
-                view.postDelayed(() -> {
-                    scheduled.opticalSettleScheduled=false;
-                    if(view.isAttachedToWindow())view.invalidate();
-                },Math.max(16L,180L-(now-state.opticalLastMoveAt)+1L));
-            }
-        }
-        return Math.max(0f,Math.min(1f,state.opticalOpacity));
+        return 0f;
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
@@ -1926,7 +1897,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
         "  float light=smoothstep(0.58,0.96,lum);\n"+
         "  float ambient=0.070*light*(0.35+0.65*edgeSheen);\n"+
-        "  float motion=0.006*motionHighlight*light*edgeSheen;\n"+
+        "  float motion=0.0; // No touch-triggered luminance jumps\n"+
         "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.080)));\n"+
         "  color.a=half(0.65*temporalOpacity);return color;\n"+
         " }\n"+
@@ -1945,7 +1916,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float edgeOpacity=0.115*edgeWeight*(1.0-0.75*bright);\n"+
         " float neutralOpacity=0.055*bright;\n"+
         " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
-        " float softSheen=(0.035+0.004*motionHighlight)*envelope*smoothstep(0.52,0.96,luminance);\n"+
+        " float softSheen=0.035*envelope*smoothstep(0.52,0.96,luminance);\n"+
         " color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));\n"+
         " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
         " return color;\n"+
@@ -2119,8 +2090,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     // Only the motion sheen is time-smoothed. Wallpaper sampling
                     // stays locked to the real screen position on every frame.
-                    float motionHighlight=smoothHighlightProgress(view,state);
-                    state.continuousShader.setFloatUniform("motionHighlight",motionHighlight);
+                    state.continuousShader.setFloatUniform("motionHighlight",0.0f); // V1.9.131: optical lighting is position/brightness-driven, not touch-driven
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);

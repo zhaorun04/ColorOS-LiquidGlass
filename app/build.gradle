@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 19130
-        versionName '1.9.130-highlight-performance'
+        versionCode 19131
+        versionName '1.9.131-static-optics-frame-budget'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
