@@ -1,27 +1,63 @@
-V1.9.114｜运动折射亮度分离与延迟退场实验版
+V1.9.113｜AGSL纹理采样、边界与亮度隔离诊断版
 
-来源：V1.9.113；保留原生模糊、圆角、开机自动参考帧、实时壁纸采样。
-现象依据：V1.9.111 固定中灰不闪；V1.9.113 边界保护、灰阶和降低对比度仍闪。
-结论边界：这些现象说明闪烁依赖实际壁纸采样内容，尚未证明唯一根因；本版是针对观感的实验修复。
+来源：V1.9.112；保持 ColorOS 原生模糊、圆角描边和实时壁纸折射。
+验证依据：V1.9.111 原始壁纸采样闪烁，固定中灰不闪烁；V1.9.112 坐标日志中参考帧稳定。
+【本版是诊断版，不保证已经修复闪烁】
 
-关键修改：
-- 保留 `wallpaper` BitmapShader：每帧用当前文件夹位置更新，主折射纹理没有插值、滞后、缓存。
-- 新增 `heldHighlight` BitmapShader：独立追踪同一次滑动期间出现过的高亮位置，仅参与超出静态亮度上限的光学亮度。
-- AGSL 模式2 将动态高亮分为实时采样的静态底色与独立高亮差值。静态底色的亮度上限为 0.60；最高亮度差值使用运动进度渐入/渐出。
-- 通过 `OnPreDrawListener` 中实际文件夹位置变化（大于 0.25 像素）触发运动时间，避免只靠壁纸偏移回调而忽略短滑。
-- 渐亮时间常数 600ms、渐暗 1200ms、运动保持窗口 120ms。动画退场期间持续请求重绘。
-- 为避免松手位置回弹立即冲掉亮色，保留本次手势中采样亮度最高的位置；新的手势在静止超过 350ms 后重置。
-- 原有 V1.9.113 的 sample_test=0..5 诊断指令全部保留。固定中灰、灰阶等模式不会受到动态高亮处理。
+变更说明：
+- sample_test=0：原始实时壁纸采样，AGSL旧算法不变（默认）。
+- sample_test=1：固定中灰色、alpha 0.65（V1.9.111原有对照）。
+- sample_test=2：仅在采样坐标越过显示区域时，明确把采样位置限制到显示边界；屏内坐标不变。
+- sample_test=3：保留原壁纸采样坐标及其实际亮度，但输出灰阶（用于分离颜色/亮度）。
+- sample_test=4：在越过显示范围时把对应像素显示成橙色，其余采用原始折射。颜色用于定位屏幕边缘越界情况。
+- sample_test=5：保留实时采样与部分颜色细节，但压低壁纸亮度对比度（实验）。
+注意：模式3/5是视觉对照，非最终画质方案；模式4在离屏/分页时出现橙色属于预期。
+所有测试保持采样坐标实时更新，无时间延迟、无整层渐变。
 
-A/B 切换（无需重装，等待约1秒）：
-新方案（默认）： su -c 'settings put global liquidglass_refraction_motion_glow_test 1'
-原始输出对照： su -c 'settings put global liquidglass_refraction_motion_glow_test 0'
-建议测试前恢复 sample_test=0、visibility_test=2、composition_test=1。
+建议测试：
+ su -c 'settings put global liquidglass_refraction_composition_test 1'
+ su -c 'settings put global liquidglass_refraction_visibility_test 2'
+ su -c 'settings put global liquidglass_refraction_displacement_test 1'
+ su -c 'settings put global liquidglass_refraction_sample_test 0'
+接着每次按以下命令切换，等待一秒后轻滑并松手，比较闪烁：
+ su -c 'settings put global liquidglass_refraction_sample_test 2'   # 边界保护
+ su -c 'settings put global liquidglass_refraction_sample_test 3'   # 亮度灰阶
+ su -c 'settings put global liquidglass_refraction_sample_test 4'   # 边界橙色提示
+测试完恢复：
+ su -c 'settings put global liquidglass_refraction_sample_test 0'
+ su -c 'settings put global liquidglass_refraction_composition_test 0'
 
-已知限制：
-- 视觉高亮现在被分离为静态基底与动态亮度增强，因此静止时明亮壁纸的折射会比原始模式略暗，这是针对瞬间闪烁的权衡。
-- 渐变平滑的是高亮差值，不是采样坐标，也不能消除壁纸纹理本身所有正常的空间颜色变化。
-- 亮度峰值用 3x3 的轻量像素采样估计，仅用于选择保持的亮度位置；它不是逐像素帧缓存。可能发生与纹理边缘不完全匹配的残影。
-- 如果仍然瞬闪或发生色块残影，请执行 A/B 对照并附上最新 LSPosed 模块日志（含 REFRACTION_GLOW_114）。
+查看 LSPosed 模块日志内的 REFRACTION_SAMPLE_ISOLATION_113 与 REFRACTION_COORD_112。
+不要仅因为 0 和 3 都闪烁就认定是采样坐标跳变；灰阶可帮助确认亮度而非色相变化。
+注意 Root/Termux 源码覆盖后提交 Git，等待 GitHub Actions 构建。未在当前环境执行 Android Gradle 编译或真机验证。
 
-构建验证：当前环境缺少 Android SDK/Gradle，未运行 Gradle 编译和真机验证。源码、压缩包、Root shell 可进行静态检查。
+
+V1.9.114 模糊与透明度解耦修复
+- 保持原生模糊 Drawable 的原始 alpha，不再跟随玻璃透明度滑块改变。
+- 原生模糊强度仍由 ColorOS 决定；本版没有伪造可调模糊半径。
+- 保留 V1.9.113 壁纸采样、AGSL 折射、运动高光实现，尚未实机验证 iOS 风格优化。
+- 建议先备份旧版，验证文件夹模糊是否恢复，再继续折射调优。
+
+
+V1.9.115：实验性合成顺序修复：将玻璃表面绘制移至 FolderIcon dispatchDraw 之后，并避开子图标矩形；圆角统一向内收缩1像素，降低越界风险。此版本尚未在一加13T实机验证；若出现图标周边矩形接缝请回退V1.9.114并提供日志。
+
+V1.9.116：优先在原生 drawBackground 回调后、子图标绘制前渲染折射；成功后取消 dispatchDraw 末尾的二次折射绘制，防止覆盖图标。仅在回调缺失时使用图标裁剪回退；适度增强正常模式折射可见度，保留 V1.9.115 圆角几何。测试模式3仍会故意覆盖图标，使用前须恢复为0。未实机验证。
+
+V1.9.117｜文件夹原生模糊隔离实验版
+- 默认保持 ColorOS 原生模糊（隔离开关为0），避免未经验证时改变原有外观。
+- 实验开关仅在 FolderIcon 绘制期间，针对已经识别和追踪的 LayerBlurDrawable 跳过其 draw(Canvas)。不修改系统全局模糊设置。
+- 注意：若厂商实际模糊由其他绘制路径或 Surface 合成，本开关可能无法消除模糊。
+- 该版没有实现自定义模糊半径，也未宣称圆角几何完全解决。
+- 开启：su -c 'settings put global liquidglass_folder_native_blur_isolation 1'
+- 关闭：su -c 'settings put global liquidglass_folder_native_blur_isolation 0'
+- 测试时将 visibility_test 设为0、composition_test 设为0，重启桌面后对比截图与 Vector 日志 FOLDER_NATIVE_BLUR_。
+- 如果桌面异常，立刻把隔离开关改回0，并重启桌面。
+- 尚未编译或实机验证。
+
+
+V1.9.118 实验性自定义壁纸模糊
+- 移除 OplusBlurProperties 材质布尔值强制 true 的 Hook；不保证 ColorOS 自身不启用原生模糊。
+- 新增 14dp 壁纸纹理降采样双向盒式模糊缓存、35% AGSL 折射位移、18% 独立底色、30% 高光。
+- 配置快照扩展为 LG1 + 19 字段，需更新 Root 辅助脚本。
+- 自定义模糊只适用于静态壁纸快照；动态壁纸、图标保护和真实 OEM 图层顺序需实机验证。
+- 未经过 APK 编译和设备测试，首次安装请备份旧版。

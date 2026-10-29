@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 19116
-        versionName '1.9.116-refraction-layer-fix'
+        versionCode 19118
+        versionName '1.9.118-custom-wallpaper-blur'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

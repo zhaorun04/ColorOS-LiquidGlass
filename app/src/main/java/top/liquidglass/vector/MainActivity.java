@@ -49,17 +49,28 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.114  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
-        section("玻璃效果","保留当前折射、圆角和原生模糊。设置保存后返回桌面查看。");
+        TextView version=text("V1.9.118  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
-        slider("背景不透明度（越小越通透）","alpha",210,40,255);
+        slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
+        slider("自定义壁纸模糊半径 (dp)","custom_blur_dp",14,0,40);
+        slider("折射强度 (%)","refraction_percent",35,0,100);
+        TextView modeLabel=text("背景模糊模式",13,false);current.addView(modeLabel);
+        Spinner blurMode=new Spinner(this);
+        String[] blurModes={"关闭模糊 · 纯折射","自定义壁纸模糊 · 推荐","ColorOS 原生兼容"};
+        blurMode.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,blurModes));
+        blurMode.setSelection(Math.max(0,Math.min(2,prefs.getInt("custom_blur_mode",1))));current.addView(blurMode);
+        blurMode.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){prefs.edit().putInt("custom_blur_mode",pos).commit();}
+            public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
         toggle("真实壁纸折射","real_refraction",false);
         // Legacy native_alpha_probe is deliberately disabled: blur and material opacity are separate.
         prefs.edit().putBoolean("native_alpha_probe",false).apply();
-        TextView blurInfo=text("原生模糊层独立保留：透明度滑块不再改变模糊 Drawable 的透明度。模糊强度仍由系统控制。",12,false);current.addView(blurInfo);
+        TextView blurInfo=text("自定义模糊使用壁纸采样，不模糊应用图标。系统模糊开关不再强制开启；ColorOS 自身仍可能启用原生模糊。",12,false);current.addView(blurInfo);
         section("柔和高光","静态圆角高光与光学轮廓；不改变已验证的描边几何。");
         toggle("启用柔和高光描边","highlight",false);
-        slider("高光强度","highlight_strength",35,0,100);
+        slider("高光强度 (%)","highlight_strength",30,0,100);
         slider("描边宽度（像素）","highlight_width",2,1,5);
         toggle("方向性反射","directional_light",true);
         section("视觉风格","保留必要的色调控制；移除旧版诊断和无效实验入口。");
@@ -77,6 +88,12 @@ public final class MainActivity extends Activity {
                 .putBoolean("highlight",true).putInt("highlight_strength",55).putInt("highlight_width",2)
                 .putBoolean("directional_light",true).putBoolean("native_alpha_probe",false).putBoolean("real_refraction",true)
                 .putInt("probe_mode",0).commit();recreate();
+        });
+        action("恢复液态玻璃推荐参数 (14 / 35 / 18 / 30)",()->{
+            prefs.edit().putInt("custom_blur_dp",14).putInt("refraction_percent",35)
+                .putInt("glass_tint_opacity",18).putInt("highlight_strength",30)
+                .putInt("custom_blur_mode",1).putBoolean("real_refraction",true)
+                .putBoolean("highlight",true).putBoolean("enabled",true).commit();recreate();
         });
         section("维护与状态","高级实验已从首页隐藏，保留必要的 Root 脚本更新与日志开关。");
         TextView status=text("检查 Root 辅助脚本中…",12,false);current.addView(status);

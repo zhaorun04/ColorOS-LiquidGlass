@@ -44,6 +44,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // V1.9.23: Do not mutate LayerBlurDrawable.mRadius: it is also used as
     // the background corner radius and is not a verified blur-strength API.
     private static volatile int blurRadiusPercent = 100; // legacy config ignored
+    private static volatile int customBlurDp=14, refractionPercent=35, glassTintOpacity=18, customBlurMode=1;
+    private static volatile android.graphics.Bitmap CUSTOM_BLUR_FRAME;
+    private static volatile android.graphics.Bitmap CUSTOM_BLUR_SOURCE;
+    private static volatile int CUSTOM_BLUR_RADIUS=-1;
     private static final java.util.Map<Drawable,Integer> ORIGINAL_ALPHA = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Integer>());
     private static final java.util.Set<Drawable> TINTED = java.util.Collections.newSetFromMap(new java.util.WeakHashMap<Drawable,Boolean>());
     private static volatile boolean diagnostics = false;
@@ -148,7 +152,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             String raw=android.provider.Settings.Global.getString(context.getContentResolver(),BOOT_SNAPSHOT_KEY);
             if(raw==null || !raw.startsWith("LG1|"))return false;
             String[] v=raw.split("\\|",-1);
-            if(v.length!=16)return false;
+            if(v.length!=16 && v.length!=20)return false;
             // Parse all fields first: never partially apply a corrupt snapshot.
             int[] x=new int[15];
             for(int i=0;i<x.length;i++)x[i]=Integer.parseInt(v[i+1]);
@@ -156,8 +160,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             glassEnabled=x[0]==1;glassAlpha=x[1];tintMode=x[2];tintStrength=x[3];
             highlightEnabled=x[4]==1;diagnostics=x[5]==1;highlightStrength=x[6];
             probeMode=x[7];highlightWidth=x[8];directionalLight=x[9]==1;
-            nativeBlurExperiment=glassEnabled?1:0;blurRadiusPercent=x[11];
-            nativeAlphaProbe=x[12]==1;wallpaperCompare=x[13]==1;REFRACTION_ENABLED=x[14]==1;
+            nativeBlurExperiment=0;blurRadiusPercent=x[11];
+            nativeAlphaProbe=false;wallpaperCompare=x[13]==1;REFRACTION_ENABLED=x[14]==1;
+            if(v.length==20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
             configEverLoaded=true;
             if(!raw.equals(lastBootSnapshot)){
                 lastBootSnapshot=raw;
@@ -199,9 +204,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 blurRadiusPercent=radiusIndex>=0 ? Math.max(10,Math.min(100,c.getInt(radiusIndex))) : 100;
                 probeMode=Math.max(0,Math.min(3,c.getInt(7)));
                 int expIndex=c.getColumnIndex("native_blur_experiment");
-                nativeBlurExperiment=glassEnabled ? 1 : 0; // Native blur is a mandatory glass layer
+                nativeBlurExperiment=0; // OEM material switch is no longer forced
                 int alphaProbeIndex=c.getColumnIndex("native_alpha_probe");
                 nativeAlphaProbe=alphaProbeIndex>=0 && c.getInt(alphaProbeIndex)==1;
+                int ci=c.getColumnIndex("custom_blur_dp");if(ci>=0)customBlurDp=clampInt(c.getInt(ci),0,40);
+                ci=c.getColumnIndex("refraction_percent");if(ci>=0)refractionPercent=clampInt(c.getInt(ci),0,100);
+                ci=c.getColumnIndex("glass_tint_opacity");if(ci>=0)glassTintOpacity=clampInt(c.getInt(ci),0,100);
+                ci=c.getColumnIndex("custom_blur_mode");if(ci>=0)customBlurMode=clampInt(c.getInt(ci),0,2);
                 String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
                 summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
@@ -212,7 +221,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static void refreshConfigFromContext(android.content.Context ctx) {
         long now=android.os.SystemClock.uptimeMillis();
         if(now-lastExperimentRead<1500)return;
-        nativeBlurExperiment=glassEnabled?1:0;
+        nativeBlurExperiment=0;
         lastExperimentRead=now;
     }
     private static int tintColor() {
@@ -1915,6 +1924,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
         " return color;\n"+
         "}\n";
+    private static int clampInt(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
+    // Cached low-resolution two-pass box blur of the wallpaper, never of the icons.
+    // Blur radius is in physical pixels converted from dp and scaled to the cache.
+    private static synchronized android.graphics.Bitmap blurredWallpaper(android.graphics.Bitmap src,float density){
+        if(customBlurDp<=0 || customBlurMode!=1)return null;
+        if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==customBlurDp && CUSTOM_BLUR_FRAME!=null && !CUSTOM_BLUR_FRAME.isRecycled())return CUSTOM_BLUR_FRAME;
+        try{
+            final int factor=6,w=Math.max(1,src.getWidth()/factor),h=Math.max(1,src.getHeight()/factor);
+            android.graphics.Bitmap small=android.graphics.Bitmap.createScaledBitmap(src,w,h,true);
+            int[] a=new int[w*h],b=new int[w*h],out=new int[w*h];small.getPixels(a,0,w,0,0,w,h);
+            int r=Math.max(1,Math.min(16,Math.round(customBlurDp*density/factor)));
+            for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+                int rr=0,gg=0,bb=0,n=0;
+                for(int k=-r;k<=r;k++){int c=a[y*w+Math.max(0,Math.min(w-1,x+k))];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
+                b[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
+            }
+            for(int y=0;y<h;y++)for(int x=0;x<w;x++){
+                int rr=0,gg=0,bb=0,n=0;
+                for(int k=-r;k<=r;k++){int c=b[Math.max(0,Math.min(h-1,y+k))*w+x];rr+=(c>>16)&255;gg+=(c>>8)&255;bb+=c&255;n++;}
+                out[y*w+x]=0xff000000|((rr/n)<<16)|((gg/n)<<8)|(bb/n);
+            }
+            android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(w,h,android.graphics.Bitmap.Config.ARGB_8888);
+            result.setPixels(out,0,w,0,0,w,h);small.recycle();
+            CUSTOM_BLUR_FRAME=result;CUSTOM_BLUR_SOURCE=src;CUSTOM_BLUR_RADIUS=customBlurDp;
+            log("CUSTOM_BLUR_READY radiusDp="+customBlurDp+" texture="+w+"x"+h);
+            return result;
+        }catch(Throwable t){log("CUSTOM_BLUR_FAILED "+t.getClass().getSimpleName());return null;}
+    }
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(!REFRACTION_ENABLED || rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
@@ -1980,6 +2017,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float contourRadius=Math.min(Math.min(rect.width(),rect.height())*0.5f,radius+BLUR_CORNER_RADIUS_DELTA_PX);
             state.clip.reset();state.clip.addRoundRect(rect,contourRadius,contourRadius,Path.Direction.CW);
             canvas.clipPath(state.clip);
+            if(customBlurMode==1 && customBlurDp>0){
+                android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density);
+                if(blurred!=null){
+                    Paint blurPaint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                    android.graphics.BitmapShader blurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+                    Matrix bm=new Matrix();bm.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());bm.postTranslate(-left,-top);
+                    blurShader.setLocalMatrix(bm);blurPaint.setShader(blurShader);
+                    canvas.drawRoundRect(rect,contourRadius,contourRadius,blurPaint);
+                }
+            }
+            if(glassTintOpacity>0){Paint tintPaint=new Paint(Paint.ANTI_ALIAS_FLAG);tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),235,242,250));canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);}
+
             // V1.9.70: one hardware-accelerated draw with continuous per-pixel
             // displacement. No per-strip matrix mutation or 48 draw commands.
             boolean continuousDrawn=false;
@@ -1999,7 +2048,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // Keep the requested mode 1/3 diagnostics available.
                     int shaderMode=(visibilityTest==0?2:visibilityTest);
                     int displacementMode=currentDisplacementIsolationMode();
-                    state.continuousShader.setFloatUniform("strength",displacementMode==0?0.0f:(shaderMode==2?22.0f:6.0f));
+                    state.continuousShader.setFloatUniform("strength",displacementMode==0?0.0f:(shaderMode==2?22.0f:6.0f)*refractionPercent/35.0f);
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     int samplingDiagnostic=currentSampleIsolationMode();
                     state.continuousShader.setFloatUniform("sampleIsolation",(float)samplingDiagnostic);
@@ -2172,6 +2221,48 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } finally {canvas.restoreToCount(saved);}
     }
     private static int postSafeLogs=0;
+    // V1.9.117: folder-scoped native blur isolation. Default OFF for safe rollback.
+    // This only intercepts the tracked LayerBlurDrawable while a FolderIcon is drawing.
+    private static volatile int folderBlurIsolation = 0;
+    private static volatile long folderBlurIsolationReadAt = 0L;
+    private static int currentFolderBlurIsolation() {
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-folderBlurIsolationReadAt>1000L){
+            folderBlurIsolationReadAt=now;
+            try {
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int next=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_folder_native_blur_isolation",0);
+                    next=(next==1)?1:0;
+                    if(next!=folderBlurIsolation){folderBlurIsolation=next;
+                        log("FOLDER_NATIVE_BLUR_ISOLATION mode="+next);}
+                }
+            }catch(Throwable t){log("FOLDER_NATIVE_BLUR_ISOLATION_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return folderBlurIsolation;
+    }
+    private static int folderBlurSkipLogs=0;
+    private static void hookTrackedFolderNativeBlur(ClassLoader loader){
+        try{
+            Class<?> type=Class.forName("com.android.launcher3.uioverrides.states.blurdrawable.LayerBlurDrawable",false,loader);
+            Method draw=type.getMethod("draw",Canvas.class);
+            draw.setAccessible(true);
+            XposedBridge.hookMethod(draw,new XC_MethodHook(){
+                @Override protected void beforeHookedMethod(MethodHookParam param){
+                    if(currentFolderBlurIsolation()!=1 || !glassEnabled || ACTIVE_FOLDER_ICON.get()==null)return;
+                    if(!(param.thisObject instanceof Drawable))return;
+                    boolean tracked;
+                    synchronized(TRACKED_BLUR_BACKGROUNDS){tracked=TRACKED_BLUR_BACKGROUNDS.contains(param.thisObject);}
+                    if(!tracked)return;
+                    // Skip only this drawable draw, without altering OEM blur state/alpha.
+                    param.setResult(null);
+                    if(folderBlurSkipLogs++<40)log("FOLDER_NATIVE_BLUR_SKIPPED tracked=true folderActive=true");
+                }
+            });
+            log("FOLDER_NATIVE_BLUR_ISOLATION_HOOK owner="+draw.getDeclaringClass().getName());
+        }catch(Throwable t){log("FOLDER_NATIVE_BLUR_ISOLATION_UNAVAILABLE "+t.getClass().getSimpleName());}
+    }
     private static void hookFolderIconCanvasFusion(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
         if (c == null) return;
@@ -2929,13 +3020,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                         && "com.android.launcher3.uioverrides.states.blurdrawable.OplusBlurProperties".equals(method.getDeclaringClass().getName())) {
                                     // This experiment intentionally changes ONLY the one observed accessor.
                                     // It never changes system properties, other applications or global blur state.
-                                    if (glassEnabled && Boolean.FALSE.equals(value)) {
-                                        p.setResult(Boolean.TRUE);
-                                        if (EXPERIMENT_ONCE.add("material-switch-forced"))
-                                            log("NATIVE_BLUR_EXPERIMENT material_switch original=false override=true");
-                                    } else if (EXPERIMENT_ONCE.add("material-switch-unchanged-"+nativeBlurExperiment)) {
-                                        log("NATIVE_BLUR_EXPERIMENT material_switch original="+safeValue(value)+" unchanged mode="+nativeBlurExperiment);
-                                    }
+                                    // V1.9.118: observe only; never force OEM blur on.
+                                    if(EXPERIMENT_ONCE.add("material-switch-original"))
+                                        log("NATIVE_BLUR_SWITCH original="+safeValue(value)+" override=none");
                                 }
                                 String key=signature+"="+safeValue(value)+"->"+safeValue(p.getResult());
                                 if(CONDITION_ONCE.size()>=64 || !CONDITION_ONCE.add(key))return;
@@ -3091,6 +3178,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(folderClass, "onAttachedToWindow", new Class<?>[0], "Folder", false);
             hookDynamicFolderLifecycle(folderClass);
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
+            hookTrackedFolderNativeBlur(p.classLoader);
             hookFolderIconCanvasFusion(p.classLoader);
             probeBlurDrawImplementation(p.classLoader);
             hookPreview(p.classLoader);

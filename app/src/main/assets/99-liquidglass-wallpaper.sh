@@ -62,7 +62,7 @@ sync_config() {
   grep -q 'name="enabled"' "$PREF" 2>/dev/null || return
   # The first item is the schema marker; the remaining 15 match provider columns.
   SNAP="LG1"
-  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:0'; do
+  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:1' 'custom_blur_dp:14' 'refraction_percent:35' 'glass_tint_opacity:18' 'custom_blur_mode:1'; do
     key=${entry%%:*}; fallback=${entry#*:}
     SNAP="$SNAP|$(config_value "$key" "$fallback")"
   done
