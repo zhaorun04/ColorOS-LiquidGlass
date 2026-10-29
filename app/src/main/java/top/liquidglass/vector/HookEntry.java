@@ -1832,8 +1832,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return compositionIsolationMode;
     }
-    // V1.9.111: isolate wallpaper sample color from fixed-alpha layer composition.
-    // 0 = original wallpaper sampling; 1 = constant neutral gray with the same alpha.
+    // V1.9.113: keep original wallpaper sampling at 0 and the proven fixed-gray
+    // control at 1. Compare sampling boundary and sampled luminance separately:
+    // 2 = explicit display-safe sampling clamp (only outside screen),
+    // 3 = sampled luminance as neutral grayscale (same per-pixel luminance),
+    // 4 = visualize out-of-display sampling in amber, 5 = reduced-luminance-contrast.
+    // No temporal filtering, sampling lag, or motion-state-dependent alpha.
     private static volatile int sampleIsolationMode=0;
     private static volatile long sampleIsolationReadAt=0L;
     private static int currentSampleIsolationMode(){
@@ -1845,10 +1849,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(c!=null){
                     int mode=android.provider.Settings.Global.getInt(c.getContentResolver(),
                         "liquidglass_refraction_sample_test",0);
-                    mode=mode==1?1:0;
+                    mode=Math.max(0,Math.min(5,mode));
                     if(mode!=sampleIsolationMode){
                         sampleIsolationMode=mode;
-                        log("REFRACTION_SAMPLE_ISOLATION mode="+mode);
+                        log("REFRACTION_SAMPLE_ISOLATION_113 mode="+mode+
+                            " legend=0-original,1-neutral,2-screen-clamp,3-luma,4-boundary-overlay,5-compress-luma");
                     }
                 }
             }catch(Throwable t){log("REFRACTION_SAMPLE_ISOLATION_READ_FAILED "+t.getClass().getSimpleName());}
@@ -1864,13 +1869,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float temporalOpacity;\n"+
         "uniform float motionHighlight;\n"+
         "uniform float sampleIsolation;\n"+
+        "uniform float4 screenClip;\n"+
         "half4 main(float2 p) {\n"+
         " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
         " float edge=abs(2.0*u-1.0);\n"+
         " float envelope=edge*edge*(3.0-2.0*edge);\n"+
         " float direction=1.0-2.0*smoothstep(0.47,0.53,u);\n"+
-        " half4 color=wallpaper.eval(p+float2(direction*envelope*strength,0.0));\n"+
-        " if(sampleIsolation>0.5){return half4(0.50,0.50,0.50,0.65); }\n"+
+        " float2 samplingPoint=p+float2(direction*envelope*strength,0.0);\n"+
+        " bool outOfDisplay=samplingPoint.x<screenClip.x || samplingPoint.y<screenClip.y || samplingPoint.x>screenClip.z || samplingPoint.y>screenClip.w;\n"+
+        " if(sampleIsolation>1.5 && sampleIsolation<2.5){samplingPoint=clamp(samplingPoint,screenClip.xy,screenClip.zw); }\n"+
+        " half4 color=wallpaper.eval(samplingPoint);\n"+
+        " if(sampleIsolation>0.5 && sampleIsolation<1.5){return half4(0.50,0.50,0.50,0.65); }\n"+
+        " if(sampleIsolation>3.5 && sampleIsolation<4.5 && outOfDisplay){return half4(1.0,0.48,0.02,0.93); }\n"+
+        " if(sampleIsolation>2.5 && sampleIsolation<3.5){float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));return half4(half3(lum),half(0.65)); }\n"+
+        " if(sampleIsolation>4.5 && sampleIsolation<5.5){float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));float3 toned=clamp(float3(color.rgb)+(0.5-lum)*0.85,0.0,1.0);return half4(half3(toned),half(0.65)); }\n"+
         " if(diagnosticMode>0.5 && diagnosticMode<1.5){\n"+
         "  float stripe=step(0.5,fract((p.x+p.y)*0.055));\n"+
         "  return passId>1.5 ? half4(0.05,0.95,0.20,0.92) : half4(0.95,0.08+0.20*stripe,0.12,0.92);\n"+
@@ -1987,7 +1999,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     int displacementMode=currentDisplacementIsolationMode();
                     state.continuousShader.setFloatUniform("strength",displacementMode==0?0.0f:(shaderMode==2?22.0f:6.0f));
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
-                    state.continuousShader.setFloatUniform("sampleIsolation",(float)currentSampleIsolationMode());
+                    int samplingDiagnostic=currentSampleIsolationMode();
+                    state.continuousShader.setFloatUniform("sampleIsolation",(float)samplingDiagnostic);
+                    // Same local p-space as wallpaper.eval(), but bounded by
+                    // the actual display rectangle. Only mode 2 clamps p.
+                    state.continuousShader.setFloatUniform("screenClip",0.5f-left,0.5f-top,
+                        (float)sw-0.5f-left,(float)sh-0.5f-top);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     // Only the motion sheen is time-smoothed. Wallpaper sampling
                     // stays locked to the real screen position on every frame.
