@@ -2190,6 +2190,44 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> EARLY_SURFACE_DRAWN = new ThreadLocal<Boolean>();
     private static final ThreadLocal<Matrix> FOLDER_CANVAS_MATRIX = new ThreadLocal<Matrix>();
     private static int compositionLogs = 0;
+    // V1.9.122: independent visibility probe, no wallpaper or OEM blur dependency.
+    // 0=off; 1=opaque markers before/after children; 2=post-children AGSL
+    // with a small diagnostic clipped patch; 3=opaque post-children patch.
+    private static volatile int visibility122=0;
+    private static volatile long visibility122ReadAt=0L;
+    private static int visibilityProbe122(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-visibility122ReadAt>1000L){
+            visibility122ReadAt=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int next=Math.max(0,Math.min(3,android.provider.Settings.Global.getInt(
+                        c.getContentResolver(),"liquidglass_visibility_122",0)));
+                    if(next!=visibility122){visibility122=next;log("GLASS122_MODE value="+next);}
+                }
+            }catch(Throwable t){log("GLASS122_MODE_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return visibility122;
+    }
+    private static void drawVisibilityPatch122(View v,Canvas canvas,boolean after,int mode){
+        if(mode==0)return;
+        int saved=canvas.save();
+        try{
+            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setColor(after?0xFF00FF60:0xFFFF2850);
+            float x=after?42f:8f;
+            canvas.drawRect(x,8f,x+24f,32f,paint);
+            if(after && mode==3){
+                paint.setColor(0xFF00EFFF);
+                canvas.drawRect(8f,38f,Math.min(v.getWidth()-8f,92f),Math.min(v.getHeight()-8f,90f),paint);
+            }
+            if(visibility122Logs++<90)log("GLASS122_VISIBILITY phase="+
+                (after?"AFTER_CHILDREN":"BEFORE_CHILDREN")+" mode="+mode+
+                " hardware="+canvas.isHardwareAccelerated()+" view="+v.getWidth()+"x"+v.getHeight());
+        }finally{canvas.restoreToCount(saved);}
+    }
+    private static int visibility122Logs=0;
     private static void drawRefractionProbeMarker(View v,Canvas canvas,boolean after){
         // A simple opaque stripe to prove Canvas visibility independently of RuntimeShader.
         // Top left of the FolderIcon View; this marker is diagnostic only.
@@ -2298,6 +2336,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // Independent Canvas marker: does not rely on wallpaper, AGSL, or OEM callback.
                         // Red is drawn BEFORE OEM/children; green is drawn AFTER OEM/children.
                         if(currentRefractionVisibilityTest()==1)drawRefractionProbeMarker(v,(Canvas)p.args[0],false);
+                        drawVisibilityPatch122(v,(Canvas)p.args[0],false,visibilityProbe122());
                         // V1.9.120: dispatchDraw is entered after View.draw has drawn its
                         // background and before children are painted. This is the stable
                         // folder-background composition slot even when the OEM preview
@@ -2327,6 +2366,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             // V1.9.120: never redraw glass after children in normal mode.
                             // The pre-children pass owns the complete rounded surface.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
+                            int v122=visibilityProbe122();
+                            if(v122==2){
+                                // Small clipped post-children AGSL diagnostic; icon overlap is intentional.
+                                Canvas c122=(Canvas)p.args[0];
+                                int saved122=c122.save();
+                                try{
+                                    c122.clipRect(8f,38f,Math.min(100f,((View)p.thisObject).getWidth()),
+                                        Math.min(110f,((View)p.thisObject).getHeight()));
+                                    REFRACTION_AFTER_OEM.set(Boolean.TRUE);
+                                    try{drawFolderIconFusion((View)p.thisObject,c122,false);}
+                                    finally{REFRACTION_AFTER_OEM.remove();}
+                                    if(visibility122Logs++<90)log("GLASS122_POST_AGSL submitted=true");
+                                }finally{c122.restoreToCount(saved122);}
+                            }
+                            drawVisibilityPatch122((View)p.thisObject,(Canvas)p.args[0],true,v122);
                             int probe=currentRefractionVisibilityTest();
                             // V1.9.93: do not add the post-dispatch overlay in normal mode.
                             // Mode 2 looked correct without it; keeping it would change

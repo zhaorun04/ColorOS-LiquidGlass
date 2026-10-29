@@ -67,3 +67,23 @@ V1.9.119｜渲染链分阶段诊断版
 本版不强制放行未经验证的壁纸映射，也不声称已修复壁纸裁剪。
 新增 GLASS119_PIPELINE 日志：FRAME_UNAVAILABLE、DRAW_ENTER、BLUR_DRAWN、AGSL_DRAWN，用于区分纹理未加载、模糊未绘制和着色器未执行。
 注意：REFRACTION_SAMPLING_GATE 是元数据诊断，不直接控制 drawReferenceRefraction 的采样权限。
+
+
+V1.9.120 绘制顺序修复：FolderIcon.dispatchDraw 进入时（背景已绘制、子图标未绘制）执行玻璃合成；正常模式禁用 dispatchDraw 后置覆盖图标的回退层。增加 GLASS120_COMPOSITION 日志。保持自定义模糊与四参数配置。此版本未经过真机验证；若原生文件夹背景在 dispatchDraw 之后另行绘制，仍可能覆盖玻璃。
+
+
+V1.9.121 原生材质开关 A/B 验证：
+默认 A 模式（不覆盖原生返回值）：su -c "settings put global liquidglass_material_switch_ab 0"
+B 模式（仅 Launcher 进程恢复历史材质开关强制 true）：su -c "settings put global liquidglass_material_switch_ab 1"
+建议切换后重启 Launcher 以触发材质初始化。保持其他参数不变，比较折射及日志 GLASS121_MATERIAL_SWITCH。
+注意：B 模式可能同时改变原生模糊，不能单独证明折射依赖此开关。测试结束恢复 0。
+
+
+V1.9.122 最终可见性 A/B 诊断版
+本版不声称已修复壁纸折射，新增独立于壁纸纹理的画布标记实验。
+Termux 设置：su -c 'settings put global liquidglass_visibility_122 1'（前后绘制标记）
+su -c 'settings put global liquidglass_visibility_122 2'（局部后置 AGSL 测试，可能覆盖局部图标）
+su -c 'settings put global liquidglass_visibility_122 3'（后置青色不透明色块）
+su -c 'settings put global liquidglass_visibility_122 0'（关闭）
+日志关键字 GLASS122_MODE、GLASS122_VISIBILITY、GLASS122_POST_AGSL。
+请分别截图并导出 Vector 日志，诊断结束必须恢复 0。
