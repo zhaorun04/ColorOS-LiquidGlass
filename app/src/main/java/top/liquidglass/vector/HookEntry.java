@@ -1816,14 +1816,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setInputShader("wallpaper",state.shader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
                     int visibilityTest=currentRefractionVisibilityTest();
-                    state.continuousShader.setFloatUniform("strength",visibilityTest==2?22.0f:6.0f);
-                    state.continuousShader.setFloatUniform("diagnosticMode",(float)visibilityTest);
+                    // V1.9.93: mode 0 uses the exact proven mode-2 optical profile.
+                    // Keep the requested mode 1/3 diagnostics available.
+                    int shaderMode=(visibilityTest==0?2:visibilityTest);
+                    state.continuousShader.setFloatUniform("strength",shaderMode==2?22.0f:6.0f);
+                    state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
-                    if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
+                    if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" shaderMode="+shaderMode+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
                 }catch(Throwable t){
                     state.continuousUnavailable=true;
@@ -1999,7 +2002,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             // Do not draw the surface here: it would cover app icons.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int probe=currentRefractionVisibilityTest();
-                            if(probe==0)drawPostDispatchRefractionIconSafe((View)p.thisObject,(Canvas)p.args[0]);
+                            // V1.9.93: do not add the post-dispatch overlay in normal mode.
+                            // Mode 2 looked correct without it; keeping it would change
+                            // the visual result and potentially overlay icon regions.
                             if(probe==1)drawRefractionProbeMarker((View)p.thisObject,(Canvas)p.args[0],true);
                             if(probe==3){
                                 // Diagnostic ONLY: draw AGSL after all FolderIcon children.
