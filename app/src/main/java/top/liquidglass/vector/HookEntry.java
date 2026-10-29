@@ -1678,7 +1678,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         android.view.ViewTreeObserver.OnPreDrawListener listener;
         int moveLogs;
         // Per-folder temporal response: smooth the optical overlay on real movement.
-        float opticalOpacity=1f;
+        float opticalOpacity=0f;
         long opticalUpdatedAt=0L;
         long opticalMotionRevision=-1L;
         long opticalLastMoveAt=0L;
@@ -1708,28 +1708,40 @@ public final class HookEntry implements IXposedHookLoadPackage {
         view.postInvalidate(); // Draw a stable refraction frame even before the first swipe
         return state;
     }
-    // V1.9.103: a slow optical highlight envelope rather than an on/off touch gate.
-    // The static material stays at 1.0; movement adds a subtle, slowly rising
-    // highlight, which then fades back smoothly. No touch-time hard jumps.
-    private static float smoothedOpticalOpacity(View view, DynamicRefraction state) {
-        long now=android.os.SystemClock.uptimeMillis();
+    // V1.9.104: a single per-folder animation envelope shared by the optical
+    // sampling pass and the extra native-shaped highlight. Static edge lighting
+    // is deliberately left untouched, preserving V1.9.74 corner geometry.
+    private static float smoothHighlightProgress(View view, DynamicRefraction state) {
+        final long now=android.os.SystemClock.uptimeMillis();
         if(state.opticalMotionRevision!=wallpaperOffsetRevision){
             state.opticalMotionRevision=wallpaperOffsetRevision;
             state.opticalLastMoveAt=now;
         }
-        // Hold the requested glow briefly so even a 1px flick can bloom gently.
-        boolean glowRequested=state.opticalLastMoveAt>0L && now-state.opticalLastMoveAt<350L;
-        float target=glowRequested?1.28f:1.0f;
-        long dt=state.opticalUpdatedAt==0L?0L:Math.min(64L,Math.max(0L,now-state.opticalUpdatedAt));
+        final boolean active=state.opticalLastMoveAt>0 && now-state.opticalLastMoveAt<240L;
+        final float target=active?1f:0f;
+        // Use elapsed real time rather than capping dt to 64ms: otherwise an
+        // interrupted render loop can leave the animation apparently stuck.
+        long elapsed=state.opticalUpdatedAt==0L?0L:Math.max(0L,now-state.opticalUpdatedAt);
         state.opticalUpdatedAt=now;
-        if(dt>0L){
-            float tau=glowRequested?450f:800f;
-            float factor=1f-(float)Math.exp(-dt/tau);
-            state.opticalOpacity+=(target-state.opticalOpacity)*factor;
+        if(elapsed>0L){
+            float tau=active?600f:1200f;
+            float step=1f-(float)Math.exp(-Math.min(elapsed,1000L)/tau);
+            state.opticalOpacity+=(target-state.opticalOpacity)*step;
         }
-        if(Math.abs(target-state.opticalOpacity)>0.002f && view.isAttachedToWindow())
+        if(Math.abs(target-state.opticalOpacity)>0.003f && view.isAttachedToWindow())
             view.postInvalidateDelayed(16L);
-        return Math.max(1f,Math.min(1.28f,state.opticalOpacity));
+        return Math.max(0f,Math.min(1f,state.opticalOpacity));
+    }
+    private static void drawAnimatedHighlight(View view,Canvas canvas,MaskCache cache){
+        if(view==null || cache==null || !highlightEnabled || highlightStrength<=0 || probeMode!=0)return;
+        DynamicRefraction state=dynamicState(view);
+        float progress=smoothHighlightProgress(view,state);
+        if(progress<=0.003f)return;
+        // Draw ONLY the extra moving glow; the base unified material is static.
+        // Reuse the existing OEM-aligned glow bitmap, not a new outline/path.
+        Paint glow=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+        glow.setAlpha(Math.min(95,Math.round(95f*progress*highlightStrength/100f)));
+        canvas.drawBitmap(cache.glow,0f,0f,glow);
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
@@ -1865,7 +1877,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("strength",shaderMode==2?22.0f:6.0f);
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
-                    state.continuousShader.setFloatUniform("temporalOpacity",smoothedOpticalOpacity(view,state));
+                    state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
@@ -1951,6 +1963,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!edgeOnly)drawReferenceRefraction(v,canvas,rect,radius);
                 canvas.translate(rect.left,rect.top);
                 drawUnifiedMaterial(canvas,mask,edgeOnly);
+                if(edgeOnly)drawAnimatedHighlight(v,canvas,mask);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
                     " maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
