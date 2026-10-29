@@ -2005,11 +2005,20 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Thread t=new Thread(r,"LiquidGlass-Blur126");t.setDaemon(true);t.setPriority(Thread.MIN_PRIORITY);return t;
         });
     private static volatile boolean BLUR_PENDING=false;
+    private static int blurMissLogs141=0;
     private static android.graphics.Bitmap blurredWallpaper(final android.graphics.Bitmap src,final float density,final View view){
         final int requested=customBlurDp;
         if(requested<=0 || customBlurMode!=1)return null;
         android.graphics.Bitmap cached=CUSTOM_BLUR_FRAME;
         if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==requested && cached!=null && !cached.isRecycled())return cached;
+        if(blurMissLogs141<24){
+            blurMissLogs141++;
+            log("BLUR_CACHE_141 miss src="+System.identityHashCode(src)+
+                " cachedSrc="+System.identityHashCode(CUSTOM_BLUR_SOURCE)+
+                " radius="+requested+" cachedRadius="+CUSTOM_BLUR_RADIUS+
+                " cached="+(cached!=null && !cached.isRecycled())+
+                " pending="+BLUR_PENDING);
+        }
         synchronized(HookEntry.class){
             if(BLUR_PENDING)return null;
             BLUR_PENDING=true;
@@ -2081,6 +2090,25 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return null;
     }
     private static final java.util.concurrent.atomic.AtomicInteger GLASS_PIPELINE_DIAGNOSTICS = new java.util.concurrent.atomic.AtomicInteger();
+    // V1.9.141: controlled A/B isolation of the touch-related brightness jump.
+    // 0 normal; 1 no AGSL (blur/tint remain); 2 AGSL without ambient light;
+    // 3 skip AGSL only when invoked after OEM background drawing.
+    private static volatile int opticalProbe141=0;
+    private static volatile long opticalProbeReadAt141=0L;
+    private static int opticalProbe141(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-opticalProbeReadAt141>800L){
+            opticalProbeReadAt141=now;
+            android.content.Context c=launcherContext;
+            if(c!=null){
+                try { opticalProbe141=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_optical_probe_141",0)));
+                } catch(Throwable ignored){}
+            }
+        }
+        return opticalProbe141;
+    }
+    private static int opticalProbeLogged141=-1;
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
@@ -2160,9 +2188,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // displacement. No per-strip matrix mutation or 48 draw commands.
             boolean continuousDrawn=false;
             int opticalAb=opticalAb133(); // 0: stable refractive AGSL; 1: legacy comparison; 2: no AGSL
+            int probe141=opticalProbe141();
+            if(probe141!=opticalProbeLogged141){
+                opticalProbeLogged141=probe141;
+                log("OPTICAL_PROBE_141 mode="+probe141+" refraction="+REFRACTION_ENABLED+
+                    " blur="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
+            }
             // Strict master switch: clear-refraction and blur must never activate AGSL.
             final boolean refractionActive=REFRACTION_ENABLED && refractionPercent>0;
-            if(opticalAb!=2 && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2191,7 +2225,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // stays locked to the real screen position on every frame.
                     state.continuousShader.setFloatUniform("stableOpticalMode",opticalAb==0?1.0f:0.0f);
                     state.continuousShader.setFloatUniform("clearRefraction",clearRefraction?1.0f:0.0f);
-                    state.continuousShader.setFloatUniform("opticalSheenEnabled",1.0f); // constant material response, never a touch gate
+                    state.continuousShader.setFloatUniform("opticalSheenEnabled",probe141==2?0.0f:1.0f); // V141: isolate AGSL ambient without disabling displacement
                     state.continuousShader.setFloatUniform("motionHighlight",0.0f); // legacy uniform disabled; no touch-driven sheen
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);

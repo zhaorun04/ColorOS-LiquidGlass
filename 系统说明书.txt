@@ -21,3 +21,14 @@ V1.9.140 变更
 注意：没有设备实测；如果 ColorOS 原生层另有运动增亮，仍需日志与帧分析。
 
 V1.9.140.1：删除 HookEntry.java 中已移除的 dynamicSheenMode 诊断日志引用，修复 Javac cannot find symbol 编译错误。
+
+
+V1.9.141 光学闪烁 A/B 隔离测试（保持正常模式 0 默认不变）
+Termux root 命令：
+su -c 'settings put global liquidglass_optical_probe_141 0'  正常模式
+su -c 'settings put global liquidglass_optical_probe_141 1'  仅关闭 AGSL，保留模糊底色（折射会消失，仅供定位）
+su -c 'settings put global liquidglass_optical_probe_141 2'  保留 AGSL 折射，关闭 AGSL 静态环境亮度项
+su -c 'settings put global liquidglass_optical_probe_141 3'  禁止 OEM 后 AGSL 叠加，判断绘制时序
+切换后等待约 1 秒，再重复轻微滑动/松手；模式 1 不是最终视觉方案。
+日志关键词：OPTICAL_PROBE_141、BLUR_CACHE_141。
+注意：本版属于诊断版，尚未证实异常高亮的最终来源，也未保证首次解锁模糊即时显示。
