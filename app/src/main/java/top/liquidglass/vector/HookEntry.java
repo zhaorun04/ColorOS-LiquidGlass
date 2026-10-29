@@ -1780,7 +1780,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return refractionVisibilityTest;
     }
-    // V1.9.109: independent optical displacement A/B test. 0 = no horizontal
+    // V1.9.110: independent optical displacement A/B test. 0 = no horizontal
     // displacement, 1 = original 22px displacement. Sampling tracks the screen
     // in both cases; no coordinate interpolation or additional motion delay.
     private static volatile int displacementIsolationMode = 1;
@@ -1804,6 +1804,29 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }catch(Throwable t){log("REFRACTION_DISPLACEMENT_READ_FAILED "+t.getClass().getSimpleName());}
         }
         return displacementIsolationMode;
+    }
+    // V1.9.110: isolate the two refraction composition entry points.
+    // 0=original dual-pass, 1=early only, 2=callback only.
+    private static volatile int compositionIsolationMode=0;
+    private static volatile long compositionIsolationReadAt=0L;
+    private static int currentCompositionIsolationMode(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-compositionIsolationReadAt>1000L){
+            compositionIsolationReadAt=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int value=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_refraction_composition_test",0);
+                    value=Math.max(0,Math.min(2,value));
+                    if(value!=compositionIsolationMode){
+                        compositionIsolationMode=value;
+                        log("REFRACTION_COMPOSITION_TEST mode="+value);
+                    }
+                }
+            }catch(Throwable t){log("REFRACTION_COMPOSITION_TEST_READ_FAILED "+t.getClass().getSimpleName());}
+        }
+        return compositionIsolationMode;
     }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
@@ -2085,7 +2108,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // V1.9.89: Always preserve the proven pre-background draw.
                         // A callback observed in a previous frame does not prove that
                         // it will run or successfully composite in this frame.
-                        drawFolderIconFusion(v, (Canvas)p.args[0], false);
+                        if(currentCompositionIsolationMode()!=2) drawFolderIconFusion(v, (Canvas)p.args[0], false);
                         // Independent Canvas marker: does not rely on wallpaper, AGSL, or OEM callback.
                         // Red is drawn BEFORE OEM/children; green is drawn AFTER OEM/children.
                         if(currentRefractionVisibilityTest()==1)drawRefractionProbeMarker(v,(Canvas)p.args[0],false);
@@ -2518,7 +2541,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 // V1.9.86: draw the refractive surface after OEM blur/background
                                 // and before FolderIcon's children. Motion must not toggle the pass.
                                 View activeIcon=ACTIVE_FOLDER_ICON.get();
-                                if(targetCanvas!=null && activeIcon!=null &&
+                                if(currentCompositionIsolationMode()!=1 && targetCanvas!=null && activeIcon!=null &&
                                         !Boolean.TRUE.equals(PREVIEW_SURFACE_DRAWN.get())) {
                                     PREVIEW_SURFACE_DRAWN.set(Boolean.TRUE);
                                     // Draw again AFTER the OEM background when a valid
