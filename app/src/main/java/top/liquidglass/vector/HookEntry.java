@@ -1896,8 +1896,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(now-OPTICAL_AB_READ_AT<2000L)return OPTICAL_AB_133;
         OPTICAL_AB_READ_AT=now;
         try{
+            android.content.Context context=launcherContext;
+            if(context==null)return OPTICAL_AB_133;
             int mode=android.provider.Settings.Global.getInt(
-                android.app.AndroidAppHelper.currentApplication().getContentResolver(),
+                context.getContentResolver(),
                 "liquidglass_optical_ab_133",0);
             OPTICAL_AB_133=Math.max(0,Math.min(2,mode));
         }catch(Throwable ignored){}
