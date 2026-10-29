@@ -19,3 +19,5 @@ V1.9.140 变更
 - 保留 V1.9.139 折射强度、清晰折射和柔和高光描边。
 - 兼容旧快照中的 dynamic_sheen_mode 字段，但不再使用它控制渲染。
 注意：没有设备实测；如果 ColorOS 原生层另有运动增亮，仍需日志与帧分析。
+
+V1.9.140.1：删除 HookEntry.java 中已移除的 dynamicSheenMode 诊断日志引用，修复 Javac cannot find symbol 编译错误。
