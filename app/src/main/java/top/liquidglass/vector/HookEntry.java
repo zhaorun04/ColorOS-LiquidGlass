@@ -2083,6 +2083,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             RectF rect = new RectF(offsetX + sourceBounds.left, offsetY + sourceBounds.top,
                 offsetX + sourceBounds.right, offsetY + sourceBounds.bottom);
+            // V1.9.115: avoid antialiased glow extending beyond OEM drawable bounds.
+            // Keep refraction and edge on the same inset contour.
+            final float geometryInset = 1.0f;
+            if(rect.width() > 2f*geometryInset && rect.height() > 2f*geometryInset) {
+                rect.inset(geometryInset, geometryInset);
+                radius = Math.max(0f, radius-geometryInset);
+            }
             if (rect.isEmpty() || rect.left < -1f || rect.top < -1f ||
                 rect.right > v.getWidth()+1f || rect.bottom > v.getHeight()+1f) {
                 if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=out_of_view rect="+rect);
@@ -2108,7 +2115,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
-                    " maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
+                    " geometryInsetPx=1 maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
             } finally { FOLDER_FUSION_GUARD.remove(); canvas.restoreToCount(save); }
         } catch (Throwable t) {
             if (folderFusionLogs++ < 12) log("FOLDER_CANVAS_FUSION_FAILED reason="+t.getClass().getSimpleName());
@@ -2188,7 +2195,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // V1.9.89: Always preserve the proven pre-background draw.
                         // A callback observed in a previous frame does not prove that
                         // it will run or successfully composite in this frame.
-                        if(currentCompositionIsolationMode()!=2) drawFolderIconFusion(v, (Canvas)p.args[0], false);
+                        // V1.9.115: OEM blur is drawn later; avoid placing the glass beneath it.
+                        // Post-dispatch surface is clipped away from app icon child regions.
                         // Independent Canvas marker: does not rely on wallpaper, AGSL, or OEM callback.
                         // Red is drawn BEFORE OEM/children; green is drawn AFTER OEM/children.
                         if(currentRefractionVisibilityTest()==1)drawRefractionProbeMarker(v,(Canvas)p.args[0],false);
@@ -2200,6 +2208,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     try {
                         if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                             // Do not draw the surface here: it would cover app icons.
+                            if(currentCompositionIsolationMode()!=2) drawPostDispatchRefractionIconSafe((View)p.thisObject,(Canvas)p.args[0]);
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int probe=currentRefractionVisibilityTest();
                             // V1.9.93: do not add the post-dispatch overlay in normal mode.
