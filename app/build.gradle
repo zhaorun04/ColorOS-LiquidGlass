@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191350
-        versionName '1.9.135-wallpaper-tracking-optical-stability'
+        versionCode 191370
+        versionName '1.9.137-blur-prewarm'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.128  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.136  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
@@ -65,6 +65,7 @@ public final class MainActivity extends Activity {
             public void onNothingSelected(android.widget.AdapterView<?> parent){}
         });
         toggle("真实壁纸折射","real_refraction",false);
+        toggle("清晰折射（关闭则为柔和磨砂折射）","clear_refraction",false);
         // Legacy native_alpha_probe is deliberately disabled: blur and material opacity are separate.
         prefs.edit().putBoolean("native_alpha_probe",false).apply();
         TextView blurInfo=text("自定义模糊使用壁纸采样，不模糊应用图标。系统模糊开关不再强制开启；ColorOS 自身仍可能启用原生模糊。",12,false);current.addView(blurInfo);
@@ -73,7 +74,7 @@ public final class MainActivity extends Activity {
         slider("高光强度 (%)","highlight_strength",30,0,100);
         slider("描边宽度（像素）","highlight_width",2,1,5);
         toggle("方向性反射","directional_light",true);
-        section("视觉风格","保留必要的色调控制；移除旧版诊断和无效实验入口。");
+        section("视觉风格","先选择冷白、浅灰或深色，再调节色调强度；原生色调不叠加颜色。");
         TextView tintLabel=text("色调",13,false);current.addView(tintLabel);
         Spinner tint=new Spinner(this);String[] names={"原生 · 推荐","冷白","浅灰","深色"};
         tint.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));
