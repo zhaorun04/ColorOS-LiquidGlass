@@ -130,23 +130,36 @@ sync_launcher_reference() {
   fi
   rm -f "$TMP"
 }
+# V1.9.94: do not wait for the five-minute fallback when Android CE
+# storage / Launcher private files appear after Magisk service startup.
+# Run the first checks immediately; repeat quickly until both copies exist.
 sync_config
 sync_launcher_reference
 sync_once
-# Check the event marker every 5s (cheap stat); full source metadata every 300s.
-# No wallpaper image reads unless metadata changed.
 TICKS=0
+BOOT_TICKS=0
 while true; do
-  sleep 5
+  if [ "$BOOT_TICKS" -lt 90 ]; then sleep 2; else sleep 5; fi
   sync_config
   TICKS=$((TICKS + 1))
   if [ -e "$TRIGGER" ]; then
     rm -f "$TRIGGER"
     sync_once
     sync_launcher_reference
+  elif [ "$BOOT_TICKS" -lt 90 ]; then
+    # During the first three minutes, missing paths must not defer
+    # synchronization to the normal five-minute maintenance cycle.
+    [ -s "$LAUNCHERDST" ] || sync_launcher_reference
+    [ -s "$DST" ] || sync_once
+    # If the source changed across reboot, signatures will be refreshed.
+    if [ $((BOOT_TICKS % 5)) -eq 0 ]; then
+      sync_launcher_reference
+      sync_once
+    fi
   elif [ "$TICKS" -ge 60 ]; then
     sync_once
     sync_launcher_reference
   fi
   [ "$TICKS" -ge 60 ] && TICKS=0
+  [ "$BOOT_TICKS" -lt 90 ] && BOOT_TICKS=$((BOOT_TICKS + 1))
 done

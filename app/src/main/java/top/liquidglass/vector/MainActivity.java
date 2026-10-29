@@ -35,8 +35,14 @@ public final class MainActivity extends Activity {
         super.onCreate(b);prefs=getSharedPreferences("glass",0);
         ScrollView scroll=new ScrollView(this);root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(36,32,36,36);root.setBackgroundColor(Color.rgb(247,249,252));scroll.addView(root);
-        label("ColorOS Liquid Glass V1.9.90",23);
+        label("ColorOS Liquid Glass V1.9.95",23);
         label("设置自动保存到本机；LSPosed 作用域启用时，重启手机或桌面后自动恢复，无需手动打开应用。",14);
+        label("Root 辅助脚本：安装或升级 APK 后自动尝试同步；首次授权请在此页面确认。",14);
+        TextView helperStatus=label("正在检查 Root 脚本…",14);
+        Button helperUpdate=new Button(this);helperUpdate.setText("检查并更新 Root 辅助脚本");root.addView(helperUpdate);
+        Runnable checkHelper=()->RootHelperUpdater.runAsync(this,helperStatus::setText);
+        helperUpdate.setOnClickListener(v->{helperStatus.setText("正在申请 Root 权限并更新…");checkHelper.run();});
+        checkHelper.run();
         label("预设与稳定性增强版：保留已验证的光学轮廓，新增预设备份恢复与原生模糊联动。",14);
         Switch enabled=toggle("启用文件夹材质实验","enabled",false);
         label("透明度（数值越小越透明）",18);

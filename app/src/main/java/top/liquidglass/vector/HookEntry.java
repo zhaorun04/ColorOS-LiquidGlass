@@ -1573,7 +1573,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static void scheduleReferenceLoad(final View view) {
         if (!REFRACTION_ENABLED || REFRACTION_LOADING) return;
         long now=android.os.SystemClock.uptimeMillis();
-        if(now-REFRACTION_LAST_CHECK<30000L)return;
+        // On boot the Launcher-owned wallpaper file can arrive after the first draw.
+        // Retry rapidly until the first valid frame exists; use the longer interval
+        // only after the frame is ready, to avoid steady-state disk churn.
+        long retryMs=REFRACTION_FRAME==null ? 1200L : 30000L;
+        if(now-REFRACTION_LAST_CHECK<retryMs)return;
         REFRACTION_LAST_CHECK=now;
         REFRACTION_LOADING=true;
         final android.content.Context app=view.getContext().getApplicationContext();
@@ -1610,6 +1614,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 final long loadedModified=modified,loadedLength=length;
                 if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
                     REFRACTION_FRAME=next;
+                    if(REFRACTION_LOGS++<12)log("BOOT_REFRACTION_READY source=wallpaper_reference");
                     REFRACTION_FRAME_MODIFIED=loadedModified;
                     REFRACTION_FRAME_LENGTH=loadedLength;
                     // The first reference frame arrives off-thread. Force one draw even

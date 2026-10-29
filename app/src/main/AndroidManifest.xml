@@ -5,6 +5,7 @@
         <meta-data android:name="xposedminversion" android:value="82"/>
         <provider android:name=".GlassConfigProvider" android:authorities="top.liquidglass.vector.config" android:exported="true" />
         <activity android:name=".WallpaperCalibrationActivity" android:exported="false" android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <receiver android:name=".RootHelperUpdateReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED"/></intent-filter></receiver>
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
         </activity>
