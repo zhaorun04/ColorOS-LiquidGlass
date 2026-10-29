@@ -1702,6 +1702,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         long opticalUpdatedAt=0L;
         long opticalMotionRevision=-1L;
         long opticalLastMoveAt=0L;
+        boolean opticalSettleScheduled=false;
     }
     private static DynamicRefraction dynamicState(final View view) {
         DynamicRefraction state=DYNAMIC_REFRACTION.get(view);
@@ -1748,8 +1749,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float step=1f-(float)Math.exp(-Math.min(elapsed,1000L)/tau);
             state.opticalOpacity+=(target-state.opticalOpacity)*step;
         }
-        if(Math.abs(target-state.opticalOpacity)>0.003f && view.isAttachedToWindow())
-            view.postInvalidateDelayed(16L);
+        if(view.isAttachedToWindow()){
+            // Keep drawing only while the envelope is converging. A single
+            // delayed frame also crosses the MOVING -> SETTLED boundary even
+            // when the motion envelope has already reached its target.
+            if(Math.abs(target-state.opticalOpacity)>0.003f){
+                view.postInvalidateDelayed(16L);
+            }else if(active && !state.opticalSettleScheduled){
+                state.opticalSettleScheduled=true;
+                final DynamicRefraction scheduled=state;
+                view.postDelayed(() -> {
+                    scheduled.opticalSettleScheduled=false;
+                    if(view.isAttachedToWindow())view.invalidate();
+                },Math.max(16L,180L-(now-state.opticalLastMoveAt)+1L));
+            }
+        }
         return Math.max(0f,Math.min(1f,state.opticalOpacity));
     }
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
@@ -1902,8 +1916,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // additive sheen. No smoothing or interpolation of sample coordinates.
         " if(diagnosticMode>1.5){\n"+
         "  float edgeSheen=pow(clamp(abs(2.0*u-1.0),0.0,1.0),3.0);\n"+
-        "  float sheen=0.0; // V1.9.108 diagnostic: disable AGSL added sheen only\n"+
-        "  color.rgb=mix(color.rgb,half3(1.0),half(sheen));\n"+
+        // V1.9.129: ambient light follows the *current sampled wallpaper*
+        // even at rest. Motion adds only a small bounded enhancement.
+        "  float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));\n"+
+        "  float light=smoothstep(0.58,0.96,lum);\n"+
+        "  float ambient=0.022*light*(0.28+0.72*edgeSheen);\n"+
+        "  float motion=0.020*motionHighlight*light*edgeSheen;\n"+
+        "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.045)));\n"+
         "  color.a=half(0.65*temporalOpacity);return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -1921,7 +1940,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float edgeOpacity=0.115*edgeWeight*(1.0-0.75*bright);\n"+
         " float neutralOpacity=0.055*bright;\n"+
         " color.rgb=mix(color.rgb,half3(0.12,0.16,0.19),half(0.75*bright));\n"+
-        " float softSheen=motionHighlight*0.045*envelope*smoothstep(0.42,0.96,luminance);\n"+
+        " float softSheen=(0.016+0.025*motionHighlight)*envelope*smoothstep(0.52,0.96,luminance);\n"+
         " color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));\n"+
         " color.a=half(clamp((midOpacity+edgeOpacity+neutralOpacity)*temporalOpacity,0.0,0.25));\n"+
         " return color;\n"+

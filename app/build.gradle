@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 19128
-        versionName '1.9.128-config-recovery'
+        versionCode 19129
+        versionName '1.9.129-continuous-optical-highlight'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

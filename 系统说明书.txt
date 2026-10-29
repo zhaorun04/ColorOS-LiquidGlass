@@ -1,10 +1,9 @@
-V1.9.124｜GradientDrawable 玻璃主体门控修复实验版
+V1.9.129｜静态环境高光与动态连续过渡版
 
-基于 V1.9.123。允许 ColorOS 文件夹背景 GradientDrawable 进入玻璃主体渲染，不再要求 LayerBlurDrawable。
-保留 Drawable bounds、预览偏移、圆角半径、Canvas 范围、Bitmap 帧检查；缺少几何信息时安全跳过。
-新增 GLASS124_BUILD_ID、GLASS124_GATE、GLASS124_GEOMETRY_SKIP 日志。
+基于 V1.9.128 稳定版。
+1. AGSL 默认模式的高光增加壁纸亮度驱动的常驻环境反射，不再完全依赖滑动。
+2. 滑动仅提供较弱的额外高光增强，并限制峰值，避免突然闪白。
+3. 修复运动状态结束时动画可能缺少重绘的问题，过渡完成后停止主动重绘。
+4. 保留 V1.9.128 配置同步、重启恢复、圆角、模糊与底色逻辑。
 
-本版未在一加13T实机验证，也未编译 APK。若玻璃主体仍无变化，请检查 GLASS124_GATE、GLASS124_GEOMETRY_SKIP、GLASS119_PIPELINE。
-
-测试前关闭诊断色块：su -c 'settings put global liquidglass_visibility_122 0'
-推荐参数：模糊14dp，折射35%，底色18%，高光30%。
+未进行 Android APK 编译或实机测试。
