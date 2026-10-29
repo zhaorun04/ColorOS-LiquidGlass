@@ -2092,16 +2092,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 " sampleX="+left+" sampleY="+top+" mode="+(continuousDrawn?"AGSL":"NATIVE_BLUR_FALLBACK")+" frameReady=true");
         }finally{canvas.restoreToCount(save);}
     }
+    private static int glass123GateLogs=0;
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
         if (!glassEnabled || probeMode == 1 || canvas == null || v.getWidth() <= 0 || v.getHeight() <= 0) return;
         if (Boolean.TRUE.equals(FOLDER_FUSION_GUARD.get())) return;
         try {
             Object preview = field(v.getClass(), "mBackground").get(v);
-            if (preview == null) return;
+            if (preview == null) { if(glass123GateLogs++<40)log("GLASS123_GATE reason=preview_null edge="+edgeOnly); return; }
             Method getter = preview.getClass().getDeclaredMethod("getBgDrawable");
             getter.setAccessible(true);
             Object value = getter.invoke(preview);
-            if (!(value instanceof Drawable) || !value.getClass().getName().endsWith(".LayerBlurDrawable")) return;
+            if (!(value instanceof Drawable) || !value.getClass().getName().endsWith(".LayerBlurDrawable")) { if(glass123GateLogs++<40)log("GLASS123_GATE reason=drawable_type type="+(value==null?"null":value.getClass().getName())+" edge="+edgeOnly); return; }
+            if(glass123GateLogs++<40)log("GLASS123_GATE reason=passed edge="+edgeOnly+" frameReady="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()));
             if (!edgeOnly) inspectFusionGeometry(v,preview,(Drawable)value);
             // V1.9.21: native blur bounds are in preview-local coordinates; the
             // preview offsets translate them into FolderIcon's Canvas coordinates.
@@ -2336,7 +2338,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // Independent Canvas marker: does not rely on wallpaper, AGSL, or OEM callback.
                         // Red is drawn BEFORE OEM/children; green is drawn AFTER OEM/children.
                         if(currentRefractionVisibilityTest()==1)drawRefractionProbeMarker(v,(Canvas)p.args[0],false);
-                        drawVisibilityPatch122(v,(Canvas)p.args[0],false,visibilityProbe122());
+                        int diag123=visibilityProbe122();
+                        if(glass123GateLogs++<70)log("GLASS123_DISPATCH stage=before mode="+diag123+" glass="+glassEnabled+" frame="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled())+" canvasHardware="+((Canvas)p.args[0]).isHardwareAccelerated());
+                        drawVisibilityPatch122(v,(Canvas)p.args[0],false,diag123);
                         // V1.9.120: dispatchDraw is entered after View.draw has drawn its
                         // background and before children are painted. This is the stable
                         // folder-background composition slot even when the OEM preview
@@ -2381,6 +2385,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 }finally{c122.restoreToCount(saved122);}
                             }
                             drawVisibilityPatch122((View)p.thisObject,(Canvas)p.args[0],true,v122);
+                            if(glass123GateLogs++<70)log("GLASS123_DISPATCH stage=after mode="+v122);
                             int probe=currentRefractionVisibilityTest();
                             // V1.9.93: do not add the post-dispatch overlay in normal mode.
                             // Mode 2 looked correct without it; keeping it would change
@@ -3266,6 +3271,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
         hookBootConfigRestore();
+        log("GLASS123_BUILD_ID version=V1.9.123 package="+p.packageName+" process="+p.processName);
         log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {

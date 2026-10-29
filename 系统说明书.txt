@@ -87,3 +87,8 @@ su -c 'settings put global liquidglass_visibility_122 3'（后置青色不透明
 su -c 'settings put global liquidglass_visibility_122 0'（关闭）
 日志关键字 GLASS122_MODE、GLASS122_VISIBILITY、GLASS122_POST_AGSL。
 请分别截图并导出 Vector 日志，诊断结束必须恢复 0。
+
+
+V1.9.123 渲染入口与门控诊断版
+增加 GLASS123_BUILD_ID、GLASS123_DISPATCH、GLASS123_GATE 日志。保留原四参数及现有渲染，不宣称已修复折射。
+测试：settings put global liquidglass_visibility_122 3；检查彩色方块与日志。
