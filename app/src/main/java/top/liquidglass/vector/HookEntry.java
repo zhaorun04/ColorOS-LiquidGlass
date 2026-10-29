@@ -2102,8 +2102,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             Method getter = preview.getClass().getDeclaredMethod("getBgDrawable");
             getter.setAccessible(true);
             Object value = getter.invoke(preview);
-            if (!(value instanceof Drawable) || !value.getClass().getName().endsWith(".LayerBlurDrawable")) { if(glass123GateLogs++<40)log("GLASS123_GATE reason=drawable_type type="+(value==null?"null":value.getClass().getName())+" edge="+edgeOnly); return; }
-            if(glass123GateLogs++<40)log("GLASS123_GATE reason=passed edge="+edgeOnly+" frameReady="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()));
+            if (!(value instanceof Drawable)) { if(glass123GateLogs++<40)log("GLASS124_GATE reason=not_drawable edge="+edgeOnly); return; }
+            // V1.9.124: ColorOS 15 can expose a GradientDrawable instead of
+            // LayerBlurDrawable. Geometry and wallpaper rendering must not
+            // depend on the OEM blur implementation class.
+            final boolean nativeBlurDrawable=value.getClass().getName().endsWith(".LayerBlurDrawable");
+            if(glass123GateLogs++<40)log("GLASS124_GATE accepted="+value.getClass().getName()+" nativeBlur="+nativeBlurDrawable+" edge="+edgeOnly);
+            if(glass123GateLogs++<40)log("GLASS124_GATE reason=passed edge="+edgeOnly+" frameReady="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled()));
             if (!edgeOnly) inspectFusionGeometry(v,preview,(Drawable)value);
             // V1.9.21: native blur bounds are in preview-local coordinates; the
             // preview offsets translate them into FolderIcon's Canvas coordinates.
@@ -2112,7 +2117,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // Preserve OEM geometry and blur parameters; no setMRadius calls.
             Rect nativeBounds = blur.getBounds();
             if (nativeBounds == null || nativeBounds.isEmpty()) {
-                if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=empty_blur_bounds");
+                if (folderFusionLogs++ < 12) log("GLASS124_GEOMETRY_SKIP reason=empty_drawable_bounds type="+value.getClass().getSimpleName());
                 return;
             }
             float offsetX, offsetY;
@@ -2136,7 +2141,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             if (nativeOutline && nativeShape.getRadius() > 0f) radius = nativeShape.getRadius();
             if (radius <= 0f) {
-                if (folderFusionLogs++ < 12) log("FOLDER_FUSION_GEOMETRY_SKIP reason=radius_unavailable");
+                // GradientDrawable may not expose a round-rect Outline on
+                // all OEM builds; use preview radius only when positive.
+                if (folderFusionLogs++ < 12) log("GLASS124_GEOMETRY_SKIP reason=radius_unavailable type="+value.getClass().getSimpleName());
                 return;
             }
             RectF rect = new RectF(offsetX + sourceBounds.left, offsetY + sourceBounds.top,
@@ -3271,7 +3278,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
         hookBootConfigRestore();
-        log("GLASS123_BUILD_ID version=V1.9.123 package="+p.packageName+" process="+p.processName);
+        log("GLASS124_BUILD_ID version=V1.9.124 package="+p.packageName+" process="+p.processName);
         log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {

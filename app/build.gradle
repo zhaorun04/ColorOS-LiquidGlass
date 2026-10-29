@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 19122
-        versionName '1.9.123-render-gate-diagnostics'
+        versionCode 19124
+        versionName '1.9.124-gradient-drawable-fusion'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

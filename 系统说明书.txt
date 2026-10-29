@@ -1,94 +1,10 @@
-V1.9.113｜AGSL纹理采样、边界与亮度隔离诊断版
+V1.9.124｜GradientDrawable 玻璃主体门控修复实验版
 
-来源：V1.9.112；保持 ColorOS 原生模糊、圆角描边和实时壁纸折射。
-验证依据：V1.9.111 原始壁纸采样闪烁，固定中灰不闪烁；V1.9.112 坐标日志中参考帧稳定。
-【本版是诊断版，不保证已经修复闪烁】
+基于 V1.9.123。允许 ColorOS 文件夹背景 GradientDrawable 进入玻璃主体渲染，不再要求 LayerBlurDrawable。
+保留 Drawable bounds、预览偏移、圆角半径、Canvas 范围、Bitmap 帧检查；缺少几何信息时安全跳过。
+新增 GLASS124_BUILD_ID、GLASS124_GATE、GLASS124_GEOMETRY_SKIP 日志。
 
-变更说明：
-- sample_test=0：原始实时壁纸采样，AGSL旧算法不变（默认）。
-- sample_test=1：固定中灰色、alpha 0.65（V1.9.111原有对照）。
-- sample_test=2：仅在采样坐标越过显示区域时，明确把采样位置限制到显示边界；屏内坐标不变。
-- sample_test=3：保留原壁纸采样坐标及其实际亮度，但输出灰阶（用于分离颜色/亮度）。
-- sample_test=4：在越过显示范围时把对应像素显示成橙色，其余采用原始折射。颜色用于定位屏幕边缘越界情况。
-- sample_test=5：保留实时采样与部分颜色细节，但压低壁纸亮度对比度（实验）。
-注意：模式3/5是视觉对照，非最终画质方案；模式4在离屏/分页时出现橙色属于预期。
-所有测试保持采样坐标实时更新，无时间延迟、无整层渐变。
+本版未在一加13T实机验证，也未编译 APK。若玻璃主体仍无变化，请检查 GLASS124_GATE、GLASS124_GEOMETRY_SKIP、GLASS119_PIPELINE。
 
-建议测试：
- su -c 'settings put global liquidglass_refraction_composition_test 1'
- su -c 'settings put global liquidglass_refraction_visibility_test 2'
- su -c 'settings put global liquidglass_refraction_displacement_test 1'
- su -c 'settings put global liquidglass_refraction_sample_test 0'
-接着每次按以下命令切换，等待一秒后轻滑并松手，比较闪烁：
- su -c 'settings put global liquidglass_refraction_sample_test 2'   # 边界保护
- su -c 'settings put global liquidglass_refraction_sample_test 3'   # 亮度灰阶
- su -c 'settings put global liquidglass_refraction_sample_test 4'   # 边界橙色提示
-测试完恢复：
- su -c 'settings put global liquidglass_refraction_sample_test 0'
- su -c 'settings put global liquidglass_refraction_composition_test 0'
-
-查看 LSPosed 模块日志内的 REFRACTION_SAMPLE_ISOLATION_113 与 REFRACTION_COORD_112。
-不要仅因为 0 和 3 都闪烁就认定是采样坐标跳变；灰阶可帮助确认亮度而非色相变化。
-注意 Root/Termux 源码覆盖后提交 Git，等待 GitHub Actions 构建。未在当前环境执行 Android Gradle 编译或真机验证。
-
-
-V1.9.114 模糊与透明度解耦修复
-- 保持原生模糊 Drawable 的原始 alpha，不再跟随玻璃透明度滑块改变。
-- 原生模糊强度仍由 ColorOS 决定；本版没有伪造可调模糊半径。
-- 保留 V1.9.113 壁纸采样、AGSL 折射、运动高光实现，尚未实机验证 iOS 风格优化。
-- 建议先备份旧版，验证文件夹模糊是否恢复，再继续折射调优。
-
-
-V1.9.115：实验性合成顺序修复：将玻璃表面绘制移至 FolderIcon dispatchDraw 之后，并避开子图标矩形；圆角统一向内收缩1像素，降低越界风险。此版本尚未在一加13T实机验证；若出现图标周边矩形接缝请回退V1.9.114并提供日志。
-
-V1.9.116：优先在原生 drawBackground 回调后、子图标绘制前渲染折射；成功后取消 dispatchDraw 末尾的二次折射绘制，防止覆盖图标。仅在回调缺失时使用图标裁剪回退；适度增强正常模式折射可见度，保留 V1.9.115 圆角几何。测试模式3仍会故意覆盖图标，使用前须恢复为0。未实机验证。
-
-V1.9.117｜文件夹原生模糊隔离实验版
-- 默认保持 ColorOS 原生模糊（隔离开关为0），避免未经验证时改变原有外观。
-- 实验开关仅在 FolderIcon 绘制期间，针对已经识别和追踪的 LayerBlurDrawable 跳过其 draw(Canvas)。不修改系统全局模糊设置。
-- 注意：若厂商实际模糊由其他绘制路径或 Surface 合成，本开关可能无法消除模糊。
-- 该版没有实现自定义模糊半径，也未宣称圆角几何完全解决。
-- 开启：su -c 'settings put global liquidglass_folder_native_blur_isolation 1'
-- 关闭：su -c 'settings put global liquidglass_folder_native_blur_isolation 0'
-- 测试时将 visibility_test 设为0、composition_test 设为0，重启桌面后对比截图与 Vector 日志 FOLDER_NATIVE_BLUR_。
-- 如果桌面异常，立刻把隔离开关改回0，并重启桌面。
-- 尚未编译或实机验证。
-
-
-V1.9.118 实验性自定义壁纸模糊
-- 移除 OplusBlurProperties 材质布尔值强制 true 的 Hook；不保证 ColorOS 自身不启用原生模糊。
-- 新增 14dp 壁纸纹理降采样双向盒式模糊缓存、35% AGSL 折射位移、18% 独立底色、30% 高光。
-- 配置快照扩展为 LG1 + 19 字段，需更新 Root 辅助脚本。
-- 自定义模糊只适用于静态壁纸快照；动态壁纸、图标保护和真实 OEM 图层顺序需实机验证。
-- 未经过 APK 编译和设备测试，首次安装请备份旧版。
-
-
-V1.9.119｜渲染链分阶段诊断版
-本版不强制放行未经验证的壁纸映射，也不声称已修复壁纸裁剪。
-新增 GLASS119_PIPELINE 日志：FRAME_UNAVAILABLE、DRAW_ENTER、BLUR_DRAWN、AGSL_DRAWN，用于区分纹理未加载、模糊未绘制和着色器未执行。
-注意：REFRACTION_SAMPLING_GATE 是元数据诊断，不直接控制 drawReferenceRefraction 的采样权限。
-
-
-V1.9.120 绘制顺序修复：FolderIcon.dispatchDraw 进入时（背景已绘制、子图标未绘制）执行玻璃合成；正常模式禁用 dispatchDraw 后置覆盖图标的回退层。增加 GLASS120_COMPOSITION 日志。保持自定义模糊与四参数配置。此版本未经过真机验证；若原生文件夹背景在 dispatchDraw 之后另行绘制，仍可能覆盖玻璃。
-
-
-V1.9.121 原生材质开关 A/B 验证：
-默认 A 模式（不覆盖原生返回值）：su -c "settings put global liquidglass_material_switch_ab 0"
-B 模式（仅 Launcher 进程恢复历史材质开关强制 true）：su -c "settings put global liquidglass_material_switch_ab 1"
-建议切换后重启 Launcher 以触发材质初始化。保持其他参数不变，比较折射及日志 GLASS121_MATERIAL_SWITCH。
-注意：B 模式可能同时改变原生模糊，不能单独证明折射依赖此开关。测试结束恢复 0。
-
-
-V1.9.122 最终可见性 A/B 诊断版
-本版不声称已修复壁纸折射，新增独立于壁纸纹理的画布标记实验。
-Termux 设置：su -c 'settings put global liquidglass_visibility_122 1'（前后绘制标记）
-su -c 'settings put global liquidglass_visibility_122 2'（局部后置 AGSL 测试，可能覆盖局部图标）
-su -c 'settings put global liquidglass_visibility_122 3'（后置青色不透明色块）
-su -c 'settings put global liquidglass_visibility_122 0'（关闭）
-日志关键字 GLASS122_MODE、GLASS122_VISIBILITY、GLASS122_POST_AGSL。
-请分别截图并导出 Vector 日志，诊断结束必须恢复 0。
-
-
-V1.9.123 渲染入口与门控诊断版
-增加 GLASS123_BUILD_ID、GLASS123_DISPATCH、GLASS123_GATE 日志。保留原四参数及现有渲染，不宣称已修复折射。
-测试：settings put global liquidglass_visibility_122 3；检查彩色方块与日志。
+测试前关闭诊断色块：su -c 'settings put global liquidglass_visibility_122 0'
+推荐参数：模糊14dp，折射35%，底色18%，高光30%。
