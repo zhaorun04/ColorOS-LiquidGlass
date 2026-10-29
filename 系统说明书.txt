@@ -1,34 +1,13 @@
-V1.9.137.1｜配置快照兼容修正版
+V1.9.142 光学绘制入口隔离与模糊首帧诊断版
 
-修复 V1.9.136 增加清晰折射参数后，Root 辅助脚本写入 LG1 共21段，但 Launcher 仅在20段时读取模糊半径、折射强度、玻璃底色不透明度及模糊模式的错误。
-支持旧20段与新21段格式，21段额外读取清晰折射；增强配置同步日志。
-保留 V1.9.137 的后台模糊预热及既有渲染。高光随触摸突亮问题尚未修复。
-注意：关闭真实折射后仍会显示自定义模糊的壁纸背景，这不代表折射位移仍开启。
+保留 V1.9.141 的 0~3 模式；新增：
+模式4：仅允许 afterOEM 绘制入口的 AGSL，屏蔽其他入口的 AGSL。
+模式5：仅允许非 afterOEM 绘制入口的 AGSL，屏蔽 afterOEM 入口的 AGSL。
+两种模式均不主动关闭 AGSL；如果该入口没有实际触发，可能看不到真实折射。
 
+Termux: su -c "settings put global liquidglass_optical_probe_141 4"
+或者: su -c "settings put global liquidglass_optical_probe_141 5"
+复原: su -c "settings put global liquidglass_optical_probe_141 0"
 
-V1.9.138：折射开关绘制门控诊断与配置刷新缩短至 500ms。真实折射关闭时禁止本模块 AGSL 位移采样；自定义模糊继续独立工作。若关闭后仍存在位移，应排查 ColorOS 原生 Drawable 或系统壁纸视差，并结合 REFRACTION_GATE_138 日志区分来源。未验证实机。
-
-
-V1.9.139 更新：折射强度在柔和/清晰模式均生效；新增独立动态光学高光三档（关闭/平滑/原始）。默认关闭动态高光，真实壁纸折射保持独立。平滑档渐入约180ms、渐出约350ms；只在移动及短暂衰减期按需刷新。原始档用于对照，不代表已定位 OEM 高光来源。
-
-
-V1.9.140 变更
-- 移除动态光学高光设置入口；静态环境反射不再乘运动参数，折射采样继续独立工作。
-- 模糊预热完成条件同时检查壁纸帧与模糊缓存；同壁纸缓存缺失时重新预热。
-- 模糊后台任务结束时补偿最新参数请求，避免旧任务占位造成等待。
-- 保留 V1.9.139 折射强度、清晰折射和柔和高光描边。
-- 兼容旧快照中的 dynamic_sheen_mode 字段，但不再使用它控制渲染。
-注意：没有设备实测；如果 ColorOS 原生层另有运动增亮，仍需日志与帧分析。
-
-V1.9.140.1：删除 HookEntry.java 中已移除的 dynamicSheenMode 诊断日志引用，修复 Javac cannot find symbol 编译错误。
-
-
-V1.9.141 光学闪烁 A/B 隔离测试（保持正常模式 0 默认不变）
-Termux root 命令：
-su -c 'settings put global liquidglass_optical_probe_141 0'  正常模式
-su -c 'settings put global liquidglass_optical_probe_141 1'  仅关闭 AGSL，保留模糊底色（折射会消失，仅供定位）
-su -c 'settings put global liquidglass_optical_probe_141 2'  保留 AGSL 折射，关闭 AGSL 静态环境亮度项
-su -c 'settings put global liquidglass_optical_probe_141 3'  禁止 OEM 后 AGSL 叠加，判断绘制时序
-切换后等待约 1 秒，再重复轻微滑动/松手；模式 1 不是最终视觉方案。
-日志关键词：OPTICAL_PROBE_141、BLUR_CACHE_141。
-注意：本版属于诊断版，尚未证实异常高亮的最终来源，也未保证首次解锁模糊即时显示。
+新增 BLUR_CACHE_142 HIT 和 BLUR_DRAW_142 READY/WAIT 日志，用于确认解锁后的首次实际绘制是否命中模糊缓存。
+本版为定位版，不保证已经消除闪烁或解锁模糊延迟。

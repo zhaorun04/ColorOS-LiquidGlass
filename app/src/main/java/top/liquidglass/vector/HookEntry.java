@@ -2006,11 +2006,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
         });
     private static volatile boolean BLUR_PENDING=false;
     private static int blurMissLogs141=0;
+    private static int blurHitLogs142=0;
     private static android.graphics.Bitmap blurredWallpaper(final android.graphics.Bitmap src,final float density,final View view){
         final int requested=customBlurDp;
         if(requested<=0 || customBlurMode!=1)return null;
         android.graphics.Bitmap cached=CUSTOM_BLUR_FRAME;
-        if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==requested && cached!=null && !cached.isRecycled())return cached;
+        if(CUSTOM_BLUR_SOURCE==src && CUSTOM_BLUR_RADIUS==requested && cached!=null && !cached.isRecycled()){
+            if(blurHitLogs142++<16)log("BLUR_CACHE_142 HIT src="+System.identityHashCode(src)+" radius="+requested);
+            return cached;
+        }
         if(blurMissLogs141<24){
             blurMissLogs141++;
             log("BLUR_CACHE_141 miss src="+System.identityHashCode(src)+
@@ -2092,7 +2096,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.concurrent.atomic.AtomicInteger GLASS_PIPELINE_DIAGNOSTICS = new java.util.concurrent.atomic.AtomicInteger();
     // V1.9.141: controlled A/B isolation of the touch-related brightness jump.
     // 0 normal; 1 no AGSL (blur/tint remain); 2 AGSL without ambient light;
-    // 3 skip AGSL only when invoked after OEM background drawing.
+    // 3 skip AGSL after OEM; 4 only draw AGSL after OEM; 5 only draw AGSL before OEM.
     private static volatile int opticalProbe141=0;
     private static volatile long opticalProbeReadAt141=0L;
     private static int opticalProbe141(){
@@ -2101,7 +2105,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             opticalProbeReadAt141=now;
             android.content.Context c=launcherContext;
             if(c!=null){
-                try { opticalProbe141=Math.max(0,Math.min(3,
+                try { opticalProbe141=Math.max(0,Math.min(5,
                     android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_optical_probe_141",0)));
                 } catch(Throwable ignored){}
             }
@@ -2196,7 +2200,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             // Strict master switch: clear-refraction and blur must never activate AGSL.
             final boolean refractionActive=REFRACTION_ENABLED && refractionPercent>0;
-            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==4 && !Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==5 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2251,6 +2255,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(customBlurMode==1 && customBlurDp>0){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
                 if(blurred!=null){
+                    if(blurHitLogs142++<24)log("BLUR_DRAW_142 READY radius="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
                     if(state.cachedBlurBitmap!=blurred || state.cachedBlurShader==null){
                         state.cachedBlurBitmap=blurred;
                         state.cachedBlurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
@@ -2263,7 +2268,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.cachedBlurShader.setLocalMatrix(state.cachedBlurMatrix);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.cachedBlurPaint);
                     if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<48)log("GLASS126_BLUR_DRAWN enabled="+REFRACTION_ENABLED+" radiusDp="+customBlurDp);
-                }
+                }else if(blurHitLogs142++<24){log("BLUR_DRAW_142 WAIT radius="+customBlurDp+" frame="+System.identityHashCode(frame)+" pending="+BLUR_PENDING);}
             }
             // Glass material is last, so AGSL cannot overwrite its opacity/style.
             if(glassTintOpacity>0){
