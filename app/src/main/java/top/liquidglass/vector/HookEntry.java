@@ -1244,7 +1244,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if (blurFusionLogs++ < 10) log("BLUR_FUSION_APPLIED drawable="+drawableTag(drawable)+" bounds="+r.toShortString()+" radius="+radius);
         } finally { canvas.restoreToCount(save); }
     }
-    // V1.9.91: inspect the real Drawable.draw implementation; do not assume
+    // V1.9.92: inspect the real Drawable.draw implementation; do not assume
     // LayerBlurDrawable declares draw(Canvas), and do not modify its output.
     private static void probeBlurDrawImplementation(ClassLoader loader){
         try{
@@ -1937,6 +1937,32 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(refractionMarkerLogs++<24)log("REFRACTION_CANVAS_MARKER phase="+(after?"AFTER_DISPATCH":"BEFORE_DISPATCH")+" hardware="+canvas.isHardwareAccelerated()+" size="+v.getWidth()+"x"+v.getHeight());
         }finally{canvas.restoreToCount(save);}
     }
+    // V1.9.92: draw the proven post-dispatch AGSL surface while excluding
+    // child icon bounds. This avoids washing out icons as mode 3 did.
+    // OEM blur remains untouched; corner edge remains on the original pass.
+    private static void drawPostDispatchRefractionIconSafe(View folder, Canvas canvas) {
+        if (!glassEnabled || !REFRACTION_ENABLED || !(folder instanceof ViewGroup)) return;
+        ViewGroup group=(ViewGroup)folder;
+        int saved=canvas.save();
+        try {
+            int excluded=0;
+            for(int i=0;i<group.getChildCount();i++){
+                View child=group.getChildAt(i);
+                if(child==null || child.getVisibility()!=View.VISIBLE || child.getWidth()<=0 || child.getHeight()<=0)continue;
+                // Child hit-boxes include app icons, avoiding semi-transparent overlays.
+                float x=child.getX(),y=child.getY();
+                canvas.clipOutRect(x-2f,y-2f,x+child.getWidth()+2f,y+child.getHeight()+2f);
+                excluded++;
+            }
+            REFRACTION_AFTER_OEM.set(Boolean.TRUE);
+            try { drawFolderIconFusion(folder,canvas,false); }
+            finally { REFRACTION_AFTER_OEM.remove(); }
+            if(postSafeLogs++<30)log("REFRACTION_POST_ICON_SAFE drawn=true excludedChildren="+excluded+" hardware="+canvas.isHardwareAccelerated());
+        } catch(Throwable t) {
+            if(postSafeLogs++<30)log("REFRACTION_POST_ICON_SAFE failed="+t.getClass().getSimpleName());
+        } finally {canvas.restoreToCount(saved);}
+    }
+    private static int postSafeLogs=0;
     private static void hookFolderIconCanvasFusion(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
         if (c == null) return;
@@ -1973,6 +1999,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             // Do not draw the surface here: it would cover app icons.
                             drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int probe=currentRefractionVisibilityTest();
+                            if(probe==0)drawPostDispatchRefractionIconSafe((View)p.thisObject,(Canvas)p.args[0]);
                             if(probe==1)drawRefractionProbeMarker((View)p.thisObject,(Canvas)p.args[0],true);
                             if(probe==3){
                                 // Diagnostic ONLY: draw AGSL after all FolderIcon children.
