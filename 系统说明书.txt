@@ -9,3 +9,8 @@ V1.9.184 动态镜面高光首个可视化实验版
 设置 global liquidglass_specular_184: 0=关闭新增高光; 1=柔和; 2=增强; 3=诊断强度。默认1。
 基于 V183 全局运动状态，RGB 内合成局部方向相关高光，最终 Shader Alpha=1.00。
 日志 SPECULAR_184：mode / level / direction。该版本尚未经 Android 编译及实机验证。
+
+V1.9.185 Shader 可见性诊断版：global liquidglass_specular_185，默认0。
+模式0基线；模式1静态白色光带；模式2静态红色光带；模式3随方向移动的白色光带。
+模式1/2与运动速度无关。打开文件夹即可观察；切换后约350ms刷新配置，可能需要触发一次重绘。
+日志 SPECULAR_DIAG_185 记录着色器对象、uniform调用完成和绘制路径进入。日志不代表最终像素已显示。
