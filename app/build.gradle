@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 191830
-        versionName '1.9.183-global-motion-continuity'
+        versionName '1.9.184-global-motion-continuity'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

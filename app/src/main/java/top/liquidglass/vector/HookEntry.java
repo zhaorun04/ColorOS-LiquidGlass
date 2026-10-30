@@ -2284,6 +2284,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
         log("SHADER_ALPHA_178 mode="+mode+" shaderAlpha="+(mode==0?"original":mode==1?"0.50":mode==2?"0.85":"1.00")+
             " view="+System.identityHashCode(view)+" paintAlpha="+paintAlpha);
     }
+    // V1.9.184: RGB-only directional specular reflection; opaque refraction remains stable.
+    private static volatile int specularMode184=1;
+    private static volatile long specularRead184=0L;
+    private static int specularMode184(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-specularRead184>350L){
+            specularRead184=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)specularMode184=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_specular_184",1)));
+            }catch(Throwable ignored){}
+        }
+        return specularMode184;
+    }
+    private static int specularLogs184=0;
     // V1.9.183: one shared Workspace motion clock for all glass views.
     // Diagnostic only: the stable opaque AGSL output is untouched.
     private static final MotionState183 MOTION_183 = new MotionState183();
@@ -2312,6 +2328,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                 }
                 updateMotion183(v,true);
+                // The Shader uniform is refreshed by the next draw. Redraw only while active.
+                if(specularMode184()!=0 && v.isAttachedToWindow())v.invalidate();
             }
         });
     }
@@ -2406,6 +2424,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float alphaUnderlay177;\n"+
         "uniform float shaderAlpha178;\n"+
         "uniform float stableSheen179;\n"+
+        "uniform float specularMode184;\n"+
+        "uniform float specularLevel184;\n"+
+        "uniform float specularDirection184;\n"+
         "uniform float motionIsolation173;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
@@ -2462,6 +2483,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "   float sheenWeight=(stableSheen179<0.5?0.0:(stableSheen179<1.5?0.035:(stableSheen179<2.5?0.065:0.0)));\n"+
         "   float sheen=clamp(sheenWeight*(0.30+0.70*rim),0.0,0.09);\n"+
         "   color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(sheen));\n"+
+        "   // V184: local directional glint, integrated into opaque RGB, never a translucent overlay.\n"+
+        "   if(specularMode184>0.5){\n"+
+        "    float2 uv=float2(u,clamp((p.y-bounds.y)/max(bounds.w,1.0),0.0,1.0));\n"+
+        "    float2 q=abs(uv*2.0-1.0);\n"+
+        "    float edgeBand=pow(clamp(max(q.x,q.y),0.0,1.0),7.0);\n"+
+        "    float d=clamp(specularDirection184,-1.0,1.0);\n"+
+        "    float glintX=0.50+0.22*d;\n"+
+        "    float glint=exp(-pow((uv.x-glintX)/0.24,2.0))*exp(-pow((uv.y-0.26)/0.42,2.0));\n"+
+        "    float response=clamp(specularLevel184,0.0,1.0);\n"+
+        "    float gain=(specularMode184<1.5?0.10:(specularMode184<2.5?0.20:0.35));\n"+
+        "    float sheen=clamp(gain*(0.18+0.82*response)*(0.70*glint+0.30*edgeBand),0.0,0.30);\n"+
+        "    color.rgb=mix(color.rgb,half3(0.98,0.985,1.0),half(sheen));\n"+
+        "   }\n"+
         "   color.a=half(1.0);\n"+
         "  }\n"+
 
@@ -3107,6 +3141,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("stableSheen179",(float)stableMode179);
                     traceStableSheen179(stableMode179,view);
                     updateMotion183(view,false);
+                    final int specular184=specularMode184();
+                    float motionLevel184, motionDirection184;
+                    synchronized(MOTION_183){
+                        motionLevel184=Math.max(0f,Math.min(1f,MOTION_183.highlight));
+                        motionDirection184=Math.max(-1f,Math.min(1f,MOTION_183.signed/900f));
+                    }
+                    state.continuousShader.setFloatUniform("specularMode184",(float)specular184);
+                    state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
+                    state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
+                    if(specularLogs184++<180)log("SPECULAR_184 mode="+specular184+
+                        " level="+motionLevel184+" direction="+motionDirection184+
+                        " view="+System.identityHashCode(view));
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();
