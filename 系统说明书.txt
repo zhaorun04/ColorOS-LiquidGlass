@@ -1,17 +1,10 @@
-ColorOS LiquidGlass V1.9.179 — 稳定折射与 RGB 内合成高光验证版
+ColorOS LiquidGlass V1.9.180 — 运动信号采集诊断版 
 
-基于 V1.9.178 完整源码。
-实机已确认 V178 Shader Alpha 1.00 可消除桌面运动时突增高亮。
-V179 保留不透明真实壁纸采样折射输出，并在 AGSL 内部 RGB 混合轻微高光，最终 Alpha 始终为 1.00。
-这不是运动动画；先验证自然静态高光是否稳定，避免引入新的动态问题。
+基于 V1.9.179 稳定不透明 AGSL 折射，不添加未经验证的运动高光。
+新增 MOTION_SIGNAL_180 日志，记录文件夹屏幕位置、Workspace 滚动量、逐帧速度、平滑速度及方向。
+用于验证桌面短距离滑动和惯性滑动时能否持续获取运动信号。
 
-实验开关：
-su -c 'settings put global liquidglass_stable_sheen_179 0'  # 不透明稳定基线
-su -c 'settings put global liquidglass_stable_sheen_179 1'  # 柔和附加高光
-su -c 'settings put global liquidglass_stable_sheen_179 2'  # 稍强附加高光
-su -c 'settings put global liquidglass_stable_sheen_179 3'  # 关闭附加高光，对照
+测试：安装后保持真实壁纸折射开启，静止-向右短滑-停止-再短滑；导出 LSPosed 日志，检索 MOTION_SIGNAL_180。
+如需复现上一版视觉模式：su -c 'settings put global liquidglass_stable_sheen_179 0'
 
-所有模式保留原有 AGSL 环境光与真实壁纸折射；模式 3 仅关闭 V179 新增的高光。
-旧版 alpha underlay、shader alpha、layer175、canvas159 实验被隔离，防止交叉干扰。
-注意：强制不透明可能改变玻璃层与 Launcher 原生模糊的视觉混合，这是实验方案而非最终确认的视觉修复。
-日志关键字 STABLE_SHEEN_179。
+注意：该版本为运动数据验证版，尚未接入动态镜面高光；因此视觉效果与 V1.9.179 基本相同。

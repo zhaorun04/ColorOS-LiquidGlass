@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 191790
-        versionName '1.9.179-stable-refraction-sheen'
+        versionName '1.9.180-motion-signal-diagnostics'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

@@ -2284,6 +2284,49 @@ public final class HookEntry implements IXposedHookLoadPackage {
         log("SHADER_ALPHA_178 mode="+mode+" shaderAlpha="+(mode==0?"original":mode==1?"0.50":mode==2?"0.85":"1.00")+
             " view="+System.identityHashCode(view)+" paintAlpha="+paintAlpha);
     }
+    // V1.9.180: observe real movement without changing the stable shader output.
+    // Weak keys avoid keeping detached Launcher folder views alive.
+    private static final java.util.WeakHashMap<View, float[]> MOTION_SIGNAL_180=new java.util.WeakHashMap<>();
+    private static int motionSignalLogs180=0;
+    private static void traceMotionSignal180(View view){
+        try{
+            long now=android.os.SystemClock.uptimeMillis();
+            int[] pos=new int[2];view.getLocationOnScreen(pos);
+            int[] workspace=workspaceOffset163();
+            float screenX=pos[0], screenY=pos[1];
+            float scroll=workspace[0];
+            float velocity=0f, filtered=0f, direction=0f, dt=0f;
+            boolean reset=false;
+            synchronized(MOTION_SIGNAL_180){
+                float[] prev=MOTION_SIGNAL_180.get(view);
+                if(prev!=null){
+                    dt=now-prev[0];
+                    if(dt>0f && dt<=250f){
+                        // Screen displacement is authoritative for the folder; workspace
+                        // scroll is independently reported to detect moving-page cases.
+                        float dx=screenX-prev[1],dy=screenY-prev[2];
+                        velocity=(float)Math.hypot(dx,dy)*1000f/dt;
+                        direction=dx>0.25f?1f:(dx< -0.25f?-1f:0f);
+                        float tau=velocity>prev[4]?85f:180f;
+                        float a=1f-(float)Math.exp(-dt/tau);
+                        filtered=prev[4]+a*(Math.min(2500f,velocity)-prev[4]);
+                    }else reset=true;
+                }else reset=true;
+                MOTION_SIGNAL_180.put(view,new float[]{now,screenX,screenY,scroll,filtered});
+            }
+            // Limit logging, but capture both motion and rest in each short gesture.
+            if(motionSignalLogs180<320){
+                motionSignalLogs180++;
+                if(motionSignalLogs180<=40 || motionSignalLogs180%3==0)
+                    log("MOTION_SIGNAL_180 id="+System.identityHashCode(view)+
+                        " dtMs="+dt+" screenX="+screenX+" screenY="+screenY+
+                        " workspaceScroll="+scroll+" workspaceWidth="+workspace[1]+
+                        " pageOffset="+workspace[2]+" velocityPxS="+velocity+
+                        " filteredPxS="+filtered+" direction="+direction+
+                        " reset="+reset+" alphaBase=1.0");
+            }
+        }catch(Throwable t){if(motionSignalLogs180++<8)log("MOTION_SIGNAL_180_ERROR "+t.getClass().getSimpleName());}
+    }
     // V1.9.179: opaque wallpaper-refraction base with sheen composited in RGB.
     // Modes: 0 stable baseline; 1 subtle sheen; 2 stronger sheen; 3 no added sheen.
     private static volatile int stableSheenMode179=0;
@@ -3014,6 +3057,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V179 modes override older alpha experiments inside AGSL.
                     state.continuousShader.setFloatUniform("stableSheen179",(float)stableMode179);
                     traceStableSheen179(stableMode179,view);
+                    traceMotionSignal180(view);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();
