@@ -1,18 +1,7 @@
-V1.9.156｜AGSL 折射位移与纹理采样隔离诊断版
-
-基于 V1.9.155，保留 V1.9.154 的解锁主动重绘、壁纸持久缓存、原始玻璃绘制与柔和描边。
-
-设置命令（需要 root）：
-settings put global liquidglass_optical_probe_156 0  # 原始绘制，默认
-settings put global liquidglass_optical_probe_156 1  # AGSL 位移强度设为 0，仅作诊断
-settings put global liquidglass_optical_probe_156 2  # AGSL 使用恒定灰色采样输出，仅作诊断
-settings put global liquidglass_optical_probe_156 3  # 不改变绘制，仅采集日志
-
-为保证对照，其他旧诊断模式请设为默认：
-settings put global liquidglass_coordinate_probe_155 0
-settings put global liquidglass_layer_probe_151 0
-settings put global liquidglass_native_preview_isolation_149 0
-
-日志：OPTICAL_PROBE_156、OPTICAL_DRAW_156、AGSL_ONCE_144。
-模式 1 和 2 会改变折射外观，仅用于临时测试；测试结束请恢复模式 0。
-模式 0 不修改原有 AGSL 绘制参数。此次仅诊断，未宣称修复滑动增亮。
+V1.9.157｜光学高光与折射合成来源定位版
+基于 V1.9.156。保留 V1.9.154 的解锁主动重绘。
+模式设置：settings put global liquidglass_composite_probe_157 N
+0 原样；1 关闭 AGSL 环境高光混合；2 固定 AGSL 输出 Alpha=0.15；3 固定 Alpha=0.075。
+测试时保持 liquidglass_optical_probe_156=0 和 liquidglass_coordinate_probe_155=0。
+新日志：COMPOSITE_PROBE_157、COMPOSITE_DRAW_157。
+本版本是诊断版，未加入亮度渐变；应先验证突增亮度的实际来源。

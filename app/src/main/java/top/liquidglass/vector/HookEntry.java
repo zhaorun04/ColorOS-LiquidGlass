@@ -2008,6 +2008,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float stableOpticalMode;\n"+
         "uniform float clearRefraction;\n"+
         "uniform float sampleIsolation;\n"+
+        "uniform float compositeProbe157;\n"+
         "uniform float4 screenClip;\n"+
         "uniform float probe143Composite;\n"+
         "half4 main(float2 p) {\n"+
@@ -2038,9 +2039,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled;\n"+
         "  float motion=0.0; // No touch-triggered luminance jumps\n"+
         "  if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));}\n"+
+        "  if(compositeProbe157>0.5 && compositeProbe157<1.5){ambient=0.0;}\n"+
         "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
         "  float strengthFactor=clamp(abs(strength)/22.0,0.0,2.5);\n"+
-        "  color.a=half(probe143Composite>0.5?0.18:(clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);return color;\n"+
+        "  color.a=half(probe143Composite>0.5?0.18:(clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);\n"+
+        "  if(compositeProbe157>1.5 && compositeProbe157<2.5){color.a=half(0.15); }\n"+
+        "  if(compositeProbe157>2.5 && compositeProbe157<3.5){color.a=half(0.075); }\n"+
+        "  return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
         // 0.439 edge alpha washed out both sides of the glass, especially on
@@ -2210,6 +2215,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> AGSL_SUBMITTED_144 = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> SURFACE_SUBMITTED_144 = new ThreadLocal<>();
     private static int agslSkipLogs144=0;
+    // V1.9.157: source-level optical compositing A/B. Mode 0 is identical to 156.
+    private static volatile int compositeProbe157=0;
+    private static volatile long compositeProbeRead157=0L;
+    private static int compositeProbeLogged157=-1;
+    private static int compositeProbe157(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-compositeProbeRead157>500L){
+            compositeProbeRead157=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){int v=android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_composite_probe_157",0);
+                    compositeProbe157=(v>=0 && v<=3)?v:0;}
+            }catch(Throwable ignored){}
+        }
+        if(compositeProbeLogged157!=compositeProbe157){
+            compositeProbeLogged157=compositeProbe157;
+            log("COMPOSITE_PROBE_157 mode="+compositeProbe157);
+        }
+        return compositeProbe157;
+    }
+    private static int compositeDrawLogs157=0;
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
@@ -2344,6 +2370,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     int samplingDiagnostic=currentSampleIsolationMode();
                     state.continuousShader.setFloatUniform("sampleIsolation",(float)(probe156==2?1:samplingDiagnostic));
+                    final int composite157=compositeProbe157();
+                    state.continuousShader.setFloatUniform("compositeProbe157",(float)composite157);
                     // Same local p-space as wallpaper.eval(), but bounded by
                     // the actual display rectangle. Only mode 2 clamps p.
                     state.continuousShader.setFloatUniform("screenClip",0.5f-left,0.5f-top,
@@ -2360,6 +2388,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
+                    if(compositeDrawLogs157++<160)log("COMPOSITE_DRAW_157 mode="+composite157+" view="+System.identityHashCode(view)+" canvas="+System.identityHashCode(canvas)+" frame="+System.identityHashCode(frame)+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" alphaPaint="+state.samplePaint.getAlpha()+" left="+left+" top="+top);
                     continuousDrawn=true;
                     AGSL_SUBMITTED_144.set(Boolean.TRUE);
                     if(opticalDrawLogs156++<100)log("OPTICAL_DRAW_156 mode="+probe156+
