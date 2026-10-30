@@ -2450,6 +2450,53 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }catch(Throwable t){if(motionTraceCount161++<4)log("MOTION_CHAIN_161_ERROR "+t.getClass().getSimpleName());}
     }
 
+    // V1.9.172: bounded per-frame motion/optical-chain telemetry. Diagnostic only.
+    private static final java.util.WeakHashMap<View,float[]> MOTION_LAST_172=new java.util.WeakHashMap<>();
+    private static int motionCount172=0;
+    private static long motionAt172=0L;
+    private static void traceMotionOptics172(View view, Canvas canvas, RectF rect,
+            float left, float top, float shaderLeft, float shaderTop,
+            float scaleX, float scaleY, int alpha, int frameId,
+            int pathMode, int compositeMode, int canvasMode, int sampleMode,
+            float strength, int shaderMode, int fixedMode) {
+        try {
+            long now=android.os.SystemClock.uptimeMillis();
+            if(motionCount172>=600 || now-motionAt172<14L)return;
+            motionAt172=now;
+            int[] pos=new int[2]; view.getLocationOnScreen(pos);
+            float[] prev=MOTION_LAST_172.get(view);
+            float dx=prev==null?0f:pos[0]-prev[0];
+            float dy=prev==null?0f:pos[1]-prev[1];
+            long dt=prev==null?0L:now-(long)prev[2];
+            MOTION_LAST_172.put(view,new float[]{pos[0],pos[1],now});
+            float[] cv=new float[9];android.graphics.Matrix cm=new android.graphics.Matrix();
+            canvas.getMatrix(cm);cm.getValues(cv);
+            StringBuilder chain=new StringBuilder();
+            android.view.ViewParent p=view.getParent();
+            for(int i=0;i<6 && p instanceof View;i++){
+                View v=(View)p;
+                if(i>0)chain.append('>');
+                chain.append(v.getClass().getSimpleName()).append(':')
+                    .append(v.getScrollX()).append(',').append(v.getTranslationX())
+                    .append(',').append(v.getAlpha()).append(',').append(v.getLayerType());
+                p=v.getParent();
+            }
+            motionCount172++;
+            log("MOTION_OPTICS_172 n="+motionCount172+" id="+System.identityHashCode(view)+
+                " t="+now+" dt="+dt+" moving="+(Math.abs(dx)>0.5f||Math.abs(dy)>0.5f)+
+                " screen="+pos[0]+","+pos[1]+" delta="+dx+","+dy+
+                " sample="+left+","+top+" shaderOrigin="+shaderLeft+","+shaderTop+
+                " scale="+scaleX+","+scaleY+" rect="+rect.toShortString()+
+                " canvas="+cv[0]+","+cv[1]+","+cv[2]+","+cv[3]+","+cv[4]+","+cv[5]+
+                " alpha="+alpha+" viewAlpha="+view.getAlpha()+" layer="+view.getLayerType()+
+                " frame="+frameId+" path="+pathMode+" composite="+compositeMode+
+                " canvasMode="+canvasMode+" sampleMode="+sampleMode+
+                " strength="+strength+" shaderMode="+shaderMode+" fixed="+fixedMode+
+                " afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+
+                " parents="+chain);
+        }catch(Throwable t){if(motionCount172++<8)log("MOTION_OPTICS_172_ERROR "+t.getClass().getSimpleName());}
+    }
+
     // V1.9.162: read-only full transform chain and OEM background correlation.
     // No Canvas mutation, no extra drawing and no per-frame allocation beyond sampled traces.
     private static int layerTrace162=0;
@@ -2776,6 +2823,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(isolatedLayer159>=0)canvas.restoreToCount(isolatedLayer159);
                     }
                     traceFixed167(view,canvas,fixed167,left,top);
+                    traceMotionOptics172(view,canvas,rect,left,top,shaderLeft,shaderTop,
+                        referenceScaleX,referenceScaleY,state.samplePaint.getAlpha(),
+                        System.identityHashCode(frame),pathMode169,compositeMode170,
+                        canvasMode159,sampleMode160,
+                        probe156==1?0.0f:(displacementMode==0?0.0f:22.0f*refractionPercent/35.0f),
+                        shaderMode,fixed167);
                     traceFolderMotion161(view,canvas,left,top,frame,sampleMode160,canvasMode159);
                     traceLayerChain162(view,canvas,"AGSL_SUBMIT");
                     if(CANVAS_LOG_COUNTS_159[canvasMode159]++<72)

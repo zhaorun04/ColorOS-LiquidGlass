@@ -6,3 +6,5 @@ V1.9.170｜真实壁纸折射合成顺序 A/B 验证版
 恢复：su -c 'settings put global liquidglass_refraction_composite_170 0'
 测试前请恢复 liquidglass_refraction_blur_isolation_168=0 和 liquidglass_refraction_path_169=0。
 本版本为针对性合成实验，未实机验证，不保证已解决异常高亮。
+
+V1.9.172：增加 MOTION_OPTICS_172 逐帧只读诊断，记录桌面短距离单向位移、AGSL采样原点、Canvas矩阵、父容器滚动、Shader参数和Paint透明度；不改变光学输出。每次Launcher进程最多600条，间隔至少14ms。
