@@ -1,9 +1,8 @@
-V1.9.186｜动态高光自动归中修正版
+V1.9.187｜跨桌面返回后高光归中重绘修正版
 
-修复跨桌面页面切换返回后白色光带停留在左/右侧的问题。
-新增运动信号最后实际位移时间戳、闲置时基于墙钟的方向衰减、View owner 替换/脱离时清空残留运动状态。
-保留 V185 模式 0/1/2/3 与 Alpha 1.00 稳定折射。
-
+原因：V186只在实际绘制时刷新高光方向，离开文件夹所在桌面后，硬件缓存可能保留旧方向。
+修复：为每个文件夹视图记录最近一次真正写入Shader的方向；在运动收敛阶段安排有限次定时重绘；在页面返回后的预绘制回调检查过期画面并触发重绘。
+保留V185模式0/1/2/3与Alpha1.00稳定折射。
 设置：su -c 'settings put global liquidglass_specular_185 3'
-日志：SPECULAR_DIAG_186、MOTION_SIGNAL_183、MOTION_SETTLED_183。
-注意：未执行 Android Gradle 编译或实机验证。
+日志：SPECULAR_RECENTER_REDRAW_187、SPECULAR_PAGE_RETURN_187、SPECULAR_DIAG_186。
+未完成Android Gradle编译和实机验证。

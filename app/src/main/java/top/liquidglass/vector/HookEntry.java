@@ -1808,6 +1808,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         long opticalMotionRevision=-1L;
         long opticalLastMoveAt=0L;
         boolean opticalSettleScheduled=false;
+        // V187: cached folder RenderNode must be explicitly refreshed on page return.
+        float lastSpecularDirection187=0f;
+        long lastSpecularDrawNs187=0L;
+        boolean recenterPending187=false;
+        boolean recenterRedrawScheduled187=false;
     }
     private static DynamicRefraction dynamicState(final View view) {
         DynamicRefraction state=DYNAMIC_REFRACTION.get(view);
@@ -1831,9 +1836,55 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
         };
         view.getViewTreeObserver().addOnPreDrawListener(tracked.listener);
+        // A page transition can reuse the cached folder display list. On the
+        // next Workspace pre-draw, explicitly invalidate a stale specular frame.
+        view.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener(){
+            @Override public boolean onPreDraw(){
+                if(specularMode184()!=3 || !view.isAttachedToWindow())return true;
+                if(!tracked.recenterPending187)return true;
+                long age=android.os.SystemClock.elapsedRealtimeNanos()-tracked.lastSpecularDrawNs187;
+                if(age>350000000L){
+                    tracked.recenterPending187=false;
+                    view.postInvalidateOnAnimation();
+                    if(recenterLogs187++<100)log("SPECULAR_PAGE_RETURN_187 view="+System.identityHashCode(view)+" staleMs="+(age/1000000L)+" previousDirection="+tracked.lastSpecularDirection187);
+                }
+                return true;
+            }
+        });
         DYNAMIC_REFRACTION.put(view,state);
         view.postInvalidate(); // Draw a stable refraction frame even before the first swipe
         return state;
+    }
+    private static int recenterLogs187=0;
+    // V187: independent, bounded settle redraw on the actual folder view.
+    // Motion-owner callbacks can belong to a different page; they are not a
+    // reliable way to update this folder's cached Shader uniforms.
+    private static void scheduleRecenter187(final View view,final DynamicRefraction state){
+        if(state.recenterRedrawScheduled187)return;
+        state.recenterRedrawScheduled187=true;
+        view.postDelayed(new Runnable(){
+            @Override public void run(){
+                state.recenterRedrawScheduled187=false;
+                if(!view.isAttachedToWindow())return;
+                if(specularMode184()!=3){state.recenterPending187=false;return;}
+                long age=android.os.SystemClock.elapsedRealtimeNanos()-state.lastSpecularDrawNs187;
+                // Force one final neutral uniform even if no movement or draw
+                // occurs while the user is visiting another Workspace page.
+                if(age>=110000000L && state.recenterPending187){
+                    view.postInvalidateOnAnimation();
+                    if(recenterLogs187++<100)log("SPECULAR_RECENTER_REDRAW_187 view="+System.identityHashCode(view)+" ageMs="+(age/1000000L)+" previousDirection="+state.lastSpecularDirection187);
+                }
+                // Continue briefly while settling; never create a permanent loop.
+                long motionAge;
+                synchronized(MOTION_183){motionAge=MOTION_183.lastMovementNs==0L?Long.MAX_VALUE:
+                    android.os.SystemClock.elapsedRealtimeNanos()-MOTION_183.lastMovementNs;}
+                if(state.recenterPending187 && motionAge<1600000000L){
+                    scheduleRecenter187(view,state);
+                }else if(motionAge>=1600000000L){
+                    state.recenterPending187=false;
+                }
+            }
+        },160L);
     }
     // V1.9.104: a single per-folder animation envelope shared by the optical
     // sampling pass and the extra native-shaped highlight. Static edge lighting
@@ -3151,12 +3202,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             Math.max(0L,android.os.SystemClock.elapsedRealtimeNanos()-MOTION_183.lastMovementNs);
                         float ageMs=ageNs==Long.MAX_VALUE?100000f:ageNs/1000000f;
                         float recenter=ageMs<=120f?1f:(float)Math.exp(-Math.min(2000f,ageMs-120f)/180f);
-                        if(ageMs>=1100f)recenter=0f;
+                        if(ageMs>=650f)recenter=0f;
                         motionDirection184=Math.max(-1f,Math.min(1f,MOTION_183.signed/900f))*recenter;
                     }
                     state.continuousShader.setFloatUniform("specularMode184",(float)specular184);
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
+                    // V187: record the last direction actually sent to the shader.
+                    // The page can become hardware-cached before the final settle draw.
+                    state.lastSpecularDirection187=specular184==3?motionDirection184:0f;
+                    state.lastSpecularDrawNs187=android.os.SystemClock.elapsedRealtimeNanos();
+                    state.recenterPending187=specular184==3 && Math.abs(motionDirection184)>0.005f;
+                    if(state.recenterPending187)scheduleRecenter187(view,state);
                     if(specularLogs184++<250)log("SPECULAR_DIAG_186 shaderCreated="+(state.continuousShader!=null)+" uniformApplied=true drawPathActive=true mode="+specular184+
                         " level="+motionLevel184+" direction="+motionDirection184+
                         " view="+System.identityHashCode(view));
