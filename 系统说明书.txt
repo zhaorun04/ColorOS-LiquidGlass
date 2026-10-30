@@ -1,10 +1,5 @@
-ColorOS-LiquidGlass V1.9.153｜稳定回退恢复版
-
-基于 V1.9.151 已验证的主玻璃绘制路径恢复；撤销 V1.9.152 材质分层实验修改。
-保留 V1.9.151 的 COMPOSITION_151 与 FIRST_DRAW_149 诊断。
-本版本目标是恢复正常玻璃功能，不宣称已解决解锁约1秒延迟和滑动闪烁。
-
-请完整覆盖源码，重新编译安装 APK，确认 LSPosed 作用域包含 com.android.launcher 并重启 Launcher。
-原 V1.9.152 的 liquidglass_material_probe_152 设置不再使用。
-
-构建与实机验证：未执行。
+V1.9.154｜解锁重绘与首帧追踪版
+基于实机确认正常的 V1.9.153，未改动主玻璃 Shader、混合和模糊算法。
+新增 ACTION_USER_PRESENT 普通解锁监听（与 ACTION_USER_UNLOCKED 区分），在 0/80/240ms 触发有界重绘。
+日志：UNLOCK_EVENT_154、UNLOCK_REDRAW_154、UNLOCK_DRAW_154。
+仍需实机验证解锁延迟和滑动闪烁；本版不宣称修复滑动闪烁。

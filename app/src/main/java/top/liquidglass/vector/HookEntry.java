@@ -34,6 +34,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile long lastRead = 0;
     private static volatile long CONFIG_READY_AT_146 = 0L;
     private static volatile long CONFIG_UNLOCK_AT_146 = 0L;
+    // V1.9.154: ACTION_USER_UNLOCKED fires only after credential storage unlock,
+    // not after every ordinary screen unlock. Track both events separately.
+    private static volatile long UNLOCK_EVENT_AT_154=0L;
+    private static volatile int UNLOCK_EVENT_SEQ_154=0;
+    private static volatile int UNLOCK_DRAW_LOGS_154=0;
+    private static void requestUnlockRedraw154(final android.os.Handler handler,final int sequence,final int delayMs){
+        handler.postDelayed(()->{
+            if(sequence!=UNLOCK_EVENT_SEQ_154)return;
+            int count=0;
+            synchronized(BOOT_FOLDER_VIEWS){
+                for(View v:BOOT_FOLDER_VIEWS.keySet()){
+                    if(v!=null && v.isAttachedToWindow()){
+                        v.postInvalidateOnAnimation();
+                        count++;
+                    }
+                }
+            }
+            // Existing fallback also finds late FolderIcons and invalidates parents.
+            if(delayMs==0 || (count==0 && delayMs==240))invalidateGlassViews();
+            log("UNLOCK_REDRAW_154 seq="+sequence+" delay="+delayMs+" folders="+count+
+                " frame="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled())+
+                " glass="+glassEnabled+" elapsed="+(android.os.SystemClock.uptimeMillis()-UNLOCK_EVENT_AT_154));
+        },delayMs);
+    }
+
     private static volatile int CONFIG_LOGS_146 = 0;
     private static volatile boolean configEverLoaded = false;
     private static volatile android.content.Context launcherContext;
@@ -2578,6 +2603,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         traceTouchComposite147(v,(Canvas)p.args[0]);
                         traceComposition151(v,(Canvas)p.args[0],"before");
                         traceFirstDraw149(v,"dispatch");
+                        if(UNLOCK_EVENT_AT_154>0 && android.os.SystemClock.uptimeMillis()-UNLOCK_EVENT_AT_154<2500L
+                                && UNLOCK_DRAW_LOGS_154++<36)
+                            log("UNLOCK_DRAW_154 seq="+UNLOCK_EVENT_SEQ_154+" elapsed="+
+                                (android.os.SystemClock.uptimeMillis()-UNLOCK_EVENT_AT_154)+
+                                " view="+System.identityHashCode(v)+" frame="+
+                                (REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled())+
+                                " glass="+glassEnabled+" hardware="+((Canvas)p.args[0]).isHardwareAccelerated());
+
                         // A new dispatch is a new frame for this folder.
                         AGSL_SUBMITTED_144.remove();
                         SURFACE_SUBMITTED_144.remove();
@@ -3699,8 +3732,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     handler.postDelayed(restore,60000L);
                     try {
                         android.content.IntentFilter filter=new android.content.IntentFilter(android.content.Intent.ACTION_USER_UNLOCKED);
+                        filter.addAction(android.content.Intent.ACTION_USER_PRESENT);
                         app.registerReceiver(new android.content.BroadcastReceiver(){
                             @Override public void onReceive(android.content.Context c,android.content.Intent i){
+                                final String action=i==null?"unknown":i.getAction();
+                                final int seq=++UNLOCK_EVENT_SEQ_154;
+                                UNLOCK_EVENT_AT_154=android.os.SystemClock.uptimeMillis();
+                                UNLOCK_DRAW_LOGS_154=0;
+                                log("UNLOCK_EVENT_154 seq="+seq+" action="+action+
+                                    " frame="+(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled())+
+                                    " glass="+glassEnabled);
+                                requestUnlockRedraw154(handler,seq,0);
+                                requestUnlockRedraw154(handler,seq,80);
+                                requestUnlockRedraw154(handler,seq,240);
                                 CONFIG_UNLOCK_AT_146=android.os.SystemClock.uptimeMillis();
                                 lastRead=0L;
                                 boolean changed=restoreBootSnapshot(app);
