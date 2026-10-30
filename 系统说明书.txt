@@ -24,3 +24,6 @@ V1.9.174｜父容器合成状态逐帧审计
 每个文件夹独立记录 screen/delta、Workspace scroll/delta、DragLayer 与 CellLayout 的 layer/alpha、AGSL Paint Alpha、采样坐标、壁纸帧及 Canvas 硬件状态。
 重点对比：桌面静止、向右短距离移动、再次静止，是否发生父容器 Alpha 或图层切换。
 日志最多 900 条/进程；无需新开关。保留 V1.9.154 解锁即时刷新。
+
+
+V1.9.175：新增 liquidglass_layer_composite_175：0原始绘制，1局部离屏，2文件夹视图范围离屏，3局部离屏并以128 Alpha合成。仅诊断 AGSL 合成；不修改父容器。配合 liquidglass_motion_composite_173=1 可验证固定颜色。

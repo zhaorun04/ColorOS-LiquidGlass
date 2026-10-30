@@ -2114,6 +2114,38 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " master="+enabled+" count="+REFRACTION_PATH_COUNTS_169[mode]);
         }
     }
+    // V1.9.175: isolated AGSL compositing experiment. Does not mutate Launcher parents.
+    // 0=direct, 1=tight offscreen, 2=full view offscreen, 3=tight offscreen/half restore alpha.
+    private static volatile int layerExperiment175=0;
+    private static volatile long layerExperimentRead175=0L;
+    private static int layerExperiment175(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-layerExperimentRead175>350L){
+            layerExperimentRead175=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)layerExperiment175=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_layer_composite_175",0)));
+            }catch(Throwable ignored){}
+        }
+        return layerExperiment175;
+    }
+    private static final int[] LAYER_LOG_COUNTS_175=new int[4];
+    private static void traceLayer175(int mode,View view,Canvas canvas,int paintAlpha){
+        if(LAYER_LOG_COUNTS_175[mode]++>=140)return;
+        StringBuilder b=new StringBuilder("LAYER_COMPOSITE_175 mode=").append(mode)
+            .append(" id=").append(System.identityHashCode(view))
+            .append(" paintAlpha=").append(paintAlpha)
+            .append(" hardware=").append(canvas.isHardwareAccelerated());
+        for(android.view.ViewParent p=view.getParent();p instanceof View;p=((View)p).getParent()){
+            View v=(View)p;
+            String name=v.getClass().getSimpleName();
+            if(name.contains("Workspace")||name.contains("CellLayout")||name.contains("DragLayer"))
+                b.append(" parent=").append(name).append(':').append(v.getLayerType())
+                    .append(':').append(v.getAlpha()).append(':').append(v.getScrollX());
+        }
+        log(b.toString());
+    }
     // V1.9.173: isolate wallpaper sampling from motion-time layer compositing.
     // 0=original; 1=constant RGB with original AGSL alpha; 2=no optical displacement;
     // 3=constant RGB + no displacement. These are diagnostic modes only.
@@ -2903,20 +2935,33 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // SRC is NEVER applied directly to the parent Canvas: that would
                     // erase existing pixels outside the shader's non-opaque area.
                     final int canvasMode159=canvasComposite159();
+                    final int layerMode175=layerExperiment175();
                     int isolatedLayer159=-1;
                     android.graphics.Xfermode previousXfer159=state.samplePaint.getXfermode();
+                    Paint restorePaint175=null;
+                    traceLayer175(layerMode175,view,canvas,state.samplePaint.getAlpha());
                     try{
-                        if(canvasMode159==2 || canvasMode159==3){
-                            // Tight local bounds; restore composites the transparent
-                            // offscreen result back using the default SRC_OVER.
-                            isolatedLayer159=canvas.saveLayer(rect.left,rect.top,rect.right,rect.bottom,null);
-                        }
-                        if(canvasMode159==1){
-                            state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_OVER));
-                        }else if(canvasMode159==2){
-                            state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC));
-                        }else{
+                        if(layerMode175!=0){
+                            if(layerMode175==3){
+                                restorePaint175=new Paint(Paint.ANTI_ALIAS_FLAG);
+                                restorePaint175.setAlpha(128);
+                            }
+                            if(layerMode175==2){
+                                isolatedLayer159=canvas.saveLayer(0f,0f,view.getWidth(),view.getHeight(),restorePaint175);
+                            }else{
+                                isolatedLayer159=canvas.saveLayer(rect.left,rect.top,rect.right,rect.bottom,restorePaint175);
+                            }
+                            // Preserve the AGSL shader's original SRC_OVER semantics inside the layer.
                             state.samplePaint.setXfermode(null);
+                        }else{
+                            // Retain V159 diagnostic behavior when mode 175 is disabled.
+                            if(canvasMode159==2 || canvasMode159==3)
+                                isolatedLayer159=canvas.saveLayer(rect.left,rect.top,rect.right,rect.bottom,null);
+                            if(canvasMode159==1)
+                                state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_OVER));
+                            else if(canvasMode159==2)
+                                state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC));
+                            else state.samplePaint.setXfermode(null);
                         }
                         canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     }finally{
