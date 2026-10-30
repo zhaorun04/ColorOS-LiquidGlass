@@ -1,15 +1,8 @@
-V1.9.143｜真实折射坐标与合成隔离诊断版
+V1.9.144｜单帧单次 AGSL 绘制验证与多文件夹模糊刷新
 
-基于 V1.9.142。保留模式 0~5，新增：
-模式 6：保留 AGSL afterOEM 真实折射，但锁定每个文件夹首次绘制时的壁纸采样矩阵平移。滑动时采样可能错位，仅用于诊断。
-模式 7：保留动态采样坐标与真实折射；将 AGSL 输出 alpha 固定为 0.18，跳过 AGSL 的环境提亮混色。用于隔离颜色和 alpha 合成变化。
-
-切换命令：
-su -c 'settings put global liquidglass_optical_probe_141 6'
-su -c 'settings put global liquidglass_optical_probe_141 7'
-su -c 'settings put global liquidglass_optical_probe_141 0'
-
-建议模糊 0dp，分别记录真实像素折射是否存在、滑动突增高亮是否存在。模式 6 需要切换后重新启动 Launcher 才能确保首次采样锁定位置可复现。
-
-解锁模糊延迟：沿用 V1.9.142 的 BLUR_CACHE_142 / BLUR_DRAW_142 日志，本版未声称解决。
-此版是诊断候选，尚未完成 Gradle 编译或实机验证。
+基于 V1.9.143。
+1. 同一次 FolderIcon.dispatchDraw 内只提交一次玻璃背景/AGSL 绘制，保留边缘描边。
+2. 模糊缓存发布时遍历已知根视图，主动登记并刷新同屏 FolderIcon。
+3. 新增 AGSL_ONCE_144 / BLUR_ALL_FOLDERS_144 日志。
+4. 保留模式 0-7；建议先模式0、模糊0dp测试闪烁，再设置模糊半径测试解锁同步。
+注意：此版本是验证版，未完成实机测试。

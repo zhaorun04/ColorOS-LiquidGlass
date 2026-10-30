@@ -2116,6 +2116,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return opticalProbe141;
     }
     private static int opticalProbeLogged141=-1;
+    // V1.9.144: one AGSL surface submission per FolderIcon dispatchDraw.
+    // The OEM callback can run during the same dispatch; do not composite twice.
+    private static final ThreadLocal<Boolean> AGSL_SUBMITTED_144 = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> SURFACE_SUBMITTED_144 = new ThreadLocal<>();
+    private static int agslSkipLogs144=0;
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
@@ -2203,7 +2208,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             // Strict master switch: clear-refraction and blur must never activate AGSL.
             final boolean refractionActive=REFRACTION_ENABLED && refractionPercent>0;
-            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==4 && !Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==5 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable){
+            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==4 && !Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==5 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable && !Boolean.TRUE.equals(AGSL_SUBMITTED_144.get())){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2251,6 +2256,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
+                    AGSL_SUBMITTED_144.set(Boolean.TRUE);
                     if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<64)log("GLASS119_PIPELINE stage=AGSL_DRAWN mode="+customBlurMode+" shaderMode="+shaderMode+" displacementMode="+displacementMode);
                     if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" shaderMode="+shaderMode+" displacementMode="+displacementMode+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}
@@ -2259,6 +2265,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=SHADER_FAILED reason="+t.getClass().getName()+" detail="+String.valueOf(t.getMessage()));}
                 }
             }
+            if(refractionActive && Boolean.TRUE.equals(AGSL_SUBMITTED_144.get()) && !continuousDrawn && agslSkipLogs144++<24)
+                log("AGSL_ONCE_144 SKIP duplicate view="+System.identityHashCode(view));
             if(refractionActive && opticalAb!=2 && !continuousDrawn){
                 // No banded fallback: the former 12-strip implementation caused
                 // visible vertical seams. Keep the native folder blur intact.
@@ -2310,6 +2318,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static int glass123GateLogs=0;
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
         if (!glassEnabled || probeMode == 1 || canvas == null || v.getWidth() <= 0 || v.getHeight() <= 0) return;
+        if (!edgeOnly && Boolean.TRUE.equals(SURFACE_SUBMITTED_144.get())) return;
         if (Boolean.TRUE.equals(FOLDER_FUSION_GUARD.get())) return;
         try {
             Object preview = field(v.getClass(), "mBackground").get(v);
@@ -2383,7 +2392,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             int save=canvas.save();
             FOLDER_FUSION_GUARD.set(Boolean.TRUE);
             try {
-                if(!edgeOnly)drawReferenceRefraction(v,canvas,rect,radius);
+                if(!edgeOnly){
+                    SURFACE_SUBMITTED_144.set(Boolean.TRUE);
+                    drawReferenceRefraction(v,canvas,rect,radius);
+                }
                 canvas.translate(rect.left,rect.top);
                 // The exact original glow/edge/rim/specular passes now share
                 // one envelope. No separate overlay or abrupt full-strength pass.
@@ -2543,6 +2555,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                         View v=(View)p.thisObject;
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
+                        // A new dispatch is a new frame for this folder.
+                        AGSL_SUBMITTED_144.remove();
+                        SURFACE_SUBMITTED_144.remove();
                         refresh(v);
                         ACTIVE_FOLDER_ICON.set(v);
                         PREVIEW_SURFACE_DRAWN.set(Boolean.FALSE);
@@ -2628,6 +2643,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER mode=DISPATCH_AFTER_EDGE previewCallback="+callback);
                         }
                     } finally {
+                        AGSL_SUBMITTED_144.remove();
+                        SURFACE_SUBMITTED_144.remove();
                         ACTIVE_FOLDER_ICON.remove();
                         PREVIEW_SURFACE_DRAWN.remove();
                         EARLY_SURFACE_DRAWN.remove();
@@ -3395,6 +3412,33 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
         }
+        // V1.9.144: on cache publication, a FolderIcon may not yet have
+        // entered dispatchDraw. Find late siblings in the same attached root.
+        java.util.HashSet<View> roots=new java.util.HashSet<>();
+        synchronized(BOOT_FOLDER_VIEWS){
+            for(View folder:BOOT_FOLDER_VIEWS.keySet())
+                if(folder!=null && folder.isAttachedToWindow())roots.add(folder.getRootView());
+        }
+        int discovered=0;
+        for(View root:roots){
+            if(root==null)continue;
+            java.util.ArrayDeque<View> queue=new java.util.ArrayDeque<>();
+            queue.add(root);
+            int inspected=0;
+            while(!queue.isEmpty() && inspected++<2500){
+                View node=queue.removeFirst();
+                if(node.getClass().getName().endsWith(".FolderIcon")){
+                    BOOT_FOLDER_VIEWS.put(node,Boolean.TRUE);
+                    node.postInvalidateOnAnimation();
+                    discovered++;
+                }
+                if(node instanceof ViewGroup){
+                    ViewGroup group=(ViewGroup)node;
+                    for(int i=0;i<group.getChildCount();i++)queue.addLast(group.getChildAt(i));
+                }
+            }
+        }
+        if(agslSkipLogs144++<30)log("BLUR_ALL_FOLDERS_144 roots="+roots.size()+" discovered="+discovered);
         log("BOOT_CONFIG_INVALIDATED tracked="+DYNAMIC_REFRACTION.size()+" folders="+folderCount);
     }
 

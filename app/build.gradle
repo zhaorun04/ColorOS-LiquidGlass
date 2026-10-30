@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191430
-        versionName '1.9.143-optical-coordinate-composite-ab'
+        versionCode 191440
+        versionName '1.9.144-single-pass-blur-broadcast'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
