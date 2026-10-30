@@ -1,8 +1,10 @@
-ColorOS-LiquidGlass V1.9.152｜主玻璃材质分层隔离诊断版
+ColorOS-LiquidGlass V1.9.153｜稳定回退恢复版
 
-保留 V1.9.151 的原有功能、真实 AGSL 折射、壁纸参考帧持久缓存与诊断日志。
-新增设置项：liquidglass_material_probe_152
-0：默认完整材质；1：仅 AGSL 折射（跳过模糊和颜色覆盖）；2：仅模糊（跳过 AGSL 与颜色覆盖）；3：AGSL + 模糊（跳过颜色覆盖）；4：AGSL + 颜色覆盖（跳过模糊）。
-模式 1、2、3、4 仅用于短时间诊断，可能与正常效果不同。设置后等待约 1 秒。
-日志关键字：MATERIAL_PROBE_152。
-本版并未宣称已修复滑动亮度闪烁或解锁约 1 秒延迟。
+基于 V1.9.151 已验证的主玻璃绘制路径恢复；撤销 V1.9.152 材质分层实验修改。
+保留 V1.9.151 的 COMPOSITION_151 与 FIRST_DRAW_149 诊断。
+本版本目标是恢复正常玻璃功能，不宣称已解决解锁约1秒延迟和滑动闪烁。
+
+请完整覆盖源码，重新编译安装 APK，确认 LSPosed 作用域包含 com.android.launcher 并重启 Launcher。
+原 V1.9.152 的 liquidglass_material_probe_152 设置不再使用。
+
+构建与实机验证：未执行。
