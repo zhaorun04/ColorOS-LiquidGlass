@@ -2400,7 +2400,36 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return surfaceDefault193;
     }
+    // V1.9.194: single authoritative surface-optics selector.
+    // 0=off, 1=static rounded reflection, 2=dynamic reflection,
+    // 3=dynamic reflection + inner depth (default).
+    // Legacy experiment switches are only used when explicit rollback=1.
+    private static volatile int surfaceMode194=3;
+    private static volatile int surfaceStrength194=100;
+    private static volatile int surfaceSoftness194=100;
+    private static volatile int surfaceRollback194=0;
+    private static volatile long surfaceRead194=0L;
+    private static void readSurface194(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-surfaceRead194<350L)return;
+        surfaceRead194=now;
+        try{
+            android.content.Context c=launcherContext;
+            if(c==null)return;
+            android.content.ContentResolver cr=c.getContentResolver();
+            surfaceMode194=Math.max(0,Math.min(3,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_mode_194",3)));
+            surfaceStrength194=Math.max(0,Math.min(200,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_strength_194",100)));
+            surfaceSoftness194=Math.max(50,Math.min(200,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_softness_194",100)));
+            surfaceRollback194=Math.max(0,Math.min(1,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_rollback_194",0)));
+        }catch(Throwable ignored){}
+    }
+    private static boolean surface194Enabled(){readSurface194();return surfaceRollback194==0;}
+    private static int surfaceMode194(){readSurface194();return surfaceMode194;}
+    private static int surfaceStrength194(){readSurface194();return surfaceStrength194;}
+    private static int surfaceSoftness194(){readSurface194();return surfaceSoftness194;}
+    private static int surface194Logs=0;
     private static int effectiveUnified193(){
+        if(surface194Enabled())return 2; // one surface renderer; never double legacy highlight
         int selected=surfaceDefault193();
         return selected==0?unifiedSurface192():(selected==1?2:(selected==2?1:3));
     }
@@ -2421,6 +2450,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return unifiedSurface192;
     }
     private static int effectiveRim192(){
+        if(surface194Enabled())return surfaceMode194();
         int mode=effectiveUnified193();
         if(mode==1)return 0; // legacy only
         if(mode==2 || mode==3){
@@ -2436,7 +2466,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(mode==0)return;
         float w=bounds.width(),h=bounds.height();
         if(w<4f || h<4f)return;
-        final float edge=Math.max(1.25f,Math.min(3.8f,Math.min(w,h)*0.022f));
+        final float edge=Math.max(0.7f,Math.min(7.6f,Math.min(w,h)*0.022f*(surface194Enabled()?surfaceSoftness194()/100f:1f)));
         final float inset=edge*0.72f;
         android.graphics.RectF r=new android.graphics.RectF(bounds);
         r.inset(inset,inset);
@@ -2455,8 +2485,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
             p.setStyle(Paint.Style.STROKE);
             p.setStrokeWidth(edge);
             p.setStrokeJoin(Paint.Join.ROUND);
+            int strength=surface194Enabled()?surfaceStrength194():100;
+            int faint=Math.min(255,Math.round(24f*strength/100f));
+            int bright=Math.min(255,Math.round(200f*strength/100f));
             p.setShader(new android.graphics.LinearGradient(center-spread,r.top,center+spread,r.top,
-                new int[]{0x18FFFFFF,0xC8FFFFFF,0x18FFFFFF},
+                new int[]{(faint<<24)|0xFFFFFF,(bright<<24)|0xFFFFFF,(faint<<24)|0xFFFFFF},
                 new float[]{0f,0.5f,1f},android.graphics.Shader.TileMode.CLAMP));
             canvas.drawRoundRect(r,radius,radius,p);
             // V1.9.191: Do not draw a full-bounds ellipse arc here. It crosses
@@ -2470,7 +2503,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 Paint shadow=new Paint(Paint.ANTI_ALIAS_FLAG);
                 shadow.setStyle(Paint.Style.STROKE);
                 shadow.setStrokeWidth(Math.max(0.75f,edge*0.65f));
-                shadow.setColor(0x27000000);
+                int dark=surface194Enabled()?Math.min(255,Math.round(39f*surfaceStrength194()/100f)):39;
+                shadow.setColor(dark<<24);
                 canvas.drawRoundRect(inner,innerRadius,innerRadius,shadow);
             }
         }finally{canvas.restoreToCount(save);}
@@ -3380,7 +3414,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V189: post-blur surface stripe replaces (not stacks over)
                     // the legacy AGSL stripe when the diagnostic pass is enabled.
                     state.continuousShader.setFloatUniform("specularMode184",
-                        (float)((effectiveRim192()!=0 || surfacePass189()!=0 || effectiveUnified193()==1)?0:specular184));
+                        (float)((surface194Enabled() || effectiveRim192()!=0 || surfacePass189()!=0 || effectiveUnified193()==1)?0:specular184));
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
                     state.lastSpecularDirection187=motionDirection184;
@@ -3574,6 +3608,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " blurDp="+customBlurDp+
                     " direction="+state.visualDirection188);
             final int rim190=effectiveRim192();
+            if(surface194Logs++<120)log("SURFACE_MODE_194 mode="+surfaceMode194()+
+                " rollback="+(!surface194Enabled())+" strength="+surfaceStrength194()+
+                " softness="+surfaceSoftness194()+" rim="+rim190+
+                " blurDp="+customBlurDp+" direction="+state.visualDirection188);
             if(unified192!=0 && surfaceUnifiedLogs192++<160)
                 log("SURFACE_UNIFIED_192 mode="+unified192+
                     " legacyNative="+(unified192==1 || unified192==3)+
@@ -3582,7 +3620,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " blurDp="+customBlurDp+
                     " direction="+state.visualDirection188+
                     " view="+System.identityHashCode(view));
-            if(unified192==0 && rim190==0 && surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
+            if(!surface194Enabled() && unified192==0 && rim190==0 && surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
                 drawSurfaceStripe189(canvas,rect,contourRadius,
                     state.visualDirection188,spec189,surface189);
                 if(surfaceLogs189++<180)log("SURFACE_PASS_189 pass="+surface189+
