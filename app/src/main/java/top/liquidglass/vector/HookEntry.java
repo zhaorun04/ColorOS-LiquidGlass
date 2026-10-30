@@ -2141,13 +2141,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final ThreadLocal<Boolean> AGSL_SUBMITTED_144 = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> SURFACE_SUBMITTED_144 = new ThreadLocal<>();
     private static int agslSkipLogs144=0;
+    // V1.9.152: isolate actual material passes without changing the default path.
+    // 0=all, 1=AGSL only, 2=blur only, 3=AGSL+blur without tint, 4=AGSL+tint without blur.
+    private static volatile int materialProbe152=0;
+    private static volatile long materialProbeRead152=0L;
+    private static volatile int materialProbeLogged152=-1;
+    private static int materialProbe152(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-materialProbeRead152>500L){
+            materialProbeRead152=now;
+            try { if(launcherContext!=null)materialProbe152=android.provider.Settings.Global.getInt(
+                launcherContext.getContentResolver(),"liquidglass_material_probe_152",0); }
+            catch(Throwable ignored){}
+        }
+        int mode=materialProbe152;
+        if(mode!=materialProbeLogged152){materialProbeLogged152=mode;log("MATERIAL_PROBE_152 mode="+mode);}
+        return mode;
+    }
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         if(rect.width()<80 || rect.height()<80)return;
+        final int material152=materialProbe152();
+        final boolean agsl152=material152!=2;
+        final boolean blur152=material152!=1 && material152!=4;
+        final boolean tint152=material152!=1 && material152!=2 && material152!=3;
         scheduleReferenceLoad(view);
         android.graphics.Bitmap frame=REFRACTION_FRAME;
         if(frame==null||frame.isRecycled()){
             if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<32)log("GLASS119_PIPELINE stage=FRAME_UNAVAILABLE mode="+customBlurMode+" radiusDp="+customBlurDp+" frameNull="+(frame==null));
-            if(glassTintOpacity>0){
+            if(tint152 && glassTintOpacity>0){
                 Paint fallback=new Paint(Paint.ANTI_ALIAS_FLAG);
                 int tint=tintColor();
                 fallback.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
@@ -2295,7 +2316,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.samplePaint.setShader(null);
             // Independent background blur and tint: always visible with refraction OFF.
             // With refraction ON, retain some optical detail beneath the blur.
-            if(customBlurMode==1 && customBlurDp>0){
+            if(blur152 && customBlurMode==1 && customBlurDp>0){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
                 if(blurred!=null){
                     if(blurHitLogs142++<24)log("BLUR_DRAW_142 READY radius="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
@@ -2314,13 +2335,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }else if(blurHitLogs142++<24){log("BLUR_DRAW_142 WAIT radius="+customBlurDp+" frame="+System.identityHashCode(frame)+" pending="+BLUR_PENDING);}
             }
             // Glass material is last, so AGSL cannot overwrite its opacity/style.
-            if(glassTintOpacity>0){
+            if(tint152 && glassTintOpacity>0){
                 Paint tintPaint=state.cachedTintPaint;
                 int tint=tintColor();
                 tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
                 canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);
             }
-            if(tintMode!=0 && tintStrength>0){
+            if(tint152 && tintMode!=0 && tintStrength>0){
                 Paint stylePaint=state.cachedTintPaint;
                 int styleColor=tintColor();
                 stylePaint.setColor(Color.argb(Math.round(0.72f*255f*tintStrength/90f), Color.red(styleColor),Color.green(styleColor),Color.blue(styleColor)));
