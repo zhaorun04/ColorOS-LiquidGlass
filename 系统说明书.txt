@@ -22,3 +22,5 @@ V1.9.169 折射路径隔离诊断
 设置 liquidglass_refraction_path_169：0 原始；1 跳过 AGSL 但保留折射开启时的模糊 Alpha 与其他材质；2 保留 AGSL 但跳过自定义模糊、Tint 与表面光学材质（边缘描边保持）。
 请将旧版 liquidglass_fixed_output_167 等探针恢复为 0，再比较桌面左右位移时的异常高亮。日志标记 REFRACTION_PATH_169。
 模式 1、2 为诊断，不是视觉修复；不改变 V1.9.154 解锁机制。
+
+编译修正：修复 scheduleReferenceLoad 后台线程引用仅在绘制函数内定义的 pathMode169，恢复缓存命中时的原始模糊预热条件。

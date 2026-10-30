@@ -1722,7 +1722,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 modified=local.lastModified();length=local.length();
                 if(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled() && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH){
                     if(REFRACTION_LOGS++<24)log("REFERENCE_REUSE_148 memory_hit=true source="+local.getAbsolutePath());
-                    if(pathMode169!=2 && customBlurMode==1 && customBlurDp>0){
+                    if(customBlurMode==1 && customBlurDp>0){
                         android.util.DisplayMetrics metrics=app.getResources().getDisplayMetrics();
                         blurredWallpaper(REFRACTION_FRAME,metrics.density,null);
                     }
