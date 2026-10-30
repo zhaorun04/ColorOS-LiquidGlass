@@ -1,4 +1,4 @@
-V1.9.161｜桌面位移与折射层同步诊断版
+V1.9.162｜桌面位移与折射层同步诊断版
 
 本版基于 V1.9.160。新增 MOTION_CHAIN_161 诊断日志，记录文件夹屏幕坐标与前一次差值、Canvas Matrix、View 平移与滚动、最多五层父 View 的 left/scrollX/translationX/alpha、壁纸参考帧及折射提交位置。
 
@@ -13,3 +13,5 @@ V1.9.161｜桌面位移与折射层同步诊断版
 注意：MOTION_CHAIN_161 的 moving 是相邻两次诊断采样之间的坐标差，不能单独等同 Launcher 的动画状态。静止在偏移位置仍可能出现高光，因此要比较绝对位置与父层变换，而非只看 moving。
 
 未在本环境完成 Android Gradle 编译或设备验证。
+
+V1.9.162：新增 LAYER_CHAIN_162，只读记录文件夹及最多9级父容器的滚动、平移、矩阵、alpha、layerType、全局坐标与 Canvas 矩阵，并关联 AGSL 提交及 dispatch 前后阶段。无新增绘制或亮度修正。

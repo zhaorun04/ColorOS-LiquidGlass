@@ -2332,6 +2332,47 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }catch(Throwable t){if(motionTraceCount161++<4)log("MOTION_CHAIN_161_ERROR "+t.getClass().getSimpleName());}
     }
 
+    // V1.9.162: read-only full transform chain and OEM background correlation.
+    // No Canvas mutation, no extra drawing and no per-frame allocation beyond sampled traces.
+    private static int layerTrace162=0;
+    private static long layerTraceAt162=0L;
+    private static void traceLayerChain162(View view, Canvas canvas, String stage) {
+        try {
+            long now=android.os.SystemClock.uptimeMillis();
+            if(layerTrace162>=240 || now-layerTraceAt162<65L)return;
+            layerTraceAt162=now;
+            int[] screen=new int[2]; view.getLocationOnScreen(screen);
+            float[] origin=new float[]{0f,0f};
+            android.graphics.Matrix global=new android.graphics.Matrix();
+            view.transformMatrixToGlobal(global);
+            boolean mapped=true;
+            global.mapPoints(origin);
+            float[] cv=new float[9];android.graphics.Matrix cm=new android.graphics.Matrix();
+            canvas.getMatrix(cm);cm.getValues(cv);
+            StringBuilder chain=new StringBuilder();
+            View node=view;
+            for(int i=0;i<9 && node!=null;i++){
+                if(i>0)chain.append('>');
+                float[] mv=new float[9];node.getMatrix().getValues(mv);
+                chain.append(node.getClass().getSimpleName()).append('#').append(System.identityHashCode(node))
+                    .append('(').append(node.getLeft()).append(',').append(node.getTop())
+                    .append(';').append(node.getScrollX()).append(',').append(node.getScrollY())
+                    .append(';').append(node.getTranslationX()).append(',').append(node.getTranslationY())
+                    .append(';').append(node.getAlpha()).append(',').append(node.getLayerType())
+                    .append(';').append(mv[0]).append(',').append(mv[2]).append(',').append(mv[5]).append(')');
+                android.view.ViewParent parent=node.getParent();node=parent instanceof View?(View)parent:null;
+            }
+            layerTrace162++;
+            log("LAYER_CHAIN_162 stage="+stage+" id="+System.identityHashCode(view)+
+                " time="+now+" screen="+screen[0]+","+screen[1]+
+                " global="+origin[0]+","+origin[1]+" mapped="+mapped+
+                " canvas="+cv[0]+","+cv[1]+","+cv[2]+","+cv[3]+","+cv[4]+","+cv[5]+
+                " oemAfter="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+
+                " agslSubmitted="+Boolean.TRUE.equals(AGSL_SUBMITTED_144.get())+
+                " chain="+chain);
+        }catch(Throwable e){if(layerTrace162++<5)log("LAYER_CHAIN_162_ERROR "+e.getClass().getSimpleName());}
+    }
+
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
         if(compositeCounts158!=null)compositeCounts158[0]++;
@@ -2530,6 +2571,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(isolatedLayer159>=0)canvas.restoreToCount(isolatedLayer159);
                     }
                     traceFolderMotion161(view,canvas,left,top,frame,sampleMode160,canvasMode159);
+                    traceLayerChain162(view,canvas,"AGSL_SUBMIT");
                     if(CANVAS_LOG_COUNTS_159[canvasMode159]++<72)
                         log("CANVAS_SUBMIT_159 mode="+canvasMode159+" view="+System.identityHashCode(view)+
                             " canvas="+System.identityHashCode(canvas)+" layer="+(isolatedLayer159>=0)+
@@ -2847,6 +2889,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
                         traceTouchComposite147(v,(Canvas)p.args[0]);
                         traceComposition151(v,(Canvas)p.args[0],"before");
+                        traceLayerChain162(v,(Canvas)p.args[0],"DISPATCH_BEFORE");
                         traceFirstDraw149(v,"dispatch");
                         if(UNLOCK_EVENT_AT_154>0 && android.os.SystemClock.uptimeMillis()-UNLOCK_EVENT_AT_154<2500L
                                 && UNLOCK_DRAW_LOGS_154++<36)
@@ -2909,6 +2952,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             // V1.9.120: never redraw glass after children in normal mode.
                             // The pre-children pass owns the complete rounded surface.
                             traceComposition151((View)p.thisObject,(Canvas)p.args[0],"after");
+                            traceLayerChain162((View)p.thisObject,(Canvas)p.args[0],"DISPATCH_AFTER");
                             if(layerProbe151()!=2)drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int v122=visibilityProbe122();
                             if(v122==2){
