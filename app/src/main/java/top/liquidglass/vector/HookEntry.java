@@ -2876,6 +2876,73 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("FOLDER_NATIVE_BLUR_ISOLATION_HOOK owner="+draw.getDeclaringClass().getName());
         }catch(Throwable t){log("FOLDER_NATIVE_BLUR_ISOLATION_UNAVAILABLE "+t.getClass().getSimpleName());}
     }
+    // V1.9.165: read-only tracing of the *actual* FolderIcon draw chain.
+    // Do not skip any OEM call or change paint/shader/Canvas state.
+    private static int drawChainLogs165=0, backgroundLogs165=0;
+    private static final java.util.Set<Class<?>> DRAWABLE_CLASSES_165 =
+        java.util.Collections.synchronizedSet(new java.util.HashSet<Class<?>>());
+    private static void traceFolderBackground165(View v,String stage) {
+        if(v==null || backgroundLogs165>=120)return;
+        try {
+            Drawable bg=v.getBackground();
+            String parent=v.getParent()==null?"null":v.getParent().getClass().getName();
+            log("FOLDER_BG_165 stage="+stage+" view="+System.identityHashCode(v)+
+                " bg="+drawableTag(bg)+" alpha="+(bg==null?-1:bg.getAlpha())+
+                " parent="+parent+" scroll="+(v.getParent() instanceof View?((View)v.getParent()).getScrollX():0)+
+                " glass="+glassEnabled);
+            backgroundLogs165++;
+            if(bg!=null)hookObservedBackgroundDrawable165(bg);
+        }catch(Throwable t){if(backgroundLogs165++<120)log("FOLDER_BG_165 error="+t.getClass().getSimpleName());}
+    }
+    private static void hookObservedBackgroundDrawable165(Drawable bg) {
+        Class<?> type=bg.getClass();
+        if(type==Drawable.class || type.getName().startsWith("android."))return;
+        synchronized(DRAWABLE_CLASSES_165){if(!DRAWABLE_CLASSES_165.add(type))return;}
+        try {
+            Method draw=type.getDeclaredMethod("draw",Canvas.class);
+            draw.setAccessible(true);
+            XposedBridge.hookMethod(draw,new XC_MethodHook(){
+                @Override protected void beforeHookedMethod(MethodHookParam p){
+                    View active=ACTIVE_FOLDER_ICON.get();
+                    if(active!=null && drawChainLogs165++<180)
+                        log("FOLDER_BG_DRAW_165 owner="+drawableTag(p.thisObject)+
+                            " active="+System.identityHashCode(active)+
+                            " canvasHardware="+((Canvas)p.args[0]).isHardwareAccelerated());
+                }
+            });
+            log("FOLDER_BG_HOOK_165 installed="+draw.toGenericString());
+        }catch(NoSuchMethodException e){log("FOLDER_BG_HOOK_165 inherited_or_no_draw="+type.getName());}
+        catch(Throwable t){log("FOLDER_BG_HOOK_165 failed="+type.getName()+" "+t.getClass().getSimpleName());}
+    }
+    private static void hookFolderDrawChain165(ClassLoader loader) {
+        Class<?> c=find("com.android.launcher3.folder.FolderIcon",loader);
+        if(c==null){log("FOLDER_DRAW_INSTALL_165 missing_class");return;}
+        for(String name:new String[]{"draw","onDraw"}) {
+            try {
+                Method m=c.getDeclaredMethod(name,Canvas.class);
+                m.setAccessible(true);
+                XposedBridge.hookMethod(m,new XC_MethodHook(){
+                    @Override protected void beforeHookedMethod(MethodHookParam p){
+                        if(p.thisObject instanceof View && drawChainLogs165++<180){
+                            View v=(View)p.thisObject;
+                            log("FOLDER_DRAW_CHAIN_165 stage=BEFORE method="+name+
+                                " view="+System.identityHashCode(v)+" x="+v.getX()+
+                                " screen="+screenX165(v)+" alpha="+v.getAlpha());
+                            traceFolderBackground165(v,name);
+                        }
+                    }
+                    @Override protected void afterHookedMethod(MethodHookParam p){
+                        if(p.thisObject instanceof View && drawChainLogs165++<180)
+                            log("FOLDER_DRAW_CHAIN_165 stage=AFTER method="+name+
+                                " view="+System.identityHashCode(p.thisObject));
+                    }
+                });
+                log("FOLDER_DRAW_INSTALL_165 installed="+m.toGenericString());
+            }catch(NoSuchMethodException e){log("FOLDER_DRAW_INSTALL_165 inherited="+name+" owner="+c.getName());}
+            catch(Throwable t){log("FOLDER_DRAW_INSTALL_165 failed="+name+" error="+t.getClass().getSimpleName());}
+        }
+    }
+    private static int screenX165(View v){int[] xy=new int[2];v.getLocationOnScreen(xy);return xy[0];}
     private static void hookFolderIconCanvasFusion(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.FolderIcon",loader);
         if (c == null) return;
@@ -2888,6 +2955,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         View v=(View)p.thisObject;
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
                         verifyOemModeAtDispatch164(v);
+                        if(drawChainLogs165++<180)log("FOLDER_DRAW_CHAIN_165 stage=DISPATCH_BEFORE view="+System.identityHashCode(v)+" screen="+screenX165(v));
+                        traceFolderBackground165(v,"dispatch");
                         traceTouchComposite147(v,(Canvas)p.args[0]);
                         traceComposition151(v,(Canvas)p.args[0],"before");
                         traceLayerChain162(v,(Canvas)p.args[0],"DISPATCH_BEFORE");
@@ -4158,7 +4227,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
         hookBootConfigRestore();
-        log("GLASS124_BUILD_ID version=V1.9.124 package="+p.packageName+" process="+p.processName);
+        log("GLASS165_BUILD_ID version=V1.9.165 package="+p.packageName+" process="+p.processName);
         log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
@@ -4174,6 +4243,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.launcher3.folder.FolderIcon", p.classLoader), "dispatchDraw", new Class<?>[]{Canvas.class}, "FolderIcon", true);
             hookTrackedFolderNativeBlur(p.classLoader);
             hookFolderIconCanvasFusion(p.classLoader);
+            hookFolderDrawChain165(p.classLoader);
             probeBlurDrawImplementation(p.classLoader);
             hookPreview(p.classLoader);
             traceBlurMethods(p.classLoader);

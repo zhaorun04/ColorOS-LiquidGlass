@@ -1,7 +1,8 @@
-V1.9.164｜OEM Hook 安装与模式读取独立验证版
+ColorOS-LiquidGlass V1.9.165｜文件夹背景真实绘制入口追踪版
 
-基于 V1.9.163。保留真实 AGSL 折射和解锁即时显示。
-新增日志 OEM_VERIFY_DISPATCH_164：从已知执行的 FolderIcon.dispatchDraw 读取模式；OEM_VERIFY_INSTALL_164：记录 OEM 类、候选方法、安装成功；OEM_VERIFY_ENTRY_164：记录 OEM drawBackground 是否调用；OEM_VERIFY_SKIP_164：记录实际跳过。
-模式开关仍为 liquidglass_oem_scroll_isolation_163（0/1/2）。
-说明：若没有 OEM_VERIFY_ENTRY_164，即使模式已读取，也不能证明 OEM 背景已被隔离。
-本版仅强化验证，不宣称修复闪烁。
+基于 V1.9.164。保留真实 AGSL 折射、解锁即时重绘、壁纸缓存、描边和所有现有诊断设置。
+新增只读日志：FOLDER_DRAW_INSTALL_165、FOLDER_DRAW_CHAIN_165、FOLDER_BG_165、FOLDER_BG_HOOK_165、FOLDER_BG_DRAW_165。
+追踪 FolderIcon.draw/onDraw（若为本类声明）、dispatchDraw 和 View.getBackground() 的实际 Drawable 类型；只对观察到的自定义 Drawable.draw 进行有限日志 Hook。
+注意：Android 框架 Drawable 和继承的 draw 不进行全局 Hook；没有命中不等于没有绘制。此版本不隔离 OEM 层、不改变 Shader 或 Canvas 合成。
+测试：重启 Launcher 后静止2秒，左右滑动、偏移保持、松手复位，导出 LSPosed 日志。
+验证：ZIP 静态检查，不代表已完成 Gradle 编译或实机测试。
