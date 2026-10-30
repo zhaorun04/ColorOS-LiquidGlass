@@ -1,16 +1,21 @@
-V1.9.190｜独立表面光学层与圆角高光实验版
+V1.9.191｜圆角高光几何修正版
 
-基于V1.9.189；默认新增圆角反射关闭，保留V189行为。V190启用时不再绘制旧AGSL直线色带和V189后置直线色带，避免重复叠加。新圆角高光在自定义壁纸模糊与染色后绘制，使用真实rect及contourRadius。运动归中仍沿用V188的已验证逻辑。
+基于V1.9.190，仅修复drawRoundedRim190中错误的整矩形椭圆弧绘制：删除canvas.drawArc(upper,195f,150f,false,p)及其辅助画笔配置，避免玻璃内部出现半圆弧线。
 
-先启用原运动驱动：
+保留沿真实圆角矩形的主高光、模式3内侧暗边、V1.9.188运动归中与V1.9.189后置绘制及背景模糊解耦。
+
+测试：
 su -c 'settings put global liquidglass_specular_185 3'
+su -c 'settings put global liquidglass_rim_mode_190 1'
+su -c 'settings put global liquidglass_rim_mode_190 2'
+su -c 'settings put global liquidglass_rim_mode_190 3'
 
-V190模式：
-su -c 'settings put global liquidglass_rim_mode_190 0' # V189原样对照
-su -c 'settings put global liquidglass_rim_mode_190 1' # 静态圆角高光
-su -c 'settings put global liquidglass_rim_mode_190 2' # 动态圆角高光
-su -c 'settings put global liquidglass_rim_mode_190 3' # 动态高光+内侧柔和暗边
+重点检查：原先玻璃内部的大半圆线条消失；四角高光仍贴合；跨桌面归中平滑；背景模糊不影响后置高光。
 
-V189旧模式仍保留：liquidglass_surface_pass_189；启用V190时自动不画V189诊断色带。日志：SURFACE_RIM_190。
-测试：四角贴合、模糊半径大小对高光锐度影响、2→1→2和2→3→2运动归中、无整块玻璃闪亮。
-注意：本版为Canvas表面反射实验，非物理精确光学仿真。未在Android设备上编译/验证。
+Termux Git：
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.191 Rounded Rim Geometry Fix"
+git push origin main
+
+验证：源码修改、ZIP完整性检查；未完成Android Gradle编译或实机测试。

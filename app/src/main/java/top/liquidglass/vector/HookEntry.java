@@ -2405,13 +2405,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 new int[]{0x18FFFFFF,0xC8FFFFFF,0x18FFFFFF},
                 new float[]{0f,0.5f,1f},android.graphics.Shader.TileMode.CLAMP));
             canvas.drawRoundRect(r,radius,radius,p);
-            // Narrow secondary highlight near the upper curved rim.
-            android.graphics.RectF upper=new android.graphics.RectF(r);
-            p.setStrokeWidth(Math.max(0.8f,edge*0.42f));
-            p.setShader(new android.graphics.LinearGradient(center-spread,r.top,center+spread,r.top,
-                new int[]{0x00FFFFFF,0xA0FFFFFF,0x00FFFFFF},
-                new float[]{0f,0.5f,1f},android.graphics.Shader.TileMode.CLAMP));
-            canvas.drawArc(upper,195f,150f,false,p);
+            // V1.9.191: Do not draw a full-bounds ellipse arc here. It crosses
+            // the glass interior. The rounded-rectangle contour above is the
+            // only visible bright rim; its gradient already follows motion.
             if(mode==3){
                 android.graphics.RectF inner=new android.graphics.RectF(bounds);
                 float offset=edge*2.1f;
