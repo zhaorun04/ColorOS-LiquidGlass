@@ -31,3 +31,7 @@ V1.9.175：新增 liquidglass_layer_composite_175：0原始绘制，1局部离�
 
 V1.9.176｜桌面滚动文件夹绘制链路审计
 新增 DRAW_TRACE_176：按 FolderIcon dispatch 分配 seq，记录 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END，包含 Canvas 矩阵、裁剪、屏幕位置、提交次数。此版本仅诊断，不修改原有折射强度、模糊、描边及解锁刷新。日志最多 850 条；同一帧可根据 seq 对照。
+
+V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。
+
+V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。

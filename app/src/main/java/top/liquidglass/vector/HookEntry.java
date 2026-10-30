@@ -2461,6 +2461,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     // V1.9.144: one AGSL surface submission per FolderIcon dispatchDraw.
     // The OEM callback can run during the same dispatch; do not composite twice.
+    // V1.9.176.1: verified dispatch-scoped draw-chain audit. Diagnostic only.
+    private static final java.util.concurrent.atomic.AtomicLong DRAW_SEQ_1761 = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicInteger DRAW_LOG_BUDGET_1761 = new java.util.concurrent.atomic.AtomicInteger();
+    private static final ThreadLocal<long[]> DRAW_CONTEXT_1761 = new ThreadLocal<>();
+    private static void drawTrace1761(String stage, View v, Canvas c, String detail) {
+        if(DRAW_LOG_BUDGET_1761.getAndIncrement()>=1400)return;
+        long[] ctx=DRAW_CONTEXT_1761.get();
+        String matrix="none", clip="none";
+        if(c!=null){
+            try{Matrix m=new Matrix();c.getMatrix(m);float[] a=new float[9];m.getValues(a);
+                matrix=a[0]+","+a[1]+","+a[2]+","+a[3]+","+a[4]+","+a[5];}catch(Throwable ignored){}
+            try{Rect r=new Rect();clip=c.getClipBounds(r)?r.toShortString():"empty";}catch(Throwable ignored){}
+        }
+        log("DRAW_TRACE_176 stage="+stage+" seq="+(ctx==null?-1:ctx[0])+
+            " view="+(v==null?0:System.identityHashCode(v))+
+            " canvas="+(c==null?0:System.identityHashCode(c))+
+            " attempts="+(ctx==null?-1:ctx[1])+" submits="+(ctx==null?-1:ctx[2])+
+            " surface="+(ctx==null?-1:ctx[3])+" edge="+(ctx==null?-1:ctx[4])+
+            " hardware="+(c!=null&&c.isHardwareAccelerated())+
+            " matrix="+matrix+" clip="+clip+" "+detail);
+    }
     private static final ThreadLocal<Boolean> AGSL_SUBMITTED_144 = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> SURFACE_SUBMITTED_144 = new ThreadLocal<>();
     private static int agslSkipLogs144=0;
@@ -2720,6 +2741,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
 
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
+        long[] drawCtx1761=DRAW_CONTEXT_1761.get();
+        if(drawCtx1761!=null)drawCtx1761[1]++;
+        drawTrace1761("AGSL_ATTEMPT",view,canvas,"refractionActive="+glassEnabled);
         int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
         if(compositeCounts158!=null)compositeCounts158[0]++;
         if(rect.width()<80 || rect.height()<80)return;
@@ -2989,6 +3013,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                     if(compositeDrawLogs157++<160)log("COMPOSITE_DRAW_157 mode="+composite157+" view="+System.identityHashCode(view)+" canvas="+System.identityHashCode(canvas)+" frame="+System.identityHashCode(frame)+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" alphaPaint="+state.samplePaint.getAlpha()+" left="+left+" top="+top);
                     continuousDrawn=true;
+                    long[] submitted1761=DRAW_CONTEXT_1761.get();
+                    if(submitted1761!=null)submitted1761[2]++;
+                    drawTrace1761("AGSL_SUBMIT",view,canvas,"paintAlpha="+state.samplePaint.getAlpha()+" frame="+System.identityHashCode(frame));
                     AGSL_SUBMITTED_144.set(Boolean.TRUE);
                     if(opticalDrawLogs156++<100)log("OPTICAL_DRAW_156 mode="+probe156+
                         " view="+System.identityHashCode(view)+" canvas="+System.identityHashCode(canvas)+
@@ -3065,6 +3092,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static int glass123GateLogs=0;
     private static void drawFolderIconFusion(View v, Canvas canvas, boolean edgeOnly) {
+        long[] fusion1761=DRAW_CONTEXT_1761.get();
+        if(fusion1761!=null)fusion1761[edgeOnly?4:3]++;
+        drawTrace1761("FUSION_ENTRY",v,canvas,"edge="+edgeOnly+
+            " surfaceGuard="+Boolean.TRUE.equals(SURFACE_SUBMITTED_144.get())+
+            " fusionGuard="+Boolean.TRUE.equals(FOLDER_FUSION_GUARD.get()));
         if (!glassEnabled || probeMode == 1 || canvas == null || v.getWidth() <= 0 || v.getHeight() <= 0) return;
         if (!edgeOnly && Boolean.TRUE.equals(SURFACE_SUBMITTED_144.get())) return;
         if (Boolean.TRUE.equals(FOLDER_FUSION_GUARD.get())) return;
@@ -3386,6 +3418,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 (REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled())+
                                 " glass="+glassEnabled+" hardware="+((Canvas)p.args[0]).isHardwareAccelerated());
 
+                        DRAW_CONTEXT_1761.set(new long[]{DRAW_SEQ_1761.incrementAndGet(),0,0,0,0});
+                        drawTrace1761("DISPATCH_BEGIN",v,(Canvas)p.args[0],"x="+v.getX()+" y="+v.getY());
                         // A new dispatch is a new frame for this folder.
                         COMPOSITE_COUNTS_158.set(new int[2]);
                         AGSL_SUBMITTED_144.remove();
@@ -3487,6 +3521,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             if(compositeTraceLogs158++<240)log("COMPOSITE_DISPATCH_158 view="+System.identityHashCode(p.thisObject)+" attempts="+counts158[0]+" submissions="+counts158[1]+" mode="+compositeProbe157+" canvas="+System.identityHashCode(p.args[0]));
                             COMPOSITE_COUNTS_158.remove();
                         }
+                        if(p.thisObject instanceof View && p.args.length>0 && p.args[0] instanceof Canvas)
+                            drawTrace1761("DISPATCH_END",(View)p.thisObject,(Canvas)p.args[0],"complete=true");
+                        DRAW_CONTEXT_1761.remove();
                         AGSL_SUBMITTED_144.remove();
                         SURFACE_SUBMITTED_144.remove();
                         ACTIVE_FOLDER_ICON.remove();
