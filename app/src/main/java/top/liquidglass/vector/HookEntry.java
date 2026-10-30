@@ -32,6 +32,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final String TAG = "ColorOSLiquidGlass";
     private static final Uri CONFIG = Uri.parse("content://top.liquidglass.vector.config/settings");
     private static volatile long lastRead = 0;
+    private static volatile long CONFIG_READY_AT_146 = 0L;
+    private static volatile long CONFIG_UNLOCK_AT_146 = 0L;
+    private static volatile int CONFIG_LOGS_146 = 0;
     private static volatile boolean configEverLoaded = false;
     private static volatile android.content.Context launcherContext;
     private static volatile long lastExperimentRead = 0;
@@ -196,6 +199,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(v.length>=20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
             if(v.length>=21)clearRefraction="1".equals(v[20]);
             configEverLoaded=true;
+            CONFIG_READY_AT_146=android.os.SystemClock.uptimeMillis();
             if(previousRefraction!=REFRACTION_ENABLED){
                 REFRACTION_CONFIG_EPOCH++;
                 if(REFRACTION_SWITCH_LOGS++<40)log("REFRACTION_SWITCH_138 enabled="+REFRACTION_ENABLED+
@@ -205,6 +209,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(!raw.equals(lastBootSnapshot)){
                 lastBootSnapshot=raw;
                 log("BOOT_SNAPSHOT_APPLIED enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
+                if(CONFIG_LOGS_146++<32)log("CONFIG_FIRST_FRAME_146 snapshotReady="+CONFIG_READY_AT_146+" unlockAt="+CONFIG_UNLOCK_AT_146+" blur="+customBlurDp+" alpha="+glassAlpha+" refract="+refractionPercent);
                 return true;
             }
             return false;
@@ -213,7 +218,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static void refresh(View v) { refreshFromContext(v.getContext()); }
     private static void refreshFromContext(android.content.Context context) {
         long now = android.os.SystemClock.uptimeMillis();
-        if (now-lastRead < 1500) return;
+        if (configEverLoaded && now-lastRead < 1500) return;
         lastRead=now;
         // V1.9.97: Launcher never cold-starts the module ContentProvider.
         // ColorOS blocks that startup during boot; use the root-published snapshot.
@@ -3475,7 +3480,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 if(frameReady && blurReady){
                     BOOT_PREWARM_RUNNING=false;
-                    log("BOOT_MATERIAL_READY_145 attempts="+attempts+" refraction="+REFRACTION_ENABLED);
+                    log("BOOT_MATERIAL_READY_146 attempts="+attempts+" refraction="+REFRACTION_ENABLED+" configAt="+CONFIG_READY_AT_146+" unlockAt="+CONFIG_UNLOCK_AT_146);
                     invalidateGlassViews();
                     return;
                 }
@@ -3504,7 +3509,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             XposedBridge.hookMethod(attach,new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam p) {
                     if(p.args.length==0 || !(p.args[0] instanceof android.content.Context))return;
-                    // Avoid blocking process startup; drawing will retry if provider isn't ready.
+                    // Apply the small Settings.Global snapshot before first folder drawing.
                     final android.content.Context context=(android.content.Context)p.args[0];
                     if (!"com.android.launcher".equals(context.getPackageName())) return;
                     final android.content.Context app=context.getApplicationContext()==null?context:context.getApplicationContext();
@@ -3556,6 +3561,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             });
                         log("BOOT_SNAPSHOT_OBSERVER_READY");
                     }catch(Throwable t){log("BOOT_SNAPSHOT_OBSERVER_FAILED "+t.getClass().getSimpleName());}
+                    // Delayed retries are fallback only; the synchronous snapshot above
+                    // must already be applied before Launcher starts rendering.
                     handler.postDelayed(restore,2000L);
                     handler.postDelayed(restore,8000L);
                     handler.postDelayed(restore,25000L);
@@ -3564,12 +3571,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         android.content.IntentFilter filter=new android.content.IntentFilter(android.content.Intent.ACTION_USER_UNLOCKED);
                         app.registerReceiver(new android.content.BroadcastReceiver(){
                             @Override public void onReceive(android.content.Context c,android.content.Intent i){
+                                CONFIG_UNLOCK_AT_146=android.os.SystemClock.uptimeMillis();
                                 lastRead=0L;
+                                boolean changed=restoreBootSnapshot(app);
+                                log("CONFIG_UNLOCK_146 changed="+changed+" readyAt="+CONFIG_READY_AT_146+" unlockAt="+CONFIG_UNLOCK_AT_146+" blur="+customBlurDp+" refract="+refractionPercent);
+                                if(changed)invalidateGlassViews();
                                 // Unlock can make CE wallpaper file readable before
                                 // delayed config restore; request the frame immediately.
                                 REFRACTION_LAST_CHECK=0L;
                                 scheduleReferenceLoad(app,null);
                                 prewarmBootRefraction(app,handler);
+                                // Run the consistency check immediately, not after 1s.
+                                handler.post(restore);
                                 handler.postDelayed(restore,1000L);
                                 handler.postDelayed(restore,4000L);
                             }
