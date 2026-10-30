@@ -1675,6 +1675,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // V1.9.98: Never call the blocked module provider from Launcher.
                 // A missing file must be retried after CE unlock, not treated as a provider failure.
                 java.io.File local=new java.io.File(app.getFilesDir(),"liquidglass_wallpaper_reference.jpg");
+                // V148: DE mirror survives lock/unlock and is readable before CE unlock.
+                java.io.File deMirror=new java.io.File(app.createDeviceProtectedStorageContext().getFilesDir(),"liquidglass_wallpaper_reference.jpg");
                 // CE storage may become available only after unlock. Check both
                 // locations on every attempt; prefer a valid, nonempty file.
                 java.io.File alternate=new java.io.File("/data/user/0/com.android.launcher/files/liquidglass_wallpaper_reference.jpg");
@@ -1683,6 +1685,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // If both exist, prefer the newest complete frame.
                 boolean localValid=local.isFile() && local.length()>1024L;
                 boolean alternateValid=alternate.isFile() && alternate.length()>1024L;
+                boolean deValid=deMirror.isFile() && deMirror.length()>1024L;
+                if(deValid && (!localValid || deMirror.lastModified()>local.lastModified())){ local=deMirror; localValid=true; }
                 if(alternateValid && (!localValid || alternate.lastModified()>local.lastModified()))
                     local=alternate;
                 long modified=-1L,length=-1L;
@@ -1691,7 +1695,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     return;
                 }
                 modified=local.lastModified();length=local.length();
-                if(REFRACTION_FRAME!=null && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH){
+                if(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled() && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH){
+                    if(REFRACTION_LOGS++<24)log("REFERENCE_REUSE_148 memory_hit=true source="+local.getAbsolutePath());
                     if(customBlurMode==1 && customBlurDp>0){
                         android.util.DisplayMetrics metrics=app.getResources().getDisplayMetrics();
                         blurredWallpaper(REFRACTION_FRAME,metrics.density,null);
@@ -1702,6 +1707,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 opts.inPreferredConfig=android.graphics.Bitmap.Config.ARGB_8888;
                 next=android.graphics.BitmapFactory.decodeFile(local.getAbsolutePath(),opts);
                 if(REFRACTION_LOGS++<24)log("BOOT_REFERENCE_DECODE path="+local.getAbsolutePath()+" decoded="+(next!=null));
+                if(REFRACTION_LOGS++<24)log("REFERENCE_REUSE_148 disk_hit="+(next!=null)+" source="+local.getAbsolutePath());
                 final long loadedModified=modified,loadedLength=length;
                 if(next!=null && next.getWidth()>=320 && next.getHeight()>=640) {
                     REFRACTION_FRAME=next;

@@ -11,6 +11,10 @@ SIGFILE=$DSTDIR/.wallpaper_reference_source_sig
 LAUNCHERDIR=/data/user/0/com.android.launcher/files
 LAUNCHERDST=$LAUNCHERDIR/liquidglass_wallpaper_reference.jpg
 LAUNCHERSIG=$LAUNCHERDIR/.liquidglass_wallpaper_reference_sig
+# V148: device-protected mirror, available immediately after boot / unlock.
+LAUNCHERDEDIR=/data/user_de/0/com.android.launcher/files
+LAUNCHERDEDST=$LAUNCHERDEDIR/liquidglass_wallpaper_reference.jpg
+LAUNCHERDESIG=$LAUNCHERDEDIR/.liquidglass_wallpaper_reference_sig
 TRIGGER=/data/local/tmp/.liquidglass-wallpaper-trigger
 LOG=/data/local/tmp/liquidglass-wallpaper-sync.log
 WATCHER_PID=
@@ -143,11 +147,38 @@ sync_launcher_reference() {
   fi
   rm -f "$TMP"
 }
+# V148: Keep a persistent DE copy synchronized with the verified CE reference.
+# Copy only when source identity changes; never remove the previous valid frame
+# on ordinary screen lock/unlock. The temporary file is atomically renamed.
+sync_de_reference() {
+  [ -s "$LAUNCHERDST" ] || return
+  [ -d /data/user_de/0/com.android.launcher ] || return
+  LUID=$(stat -c %u /data/user_de/0/com.android.launcher 2>/dev/null)
+  LGID=$(stat -c %g /data/user_de/0/com.android.launcher 2>/dev/null)
+  case "$LUID:$LGID" in *[!0-9:]*|:*) return;; esac
+  [ -d "$LAUNCHERDEDIR" ] || { mkdir -p "$LAUNCHERDEDIR" || return; chown "$LUID:$LGID" "$LAUNCHERDEDIR"; chmod 700 "$LAUNCHERDEDIR"; restorecon "$LAUNCHERDEDIR" 2>/dev/null; }
+  sig=$(cat "$LAUNCHERSIG" 2>/dev/null)
+  [ -n "$sig" ] || return
+  [ "$sig" = "$(cat "$LAUNCHERDESIG" 2>/dev/null)" ] && [ -s "$LAUNCHERDEDST" ] && return
+  tmp="$LAUNCHERDEDIR/.liquidglass_ref.new.$$"
+  if cp "$LAUNCHERDST" "$tmp" 2>/dev/null && [ "$(stat -c %s "$tmp" 2>/dev/null)" -gt 1024 ]; then
+    chown "$LUID:$LGID" "$tmp" && chmod 600 "$tmp"
+    restorecon "$tmp" 2>/dev/null
+    if mv -f "$tmp" "$LAUNCHERDEDST"; then
+      printf '%s' "$sig" > "$LAUNCHERDESIG"
+      chown "$LUID:$LGID" "$LAUNCHERDESIG"; chmod 600 "$LAUNCHERDESIG"
+      restorecon "$LAUNCHERDEDST" "$LAUNCHERDESIG" 2>/dev/null
+      echo "$(date) DE reference synced $sig" >> "$LOG"
+    fi
+  fi
+  rm -f "$tmp"
+}
 # V1.9.94: do not wait for the five-minute fallback when Android CE
 # storage / Launcher private files appear after Magisk service startup.
 # Run the first checks immediately; repeat quickly until both copies exist.
 sync_config
 sync_launcher_reference
+sync_de_reference
 sync_once
 TICKS=0
 BOOT_TICKS=0
@@ -158,19 +189,23 @@ while true; do
   if [ -e "$TRIGGER" ]; then
     rm -f "$TRIGGER"
     sync_launcher_reference
+    sync_de_reference
     sync_once
   elif [ "$BOOT_TICKS" -lt 180 ]; then
     # During the first three minutes, missing paths must not defer
     # synchronization to the normal five-minute maintenance cycle.
     [ -s "$LAUNCHERDST" ] || sync_launcher_reference
+    [ -s "$LAUNCHERDEDST" ] || sync_de_reference
     [ -s "$DST" ] || sync_once
     # If the source changed across reboot, signatures will be refreshed.
     if [ $((BOOT_TICKS % 2)) -eq 0 ]; then
       sync_launcher_reference
+      sync_de_reference
       sync_once
     fi
   elif [ "$TICKS" -ge 2 ]; then
     sync_launcher_reference
+    sync_de_reference
     sync_once
   fi
   [ "$TICKS" -ge 2 ] && TICKS=0
