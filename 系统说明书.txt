@@ -1,20 +1,13 @@
-ColorOS LiquidGlass V1.9.193｜统一表面反射默认启用版
+ColorOS Liquid Glass V1.9.195｜模糊折射同源采样与 APK 表面光学 UI 修复版
 
-基于 V1.9.192 用户确认四种模式稳定后的最小改动。
+一、修复
+1. 自定义模糊纹理作为 AGSL 壁纸采样输入；折射位移在该纹理上执行，模糊开启后仍保留 UI 折射强度的空间形变。
+2. AGSL 成功绘制后不再叠加未折射的模糊壁纸；失败时保留模糊回退。
+3. APK 新增表面反射模式、反射强度、高光宽度；通过 GlassConfigProvider 共享配置，不再依赖手动 Settings.Global 命令。
+4. 保留 V1.9.188 动画归中、V1.9.191 圆角几何、V1.9.194 表面反射实现。
 
-改动：将 192 的「仅新版圆角反射」作为默认选项，不删除旧绘制路径；保留既有运动归中、背景模糊和壁纸折射逻辑。
+二、测试
+启用真实壁纸折射、自定义壁纸模糊，固定模糊半径 1dp，分别将折射强度设为 1% 与 100%，比较图案折射形变。再在 0dp 重复。切换表面反射模式 0/1/2/3、强度与宽度观察变化。若图像异常请提供 LSPosed 日志 OPTICAL_PIPELINE_195。
 
-新开关 liquidglass_surface_default_193：
-0 = 回退到 liquidglass_surface_unified_192 的原有选择
-1 = 新版独立表面圆角反射（默认）
-2 = 仅旧高光对照
-3 = 新旧叠加对照
-
-设置示例：
-su -c 'settings put global liquidglass_surface_default_193 1'
-su -c 'settings put global liquidglass_rim_mode_190 3'
-su -c 'settings put global liquidglass_specular_185 3'
-
-注意：新默认只切换已有绘制路径，不等于删除所有历史光学代码。
-日志：SURFACE_DEFAULT_193；保留 SURFACE_UNIFIED_192 和 SURFACE_RIM_190。
-验证：源码静态检查和 ZIP 完整性检查；未完成 Gradle 编译和实机验证。
+三、注意
+尚未经过 Android Gradle 编译和实机验证。若壁纸模糊位图尚未生成，会暂时采样原始壁纸并在后续帧切换为模糊纹理。

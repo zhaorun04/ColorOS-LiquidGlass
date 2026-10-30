@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191940
-        versionName '1.9.194-unified-surface-controls'
+        versionCode 191950
+        versionName '1.9.195-blur-refraction-ui-fix'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

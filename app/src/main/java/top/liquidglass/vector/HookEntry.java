@@ -73,6 +73,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // the background corner radius and is not a verified blur-strength API.
     private static volatile int blurRadiusPercent = 100; // legacy config ignored
     private static volatile int customBlurDp=14, refractionPercent=35, glassTintOpacity=18, customBlurMode=1;
+    private static int opticalPipelineLogs195=0;
     private static volatile boolean clearRefraction=false; // false: frosted glass, true: clear refraction
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_FRAME;
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_SOURCE;
@@ -281,6 +282,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 ci=c.getColumnIndex("refraction_percent");if(ci>=0)refractionPercent=clampInt(c.getInt(ci),0,100);
                 ci=c.getColumnIndex("glass_tint_opacity");if(ci>=0)glassTintOpacity=clampInt(c.getInt(ci),0,100);
                 ci=c.getColumnIndex("custom_blur_mode");if(ci>=0)customBlurMode=clampInt(c.getInt(ci),0,2);
+                ci=c.getColumnIndex("surface_mode_195");if(ci>=0)surfaceMode194=clampInt(c.getInt(ci),0,3);
+                ci=c.getColumnIndex("surface_strength_195");if(ci>=0)surfaceStrength194=clampInt(c.getInt(ci),0,200);
+                ci=c.getColumnIndex("surface_softness_195");if(ci>=0)surfaceSoftness194=clampInt(c.getInt(ci),50,200);
                 String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
                 summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare+" customBlurDp="+customBlurDp+" refractionPercent="+refractionPercent+" glassTintOpacity="+glassTintOpacity+" customBlurMode="+customBlurMode+" clearRefraction="+clearRefraction;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
@@ -2417,9 +2421,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             android.content.Context c=launcherContext;
             if(c==null)return;
             android.content.ContentResolver cr=c.getContentResolver();
-            surfaceMode194=Math.max(0,Math.min(3,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_mode_194",3)));
-            surfaceStrength194=Math.max(0,Math.min(200,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_strength_194",100)));
-            surfaceSoftness194=Math.max(50,Math.min(200,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_softness_194",100)));
+            // V195: mode, strength and softness are supplied by GlassConfigProvider
+            // from the actual APK UI; Settings.Global no longer overrides them.
             surfaceRollback194=Math.max(0,Math.min(1,android.provider.Settings.Global.getInt(cr,"liquidglass_surface_rollback_194",0)));
         }catch(Throwable ignored){}
     }
@@ -3295,7 +3298,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             logRefractionPath169(pathMode169,"ENTER",refractionActive);
             final int compositeMode170=refractionComposite170();
             logComposite170(compositeMode170,"ENTER",-1);
-            if(compositeMode170==1 && customBlurMode==1 && customBlurDp>0){
+            if(compositeMode170==1 && customBlurMode==1 && customBlurDp>0 && !refractionActive){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
                 if(blurred!=null){
                     if(blurHitLogs142++<24)log("BLUR_DRAW_142 READY radius="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
@@ -3359,9 +3362,34 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             " scale="+referenceScaleX+","+referenceScaleY+
                             " afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
                     }
+                    // V195: blur is a SOURCE texture, not a later overlay. Both blurred and
+                    // clear wallpaper use the exact same AGSL displacement/strength.
+                    android.graphics.Shader opticalInput195=state.shader;
+                    boolean blurredInput195=false;
+                    if(customBlurMode==1 && customBlurDp>0){
+                        android.graphics.Bitmap b195=blurredWallpaper(frame,dm.density,view);
+                        if(b195!=null && !b195.isRecycled()){
+                            if(state.cachedBlurBitmap!=b195 || state.cachedBlurShader==null){
+                                state.cachedBlurBitmap=b195;
+                                state.cachedBlurShader=new android.graphics.BitmapShader(b195,
+                                    android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+                                state.cachedBlurPaint.setShader(state.cachedBlurShader);
+                            }
+                            state.cachedBlurMatrix.reset();
+                            state.cachedBlurMatrix.setScale((float)sw/b195.getWidth(),(float)sh/b195.getHeight());
+                            state.cachedBlurMatrix.postTranslate(-shaderLeft,-shaderTop);
+                            state.cachedBlurShader.setLocalMatrix(state.cachedBlurMatrix);
+                            opticalInput195=state.cachedBlurShader;
+                            blurredInput195=true;
+                        }
+                    }
                     state.shaderMatrix.postTranslate(-shaderLeft,-shaderTop);
                     state.shader.setLocalMatrix(state.shaderMatrix);
-                    state.continuousShader.setInputShader("wallpaper",state.shader);
+                    state.continuousShader.setInputShader("wallpaper",opticalInput195);
+                    if(opticalPipelineLogs195++<100)log("OPTICAL_PIPELINE_195 source="+
+                        (blurredInput195?"BLURRED_WALLPAPER":"CLEAR_WALLPAPER")+
+                        " blurDp="+customBlurDp+" refractPercent="+refractionPercent+
+                        " composite="+compositeMode170+" view="+System.identityHashCode(view));
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
                     int visibilityTest=currentRefractionVisibilityTest();
                     // V1.9.93: mode 0 uses the exact proven mode-2 optical profile.
@@ -3557,7 +3585,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             state.samplePaint.setAlpha(255);
             // Independent background blur and tint: always visible with refraction OFF.
             // With refraction ON, retain some optical detail beneath the blur.
-            if(compositeMode170==0 && customBlurMode==1 && customBlurDp>0){
+            if(customBlurMode==1 && customBlurDp>0 && !continuousDrawn){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
                 if(blurred!=null){
                     if(blurHitLogs142++<24)log("BLUR_DRAW_142 READY radius="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));

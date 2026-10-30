@@ -35,9 +35,9 @@ public final class MainActivity extends Activity {
         SeekBar bar=new SeekBar(this);bar.setMax(max-min);bar.setProgress(Math.max(0,Math.min(max-min,prefs.getInt(key,def)-min)));current.addView(bar);
         Runnable update=()->caption.setText(label+"  ·  "+(bar.getProgress()+min));update.run();
         bar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-            public void onProgressChanged(SeekBar b,int progress,boolean fromUser){update.run();if(fromUser)prefs.edit().putInt(key,progress+min).apply();}
+            public void onProgressChanged(SeekBar b,int progress,boolean fromUser){update.run();if(fromUser){prefs.edit().putInt(key,progress+min).apply();getContentResolver().notifyChange(GlassConfigProvider.URI,null);}}
             public void onStartTrackingTouch(SeekBar b){}
-            public void onStopTrackingTouch(SeekBar b){prefs.edit().putInt(key,b.getProgress()+min).commit();}
+            public void onStopTrackingTouch(SeekBar b){prefs.edit().putInt(key,b.getProgress()+min).commit();getContentResolver().notifyChange(GlassConfigProvider.URI,null);}
         });
     }
     private void action(String label,Runnable run){
@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.139  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.195  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
@@ -74,6 +74,23 @@ public final class MainActivity extends Activity {
         slider("高光强度 (%)","highlight_strength",30,0,100);
         slider("描边宽度（像素）","highlight_width",2,1,5);
         toggle("方向性反射","directional_light",true);
+        section("统一表面光学 · V1.9.195","新版圆角反射独立于背景模糊；设置保存后会同步给 Launcher。");
+        TextView surfaceLabel=text("表面反射模式",13,false);current.addView(surfaceLabel);
+        Spinner surfaceSpinner=new Spinner(this);
+        String[] surfaceModes={"0 · 关闭表面反射","1 · 静态圆角反射","2 · 动态圆角反射","3 · 动态反射 + 柔和暗边"};
+        surfaceSpinner.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,surfaceModes));
+        surfaceSpinner.setSelection(Math.max(0,Math.min(3,prefs.getInt("surface_mode_195",3))));current.addView(surfaceSpinner);
+        surfaceSpinner.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
+            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){
+                prefs.edit().putInt("surface_mode_195",pos).commit();
+                getContentResolver().notifyChange(GlassConfigProvider.URI,null);
+            }
+            public void onNothingSelected(android.widget.AdapterView<?> parent){}
+        });
+        slider("表面反射强度 (%)","surface_strength_195",100,0,200);
+        slider("高光宽度 (%)","surface_softness_195",100,50,200);
+        TextView surfaceHint=text("这三项是真正的 APK 设置控件；与背景模糊半径、壁纸折射强度分别控制不同效果。",12,false);
+        current.addView(surfaceHint);
         section("视觉风格","先选择冷白、浅灰或深色，再调节色调强度；原生色调不叠加颜色。");
         TextView tintLabel=text("色调",13,false);current.addView(tintLabel);
         Spinner tint=new Spinner(this);String[] names={"原生 · 推荐","冷白","浅灰","深色"};
