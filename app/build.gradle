@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191880
-        versionName '1.9.188-smooth-recenter-frame-scheduler'
+        versionCode 191890
+        versionName '1.9.189-blur-specular-decoupling'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

@@ -1,7 +1,13 @@
-V1.9.188｜动态高光归中帧调度优化版
+V1.9.189｜背景模糊与表面高光解耦诊断版
 
-基于V187。删除每个文件夹每160ms的延迟重绘链；改为每个View最多一个postOnAnimation请求，且仅在View实际可见时运行。
-新增每View独立的视觉方向缓动（85ms跟随、180ms归中），跨桌面返回时从最后显示的方向逐渐归中，不直接跳零。
-模式3：su -c 'settings put global liquidglass_specular_185 3'
-日志：SPECULAR_RECENTER_FRAME_188、SPECULAR_PAGE_RETURN_188、SPECULAR_EASE_188。
-保留模式0/1/2、Alpha1.00折射。未进行Android Gradle编译或实机验证。
+基于V1.9.188稳定运动和归中版本。新增可选的后置表面光带绘制通道，位置在自定义壁纸模糊和色彩叠加之后，光带锐度不再由自定义背景模糊半径决定。默认pass=0，保持V188原样。
+
+配置（需要先开启折射和模式3）：
+su -c 'settings put global liquidglass_specular_185 3'
+su -c 'settings put global liquidglass_surface_pass_189 0'  # 原V188 AGSL光带
+su -c 'settings put global liquidglass_surface_pass_189 1'  # 后置白色光带
+su -c 'settings put global liquidglass_surface_pass_189 2'  # 后置红色诊断光带
+
+比较背景模糊半径小/大时光带的锐度；若后置通道仍随半径模糊，应排查Launcher原生后续RenderEffect/OEM图层或硬件缓存。
+新增日志：SURFACE_PASS_189。
+限制：后置光带是Canvas诊断图形，不是最终AGSL圆角镜面高光；不会改变系统原生模糊，未进行Android Gradle编译或实机验证。

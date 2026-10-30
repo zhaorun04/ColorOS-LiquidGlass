@@ -2344,6 +2344,51 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return specularMode184;
     }
+    // V189: 0 legacy in-AGSL stripe; 1 post-blur crisp stripe;
+    // 2 post-blur crisp RED diagnostic stripe. Does not change background blur.
+    private static volatile int surfacePass189=0;
+    private static volatile long surfacePassRead189=0L;
+    private static int surfacePass189(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-surfacePassRead189>350L){
+            surfacePassRead189=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)surfacePass189=Math.max(0,Math.min(2,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_surface_pass_189",0)));
+            }catch(Throwable ignored){}
+        }
+        return surfacePass189;
+    }
+    private static int surfaceLogs189=0;
+    // Paint on the FINAL local Canvas, after both AGSL and the custom bitmap blur.
+    // Its edge softness is in pixels and never derived from customBlurDp.
+    private static void drawSurfaceStripe189(Canvas canvas,android.graphics.RectF rect,
+            float cornerRadius,float direction,int specularMode,int pass){
+        if(specularMode==0 || pass==0)return;
+        final float w=rect.width(),h=rect.height();
+        if(w<=0f || h<=0f)return;
+        float center=0.5f+(specularMode==3?0.30f*Math.max(-1f,Math.min(1f,direction)):0f);
+        float stripeHalf=Math.max(1f,w*0.055f);
+        float bandTop=rect.top+h*0.05f;
+        float bandBottom=rect.top+h*0.51f;
+        float cx=rect.left+w*center;
+        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(pass==2?Color.rgb(255,25,25):Color.WHITE);
+        paint.setAlpha(215);
+        paint.setShader(new android.graphics.LinearGradient(cx-stripeHalf,0f,cx+stripeHalf,0f,
+            new int[]{0x00FFFFFF,pass==2?0xEEFF1919:0xEEFFFFFF,0x00FFFFFF},
+            new float[]{0f,0.5f,1f},android.graphics.Shader.TileMode.CLAMP));
+        int save=canvas.save();
+        try{
+            android.graphics.Path clip=new android.graphics.Path();
+            clip.addRoundRect(rect,cornerRadius,cornerRadius,android.graphics.Path.Direction.CW);
+            canvas.clipPath(clip);
+            canvas.drawRoundRect(new android.graphics.RectF(cx-stripeHalf,bandTop,cx+stripeHalf,bandBottom),
+                Math.min(stripeHalf,8f),Math.min(stripeHalf,8f),paint);
+        }finally{canvas.restoreToCount(save);}
+    }
     private static int specularLogs184=0;
     // V1.9.183: one shared Workspace motion clock for all glass views.
     // Diagnostic only: the stable opaque AGSL output is untouched.
@@ -3217,7 +3262,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }else{state.visualDirection188=0f;}
                     state.visualUpdatedNs188=drawNs188;
                     state.lastVisibleFrameNs188=drawNs188;
-                    state.continuousShader.setFloatUniform("specularMode184",(float)specular184);
+                    // V189: post-blur surface stripe replaces (not stacks over)
+                    // the legacy AGSL stripe when the diagnostic pass is enabled.
+                    state.continuousShader.setFloatUniform("specularMode184",
+                        (float)(surfacePass189()==0?specular184:0));
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
                     state.lastSpecularDirection187=motionDirection184;
@@ -3398,6 +3446,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 int styleColor=tintColor();
                 stylePaint.setColor(Color.argb(Math.round(0.72f*255f*tintStrength/90f), Color.red(styleColor),Color.green(styleColor),Color.blue(styleColor)));
                 canvas.drawRoundRect(rect,contourRadius,contourRadius,stylePaint);
+            }
+            // V189: intentionally AFTER custom blur and tint, independent of blur radius.
+            // This is a diagnostic comparison path, not the final curved specular model.
+            final int surface189=surfacePass189();
+            final int spec189=specularMode184();
+            if(surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
+                drawSurfaceStripe189(canvas,rect,contourRadius,
+                    state.visualDirection188,spec189,surface189);
+                if(surfaceLogs189++<180)log("SURFACE_PASS_189 pass="+surface189+
+                    " specular="+spec189+" blurDp="+customBlurDp+
+                    " composite="+compositeMode170+" afterCustomBlur=true"+
+                    " afterTint=true view="+System.identityHashCode(view)+
+                    " direction="+state.visualDirection188);
             }
             // V1.9.74: the refraction pass must not draw a second outline.
             // The unified highlight renderer owns the complete edge treatment.
