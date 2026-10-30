@@ -1,7 +1,7 @@
-ColorOS-LiquidGlass V1.9.181｜运动信号帧驱动诊断版
+ColorOS-LiquidGlass V1.9.182｜运动状态连续性修正版
 
-沿用 V1.9.180 稳定不透明真实壁纸折射，不添加动态高光。
-本版新增 MOTION_SIGNAL_181：实际屏幕位移、Workspace 滚动、滤波速度、方向与预备高光驱动值。
-运动期间通过 postOnAnimation 采样，速度平滑衰减后停止调度；长帧间隔不直接重置。
-测试：静止两秒，左右慢滑、停止两秒，再快速滑动；导出 LSPosed 日志。
-注意：本版仅验证运动信号及帧连续性，不代表已经实现 iOS 风格动态高光。
+以 V1.9.181 为基础，修复独立帧调度：回调自行续帧，直到运动速度与高光驱动值平滑衰减到静止阈值；避免重复调度。
+新增 MOTION_SIGNAL_182 日志：frame、dtMs、signedDx、discontinuity、velocityPxS、filteredPxS、signedPxS、highlight、active、scheduled、settleTicks。
+对大幅坐标突跳进行重新布局识别，避免误判为物理运动。
+本版仍为运动诊断版，未将运动信号接入 AGSL 动态高光。
+测试：静止2秒→慢滑→停止2秒→反向慢滑→停止2秒→快速滑动；导出 LSPosed 日志。
