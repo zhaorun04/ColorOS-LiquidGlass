@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191920
-        versionName '1.9.192-unified-surface-optics-experiment'
+        versionCode 191930
+        versionName '1.9.193-unified-surface-default'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

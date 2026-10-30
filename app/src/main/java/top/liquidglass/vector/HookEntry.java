@@ -1584,7 +1584,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         boolean tint=tintMode!=0 && tintStrength>0 && glassTintOpacity>0 && probeMode!=2;
         boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
         // New-only mode replaces the legacy glow/edge/rim passes, not the tint.
-        if(edgeOnly && unifiedSurface192()==2)shine=false;
+        if(edgeOnly && effectiveUnified193()==2)shine=false;
         if(!edgeOnly) {
             if(probeMode==0 && glassTintOpacity>0)drawOpticalGlass(canvas,cache);
             if(tint){
@@ -2382,6 +2382,29 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // 0 = unchanged V191 behavior; 1 = legacy native highlight only;
     // 2 = new post-blur surface rim only; 3 = both (A/B overlap diagnostic).
     // The wallpaper refraction, blur, tint and motion scheduler are unchanged.
+    // V1.9.193: ship the successfully tested new-only surface path as default.
+    // 0=honor V192 setting (rollback), 1=new-only (default),
+    // 2=legacy-only A/B, 3=both A/B. This only selects existing renderers.
+    private static volatile int surfaceDefault193=1;
+    private static volatile long surfaceDefaultRead193=0L;
+    private static int surfaceDefault193(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-surfaceDefaultRead193>=350L){
+            surfaceDefaultRead193=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)surfaceDefault193=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_surface_default_193",1)));
+            }catch(Throwable ignored){}
+        }
+        return surfaceDefault193;
+    }
+    private static int effectiveUnified193(){
+        int selected=surfaceDefault193();
+        return selected==0?unifiedSurface192():(selected==1?2:(selected==2?1:3));
+    }
+    private static int surfaceDefaultLogs193=0;
     private static volatile int unifiedSurface192=0;
     private static volatile long unifiedSurfaceRead192=0L;
     private static int unifiedSurface192(){
@@ -2398,7 +2421,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return unifiedSurface192;
     }
     private static int effectiveRim192(){
-        int mode=unifiedSurface192();
+        int mode=effectiveUnified193();
         if(mode==1)return 0; // legacy only
         if(mode==2 || mode==3){
             int rim=rimMode190();
@@ -3357,7 +3380,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V189: post-blur surface stripe replaces (not stacks over)
                     // the legacy AGSL stripe when the diagnostic pass is enabled.
                     state.continuousShader.setFloatUniform("specularMode184",
-                        (float)((effectiveRim192()!=0 || surfacePass189()!=0 || unifiedSurface192()==1)?0:specular184));
+                        (float)((effectiveRim192()!=0 || surfacePass189()!=0 || effectiveUnified193()==1)?0:specular184));
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
                     state.lastSpecularDirection187=motionDirection184;
@@ -3543,7 +3566,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // This is a diagnostic comparison path, not the final curved specular model.
             final int surface189=surfacePass189();
             final int spec189=specularMode184();
-            final int unified192=unifiedSurface192();
+            final int unified192=effectiveUnified193();
+            if(surfaceDefaultLogs193++<100)
+                log("SURFACE_DEFAULT_193 selection="+surfaceDefault193()+
+                    " effectiveUnified="+unified192+
+                    " rimMode="+rimMode190()+
+                    " blurDp="+customBlurDp+
+                    " direction="+state.visualDirection188);
             final int rim190=effectiveRim192();
             if(unified192!=0 && surfaceUnifiedLogs192++<160)
                 log("SURFACE_UNIFIED_192 mode="+unified192+
