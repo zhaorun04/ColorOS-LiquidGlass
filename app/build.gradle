@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191910
-        versionName '1.9.191-rounded-rim-geometry-fix'
+        versionCode 191920
+        versionName '1.9.192-unified-surface-optics-experiment'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

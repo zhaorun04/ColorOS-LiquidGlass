@@ -1,21 +1,33 @@
-V1.9.191｜圆角高光几何修正版
+V1.9.192｜统一表面光学融合实验版
 
-基于V1.9.190，仅修复drawRoundedRim190中错误的整矩形椭圆弧绘制：删除canvas.drawArc(upper,195f,150f,false,p)及其辅助画笔配置，避免玻璃内部出现半圆弧线。
+基于用户已实机验证稳定的 V1.9.191；保留 V1.9.188 动画时钟/跨桌面归中、V1.9.189 后置高光与模糊解耦、V1.9.191 圆角几何修复。
 
-保留沿真实圆角矩形的主高光、模式3内侧暗边、V1.9.188运动归中与V1.9.189后置绘制及背景模糊解耦。
+本版重点：对比旧柔和高光/光学轮廓与新的后置动态圆角反射，逐步验证替换，不立即删除旧实现。
 
-测试：
+全局设置 liquidglass_surface_unified_192：
+0 = 完全保持 V1.9.191 原有配置和视觉路径（默认、安全回退）
+1 = 仅保留旧版原生形状柔和高光，禁用新圆角高光（对照）
+2 = 仅启用新版后置圆角反射，停用旧原生高光/光学轮廓的 edge 绘制（替换验证）
+3 = 同时绘制新旧高光（叠加诊断，可能偏亮，不建议长期使用）
+
+新版圆角模式继续使用 liquidglass_rim_mode_190=1/2/3；当统一模式为2或3且圆角模式为0时，自动使用圆角模式3。原有液态玻璃折射、背景模糊、染色、动画调度保持不变。
+
+测试命令：
 su -c 'settings put global liquidglass_specular_185 3'
-su -c 'settings put global liquidglass_rim_mode_190 1'
-su -c 'settings put global liquidglass_rim_mode_190 2'
 su -c 'settings put global liquidglass_rim_mode_190 3'
+su -c 'settings put global liquidglass_surface_unified_192 1'
+su -c 'settings put global liquidglass_surface_unified_192 2'
+su -c 'settings put global liquidglass_surface_unified_192 3'
+su -c 'settings put global liquidglass_surface_unified_192 0'
 
-重点检查：原先玻璃内部的大半圆线条消失；四角高光仍贴合；跨桌面归中平滑；背景模糊不影响后置高光。
+日志：SURFACE_UNIFIED_192 mode=... legacyNative=... newRim=... rimMode=... blurDp=... direction=...
+
+注意：模式2的旧版边缘高光在原生融合绘制入口被跳过，但不会删除历史代码或配置。请测试静止质感、四角贴合、左右滑动、跨桌面归中、背景模糊独立、是否过亮/过暗。
 
 Termux Git：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.191 Rounded Rim Geometry Fix"
+git commit -m "V1.9.192 Unified Surface Optics Experiment"
 git push origin main
 
-验证：源码修改、ZIP完整性检查；未完成Android Gradle编译或实机测试。
+验证：ZIP完整性与源码结构检查；未进行 Android Gradle 编译或实机验证。

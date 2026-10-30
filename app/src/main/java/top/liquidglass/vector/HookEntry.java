@@ -1583,6 +1583,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(cache==null)return;
         boolean tint=tintMode!=0 && tintStrength>0 && glassTintOpacity>0 && probeMode!=2;
         boolean shine=(highlightEnabled && highlightStrength>0 && probeMode!=3)||probeMode==2;
+        // New-only mode replaces the legacy glow/edge/rim passes, not the tint.
+        if(edgeOnly && unifiedSurface192()==2)shine=false;
         if(!edgeOnly) {
             if(probeMode==0 && glassTintOpacity>0)drawOpticalGlass(canvas,cache);
             if(tint){
@@ -2376,6 +2378,35 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return rimMode190;
     }
+    // V1.9.192: staged replacement of the legacy soft highlight / optical contour.
+    // 0 = unchanged V191 behavior; 1 = legacy native highlight only;
+    // 2 = new post-blur surface rim only; 3 = both (A/B overlap diagnostic).
+    // The wallpaper refraction, blur, tint and motion scheduler are unchanged.
+    private static volatile int unifiedSurface192=0;
+    private static volatile long unifiedSurfaceRead192=0L;
+    private static int unifiedSurface192(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-unifiedSurfaceRead192>=350L){
+            unifiedSurfaceRead192=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)unifiedSurface192=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_surface_unified_192",0)));
+            }catch(Throwable ignored){}
+        }
+        return unifiedSurface192;
+    }
+    private static int effectiveRim192(){
+        int mode=unifiedSurface192();
+        if(mode==1)return 0; // legacy only
+        if(mode==2 || mode==3){
+            int rim=rimMode190();
+            return rim==0?3:rim; // default to dynamic rim + subtle inner shadow
+        }
+        return rimMode190(); // original V191 baseline
+    }
+    private static int surfaceUnifiedLogs192=0;
     private static int rimLogs190=0;
     private static void drawRoundedRim190(Canvas canvas,android.graphics.RectF bounds,
             float cornerRadius,float direction,int mode){
@@ -3326,7 +3357,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V189: post-blur surface stripe replaces (not stacks over)
                     // the legacy AGSL stripe when the diagnostic pass is enabled.
                     state.continuousShader.setFloatUniform("specularMode184",
-                        (float)((rimMode190()!=0 || surfacePass189()!=0)?0:specular184));
+                        (float)((effectiveRim192()!=0 || surfacePass189()!=0 || unifiedSurface192()==1)?0:specular184));
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
                     state.lastSpecularDirection187=motionDirection184;
@@ -3512,8 +3543,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // This is a diagnostic comparison path, not the final curved specular model.
             final int surface189=surfacePass189();
             final int spec189=specularMode184();
-            final int rim190=rimMode190();
-            if(rim190==0 && surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
+            final int unified192=unifiedSurface192();
+            final int rim190=effectiveRim192();
+            if(unified192!=0 && surfaceUnifiedLogs192++<160)
+                log("SURFACE_UNIFIED_192 mode="+unified192+
+                    " legacyNative="+(unified192==1 || unified192==3)+
+                    " newRim="+(rim190!=0)+
+                    " rimMode="+rim190+
+                    " blurDp="+customBlurDp+
+                    " direction="+state.visualDirection188+
+                    " view="+System.identityHashCode(view));
+            if(unified192==0 && rim190==0 && surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
                 drawSurfaceStripe189(canvas,rect,contourRadius,
                     state.visualDirection188,spec189,surface189);
                 if(surfaceLogs189++<180)log("SURFACE_PASS_189 pass="+surface189+
