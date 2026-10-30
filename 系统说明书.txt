@@ -17,3 +17,10 @@ V1.9.173 运动-合成隔离实验：
 以上为定位实验，不是视觉修复。模式1/3会丢失真实壁纸折射颜色。
 日志 MOTION_COMPOSITE_173 含 view id、位置、父容器 scroll/layer/alpha。
 请先将 liquidglass_refraction_composite_170、liquidglass_agsl_paint_alpha_171 等历史实验恢复为0。
+
+
+V1.9.174｜父容器合成状态逐帧审计
+本版不更改真实折射、模糊、父容器 Alpha 或硬件图层，仅新增 PARENT_COMPOSITE_174 日志。
+每个文件夹独立记录 screen/delta、Workspace scroll/delta、DragLayer 与 CellLayout 的 layer/alpha、AGSL Paint Alpha、采样坐标、壁纸帧及 Canvas 硬件状态。
+重点对比：桌面静止、向右短距离移动、再次静止，是否发生父容器 Alpha 或图层切换。
+日志最多 900 条/进程；无需新开关。保留 V1.9.154 解锁即时刷新。

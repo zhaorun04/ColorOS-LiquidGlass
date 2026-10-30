@@ -2154,6 +2154,60 @@ public final class HookEntry implements IXposedHookLoadPackage {
             " frame="+frameId+" parents="+parents);
     }
 
+    // V1.9.174: per-folder parent-composition transition audit. Observation only:
+    // never force parent alpha or layer type (would alter Launcher animations).
+    private static final class ParentSnapshot174 {
+        long time; float screenX, screenY; int workspaceScroll, dragLayer, cellLayer;
+        float dragAlpha, cellAlpha, folderAlpha; boolean initialized;
+    }
+    private static final java.util.WeakHashMap<View,ParentSnapshot174> PARENT_SNAPSHOTS_174 = new java.util.WeakHashMap<>();
+    private static int parentTraceCount174=0;
+    private static void traceParentComposite174(View folder, Canvas canvas, float sampleX,float sampleY,
+                                                  int paintAlpha,int frameId){
+        if(parentTraceCount174>=900)return;
+        try{
+            long now=android.os.SystemClock.uptimeMillis();
+            int[] xy=new int[2];folder.getLocationOnScreen(xy);
+            View workspace=null,drag=null,cell=null;
+            android.view.ViewParent node=folder.getParent();
+            for(int i=0;i<15 && node instanceof View;i++){
+                View v=(View)node;String name=v.getClass().getSimpleName();
+                if(workspace==null && name.contains("Workspace"))workspace=v;
+                if(drag==null && name.contains("DragLayer"))drag=v;
+                if(cell==null && name.contains("CellLayout"))cell=v;
+                node=v.getParent();
+            }
+            int ws=workspace==null?Integer.MIN_VALUE:workspace.getScrollX();
+            int dl=drag==null?-1:drag.getLayerType(),cl=cell==null?-1:cell.getLayerType();
+            float da=drag==null?Float.NaN:drag.getAlpha(),ca=cell==null?Float.NaN:cell.getAlpha();
+            ParentSnapshot174 previous=PARENT_SNAPSHOTS_174.get(folder);
+            if(previous==null){previous=new ParentSnapshot174();PARENT_SNAPSHOTS_174.put(folder,previous);}
+            float dx=previous.initialized?xy[0]-previous.screenX:0f;
+            float dy=previous.initialized?xy[1]-previous.screenY:0f;
+            int scrollDelta=previous.initialized && ws!=Integer.MIN_VALUE && previous.workspaceScroll!=Integer.MIN_VALUE?ws-previous.workspaceScroll:0;
+            boolean changed=previous.initialized && (dl!=previous.dragLayer || cl!=previous.cellLayer ||
+                Math.abs(da-previous.dragAlpha)>0.005f || Math.abs(ca-previous.cellAlpha)>0.005f ||
+                Math.abs(folder.getAlpha()-previous.folderAlpha)>0.005f);
+            boolean moved=Math.abs(dx)>0.5f || Math.abs(dy)>0.5f || scrollDelta!=0;
+            // Log at most once per 25ms per folder, but always log parent-state transitions.
+            boolean shouldLog=!previous.initialized || changed || ((moved || now-previous.time>350L) && now-previous.time>=25L);
+            if(shouldLog && parentTraceCount174++<900){
+                log("PARENT_COMPOSITE_174 id="+System.identityHashCode(folder)+" t="+now+
+                    " screen="+xy[0]+","+xy[1]+" delta="+dx+","+dy+
+                    " workspaceScroll="+ws+" scrollDelta="+scrollDelta+
+                    " dragLayer="+dl+" dragAlpha="+da+
+                    " cellLayer="+cl+" cellAlpha="+ca+
+                    " folderAlpha="+folder.getAlpha()+" changed="+changed+" moved="+moved+
+                    " paintAlpha="+paintAlpha+" sample="+sampleX+","+sampleY+
+                    " frame="+frameId+" hardware="+canvas.isHardwareAccelerated());
+            }
+            previous.initialized=true;previous.time=now;
+            previous.screenX=xy[0];previous.screenY=xy[1];previous.workspaceScroll=ws;
+            previous.dragLayer=dl;previous.cellLayer=cl;previous.dragAlpha=da;
+            previous.cellAlpha=ca;previous.folderAlpha=folder.getAlpha();
+        }catch(Throwable e){if(parentTraceCount174++<900)log("PARENT_COMPOSITE_174_ERROR "+e.getClass().getSimpleName());}
+    }
+
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -2843,6 +2897,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setAlpha(alphaMode171==0?255:(alphaMode171==1?128:(alphaMode171==2?64:0)));
                     state.samplePaint.setShader(state.continuousShader);
                     traceAgslAlpha171(view,canvas,alphaMode171,state.samplePaint);
+                    traceParentComposite174(view,canvas,left,top,state.samplePaint.getAlpha(),System.identityHashCode(frame));
                     // V159: only the AGSL surface is changed. The native blur,
                     // tint, rim and children remain on their original Canvas path.
                     // SRC is NEVER applied directly to the parent Canvas: that would
