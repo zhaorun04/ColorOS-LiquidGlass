@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191690
-        versionName '1.9.169-refraction-path-isolation'
+        versionCode 191700
+        versionName '1.9.170-refraction-compositing-order'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

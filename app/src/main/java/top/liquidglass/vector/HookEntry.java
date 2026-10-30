@@ -2045,6 +2045,24 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return 0;
     }
 
+    // V1.9.170: compositing order experiment. 0=legacy AGSL->blur;
+    // 1=opaque blur foundation->AGSL. This keeps actual AGSL pixels visible.
+    private static int refractionComposite170(){
+        try{
+            android.content.Context ctx=launcherContext;
+            if(ctx!=null)return Math.max(0,Math.min(1,android.provider.Settings.Global.getInt(
+                ctx.getContentResolver(),"liquidglass_refraction_composite_170",0)));
+        }catch(Throwable ignored){}
+        return 0;
+    }
+    private static final int[] REFRACTION_COMPOSITE_LOGS_170=new int[2];
+    private static void logComposite170(int mode,String stage,int alpha){
+        synchronized(REFRACTION_COMPOSITE_LOGS_170){
+            if(REFRACTION_COMPOSITE_LOGS_170[mode]++<100)
+                log("REFRACTION_COMPOSITE_170 mode="+mode+" stage="+stage+" blurAlpha="+alpha);
+        }
+    }
+
     // V1.9.169: isolate the real-refraction switch without changing other settings.
     // 0=baseline; 1=skip AGSL while preserving refraction-active blur alpha;
     // 2=AGSL only, omit custom blur/tint/surface material (edge pass unchanged).
@@ -2599,6 +2617,35 @@ public final class HookEntry implements IXposedHookLoadPackage {
             final boolean refractionActive=REFRACTION_ENABLED && refractionPercent>0;
             final int pathMode169=refractionPathMode169();
             logRefractionPath169(pathMode169,"ENTER",refractionActive);
+            final int compositeMode170=refractionComposite170();
+            logComposite170(compositeMode170,"ENTER",-1);
+            if(compositeMode170==1 && customBlurMode==1 && customBlurDp>0){
+                android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
+                if(blurred!=null){
+                    if(blurHitLogs142++<24)log("BLUR_DRAW_142 READY radius="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
+                    if(state.cachedBlurBitmap!=blurred || state.cachedBlurShader==null){
+                        state.cachedBlurBitmap=blurred;
+                        state.cachedBlurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
+                        state.cachedBlurPaint.setShader(state.cachedBlurShader);
+                    }
+                    // V1.9.168: audit isolation: preserve the historical alpha by default.
+                    // Setting mode=1 keeps the same blur opacity when refraction is toggled,
+                    // isolating the AGSL contribution from the blur-alpha coupling.
+                    final int blurIsolation168=refractionBlurIsolation168();
+                    final int blurAlpha168=255;
+                    state.cachedBlurPaint.setAlpha(blurAlpha168);
+                    logComposite170(compositeMode170,"PRE_AGSL_BLUR",blurAlpha168);
+                    if(REFRACTION_BLUR_LOGS_168++<80)log("REFRACTION_BLUR_168 isolation="+blurIsolation168+
+                        " refractionActive="+refractionActive+" alpha="+blurAlpha168+
+                        " blurDp="+customBlurDp+" frame="+System.identityHashCode(frame));
+                    state.cachedBlurMatrix.reset();
+                    state.cachedBlurMatrix.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());
+                    state.cachedBlurMatrix.postTranslate(-left,-top);
+                    state.cachedBlurShader.setLocalMatrix(state.cachedBlurMatrix);
+                    canvas.drawRoundRect(rect,contourRadius,contourRadius,state.cachedBlurPaint);
+                    if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<48)log("GLASS126_BLUR_DRAWN enabled="+REFRACTION_ENABLED+" radiusDp="+customBlurDp);
+                }else if(blurHitLogs142++<24){log("BLUR_DRAW_142 WAIT radius="+customBlurDp+" frame="+System.identityHashCode(frame)+" pending="+BLUR_PENDING);}
+            }
             if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==4 && !Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==5 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && pathMode169!=1 && canvas.isHardwareAccelerated() && !state.continuousUnavailable && !Boolean.TRUE.equals(AGSL_SUBMITTED_144.get())){
                 try {
                     if(state.continuousShader==null){
@@ -2730,10 +2777,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
             }
             logRefractionPath169(pathMode169,continuousDrawn?"AGSL_DRAWN":"AGSL_NOT_DRAWN",refractionActive);
+            logComposite170(compositeMode170,continuousDrawn?"AGSL_DRAWN":"AGSL_NOT_DRAWN",-1);
             state.samplePaint.setShader(null);
             // Independent background blur and tint: always visible with refraction OFF.
             // With refraction ON, retain some optical detail beneath the blur.
-            if(customBlurMode==1 && customBlurDp>0){
+            if(compositeMode170==0 && customBlurMode==1 && customBlurDp>0){
                 android.graphics.Bitmap blurred=blurredWallpaper(frame,dm.density,view);
                 if(blurred!=null){
                     if(blurHitLogs142++<24)log("BLUR_DRAW_142 READY radius="+customBlurDp+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));

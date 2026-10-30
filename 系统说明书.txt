@@ -1,26 +1,8 @@
-ColorOS-LiquidGlass V1.9.168｜真实壁纸折射链路审计版
+V1.9.170｜真实壁纸折射合成顺序 A/B 验证版
 
-基于 V1.9.167，默认绘制路径保持不变；本版不宣称已修复闪烁。
-审计重点：AGSL Shader、BitmapShader 屏幕坐标映射、折射开关、模糊 Alpha 耦合、Canvas 合成、FolderIcon 前后绘制阶段、壁纸帧缓存、诊断开关。
-
-已确认的结构问题：
-1. 开启折射同时改变模糊层 Alpha（235/145 对比关闭时 255），导致总开关对照并非单变量。
-2. AGSL 在模糊层之前绘制；模糊层随后覆盖折射输出，且边缘材质另行绘制。
-3. 固定灰色 AGSL 测试仍保留其他模糊/材质层，不能直接判定 Shader 是根因。
-4. FolderIcon.getBackground() 为 null 不等于私有 mBackground 为 null。
-5. 历史诊断开关众多，测试时应恢复默认值。
-
-本版增加可恢复的单变量测试：
-settings put global liquidglass_refraction_blur_isolation_168 0  # 旧版原样
-settings put global liquidglass_refraction_blur_isolation_168 1  # 模糊 Alpha 固定 255，不随折射开关改变
-日志：REFRACTION_BLUR_168
-测试后恢复 0。模式 1 可能改变模糊视觉，不是最终修复方案。
-
-保留 AGSL 真实壁纸折射与 V1.9.154 解锁重绘。
-
-V1.9.169 折射路径隔离诊断
-设置 liquidglass_refraction_path_169：0 原始；1 跳过 AGSL 但保留折射开启时的模糊 Alpha 与其他材质；2 保留 AGSL 但跳过自定义模糊、Tint 与表面光学材质（边缘描边保持）。
-请将旧版 liquidglass_fixed_output_167 等探针恢复为 0，再比较桌面左右位移时的异常高亮。日志标记 REFRACTION_PATH_169。
-模式 1、2 为诊断，不是视觉修复；不改变 V1.9.154 解锁机制。
-
-编译修正：修复 scheduleReferenceLoad 后台线程引用仅在绘制函数内定义的 pathMode169，恢复缓存命中时的原始模糊预热条件。
+模式0：保持原有 AGSL 后绘制模糊层的顺序。
+模式1：先绘制不透明模糊壁纸底层，再绘制真实壁纸 AGSL 折射；保留后续 Tint 与材质。
+设置命令：su -c 'settings put global liquidglass_refraction_composite_170 1'
+恢复：su -c 'settings put global liquidglass_refraction_composite_170 0'
+测试前请恢复 liquidglass_refraction_blur_isolation_168=0 和 liquidglass_refraction_path_169=0。
+本版本为针对性合成实验，未实机验证，不保证已解决异常高亮。
