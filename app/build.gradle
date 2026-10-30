@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191550
-        versionName '1.9.155-coordinate-sampling-probe'
+        versionCode 191560
+        versionName '1.9.156-optical-isolation-trace'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

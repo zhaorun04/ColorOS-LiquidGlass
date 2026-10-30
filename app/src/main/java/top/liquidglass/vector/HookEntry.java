@@ -2182,6 +2182,29 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return opticalProbe141;
     }
     private static int opticalProbeLogged141=-1;
+    // V1.9.156: isolated AGSL diagnostics; mode 0 preserves V1.9.155 rendering.
+    // 1 = zero displacement, 2 = constant shader sample, 3 = diagnostics only.
+    private static volatile int opticalProbe156=0;
+    private static volatile long opticalProbeReadAt156=0L;
+    private static int opticalProbeLogged156=-1;
+    private static int opticalDrawLogs156=0;
+    private static int opticalDuplicateLogs156=0;
+    private static int opticalProbe156(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-opticalProbeReadAt156>=500L){
+            opticalProbeReadAt156=now;
+            try{
+                int v=android.provider.Settings.Global.getInt(
+                    launcherContext.getContentResolver(),"liquidglass_optical_probe_156",0);
+                opticalProbe156=(v>=0 && v<=3)?v:0;
+            }catch(Throwable ignored){}
+        }
+        if(opticalProbeLogged156!=opticalProbe156){
+            opticalProbeLogged156=opticalProbe156;
+            log("OPTICAL_PROBE_156 mode="+opticalProbe156);
+        }
+        return opticalProbe156;
+    }
     // V1.9.144: one AGSL surface submission per FolderIcon dispatchDraw.
     // The OEM callback can run during the same dispatch; do not composite twice.
     private static final ThreadLocal<Boolean> AGSL_SUBMITTED_144 = new ThreadLocal<>();
@@ -2316,10 +2339,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // Keep the requested mode 1/3 diagnostics available.
                     int shaderMode=(visibilityTest==0?2:visibilityTest);
                     int displacementMode=currentDisplacementIsolationMode();
-                    state.continuousShader.setFloatUniform("strength",displacementMode==0?0.0f:22.0f*refractionPercent/35.0f);
+                    int probe156=opticalProbe156();
+                    state.continuousShader.setFloatUniform("strength",probe156==1?0.0f:(displacementMode==0?0.0f:22.0f*refractionPercent/35.0f));
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     int samplingDiagnostic=currentSampleIsolationMode();
-                    state.continuousShader.setFloatUniform("sampleIsolation",(float)samplingDiagnostic);
+                    state.continuousShader.setFloatUniform("sampleIsolation",(float)(probe156==2?1:samplingDiagnostic));
                     // Same local p-space as wallpaper.eval(), but bounded by
                     // the actual display rectangle. Only mode 2 clamps p.
                     state.continuousShader.setFloatUniform("screenClip",0.5f-left,0.5f-top,
@@ -2338,6 +2362,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
                     continuousDrawn=true;
                     AGSL_SUBMITTED_144.set(Boolean.TRUE);
+                    if(opticalDrawLogs156++<100)log("OPTICAL_DRAW_156 mode="+probe156+
+                        " view="+System.identityHashCode(view)+" canvas="+System.identityHashCode(canvas)+
+                        " frame="+System.identityHashCode(frame)+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+
+                        " left="+left+" top="+top+" strengthZero="+(probe156==1)+" sampleNeutral="+(probe156==2));
                     if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<64)log("GLASS119_PIPELINE stage=AGSL_DRAWN mode="+customBlurMode+" shaderMode="+shaderMode+" displacementMode="+displacementMode);
                     if(refractionPassLogs++<32)log("REFRACTION_TEST_PASS mode="+visibilityTest+" shaderMode="+shaderMode+" displacementMode="+displacementMode+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" hardware="+canvas.isHardwareAccelerated()+" rect="+rect.toShortString());
                     if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=AGSL_ACTIVE");}

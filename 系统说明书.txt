@@ -1,6 +1,18 @@
-V1.9.155｜折射采样坐标一致性对照版
-基于实机验证正常的 V1.9.154。默认模式0完全沿用旧坐标路径，保留解锁主动重绘、AGSL、模糊与描边。
-设置 liquidglass_coordinate_probe_155：0=原始矩阵坐标；1=getLocationOnScreen整数坐标；2=矩阵坐标像素取整。
-模式1/2仅用于短时诊断，可能改变壁纸对齐。COORD_COMPARE_155记录坐标差异。
-恢复：su -c "settings put global liquidglass_coordinate_probe_155 0"
-未完成Gradle构建及实机验证。
+V1.9.156｜AGSL 折射位移与纹理采样隔离诊断版
+
+基于 V1.9.155，保留 V1.9.154 的解锁主动重绘、壁纸持久缓存、原始玻璃绘制与柔和描边。
+
+设置命令（需要 root）：
+settings put global liquidglass_optical_probe_156 0  # 原始绘制，默认
+settings put global liquidglass_optical_probe_156 1  # AGSL 位移强度设为 0，仅作诊断
+settings put global liquidglass_optical_probe_156 2  # AGSL 使用恒定灰色采样输出，仅作诊断
+settings put global liquidglass_optical_probe_156 3  # 不改变绘制，仅采集日志
+
+为保证对照，其他旧诊断模式请设为默认：
+settings put global liquidglass_coordinate_probe_155 0
+settings put global liquidglass_layer_probe_151 0
+settings put global liquidglass_native_preview_isolation_149 0
+
+日志：OPTICAL_PROBE_156、OPTICAL_DRAW_156、AGSL_ONCE_144。
+模式 1 和 2 会改变折射外观，仅用于临时测试；测试结束请恢复模式 0。
+模式 0 不修改原有 AGSL 绘制参数。此次仅诊断，未宣称修复滑动增亮。
