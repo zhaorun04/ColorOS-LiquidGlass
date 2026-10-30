@@ -1,6 +1,12 @@
-V1.9.148｜壁纸参考帧持久缓存与解锁复用版
+V1.9.149｜壁纸参考帧持久缓存与解锁复用版
 
 新增 Launcher DE 存储镜像，配合现有 CE 缓存，在锁屏解锁时尽量直接复用上次参考帧。root-helper 同步源壁纸变化并原子更新 CE/DE 缓存。
 Launcher 优先读取可用且较新的参考文件；内存命中不重新解码。日志 REFERENCE_REUSE_148。
 
 注意：需按原安装流程更新 root-helper 的 service.d 脚本并重启服务，否则 DE 镜像不会生成。动态壁纸实时画面不保证可由静态截图代表。触摸高亮仍需进一步诊断。
+
+V1.9.149：首帧时序诊断 FIRST_DRAW_149；原生 OplusPreviewBackground.drawBackground 可选隔离。
+默认不隔离：su -c 'settings put global liquidglass_native_preview_isolation_149 0'
+实验隔离：su -c 'settings put global liquidglass_native_preview_isolation_149 1'
+完成后务必恢复为 0。实验可能影响 ColorOS 文件夹原生动画/背景，AGSL 绘制入口不关闭。
+请对比同一明亮壁纸区域反复滑动与松手时的高光闪烁。

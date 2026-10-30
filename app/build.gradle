@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 191480
-        versionName '1.9.148-persistent-reference-cache'
+        versionName '1.9.149-persistent-reference-cache'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

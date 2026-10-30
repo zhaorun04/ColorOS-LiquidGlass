@@ -2576,6 +2576,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         View v=(View)p.thisObject;
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
                         traceTouchComposite147(v,(Canvas)p.args[0]);
+                        traceFirstDraw149(v,"dispatch");
                         // A new dispatch is a new frame for this folder.
                         AGSL_SUBMITTED_144.remove();
                         SURFACE_SUBMITTED_144.remove();
@@ -2607,7 +2608,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(currentCompositionIsolationMode()!=2 && glassEnabled){
                             REFRACTION_AFTER_OEM.set(Boolean.TRUE);
                             try { drawFolderIconFusion(v,(Canvas)p.args[0],false); }
-                            finally { REFRACTION_AFTER_OEM.remove(); }
+                            finally { REFRACTION_AFTER_OEM.remove(); traceFirstDraw149(v,"surface"); }
                             EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
                             if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<64)
                                 log("GLASS120_COMPOSITION stage=BEFORE_CHILDREN backgroundAlreadyDrawn=true frameReady="+
@@ -3052,6 +3053,47 @@ public final class HookEntry implements IXposedHookLoadPackage {
             traceConditions(preview,"preview");
         }catch(Throwable e){if(blurStateLogs++<8)log("BLUR_PROBE_FOLDER_ERROR="+e.getClass().getSimpleName());}
     }
+    // V149: opt-in native preview draw isolation. Default 0 never changes OEM behavior.
+    // 1 skips only OplusPreviewBackground.drawBackground while retaining AGSL dispatch.
+    private static volatile int previewIsolation149=0;
+    private static volatile long previewIsolationRead149=0L;
+    private static int previewIsolation149(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-previewIsolationRead149>600L){
+            previewIsolationRead149=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int mode=android.provider.Settings.Global.getInt(c.getContentResolver(),
+                        "liquidglass_native_preview_isolation_149",0)==1?1:0;
+                    if(mode!=previewIsolation149){previewIsolation149=mode;log("PREVIEW_ISOLATION_149 mode="+mode);}
+                }
+            }catch(Throwable ignored){}
+        }
+        return previewIsolation149;
+    }
+    private static final java.util.Map<View,long[]> FIRST_DRAW_149 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View,long[]>());
+    private static int firstDrawLogs149=0;
+    private static void traceFirstDraw149(View v, String stage){
+        if(firstDrawLogs149>=160)return;
+        try{
+            long now=android.os.SystemClock.uptimeMillis();
+            long[] a=FIRST_DRAW_149.get(v);
+            if(a==null){a=new long[]{now,0,0,0};FIRST_DRAW_149.put(v,a);}
+            boolean frame=REFRACTION_FRAME!=null&&!REFRACTION_FRAME.isRecycled();
+            int slot="dispatch".equals(stage)?1:("surface".equals(stage)?2:3);
+            if(a[slot]!=0)return;
+            if(slot==2&&!frame)return;
+            a[slot]=now;
+            if(firstDrawLogs149++<160)log("FIRST_DRAW_149 stage="+stage+
+                " view="+System.identityHashCode(v)+" elapsed="+(now-a[0])+
+                " frame="+frame+" configEpoch="+REFRACTION_CONFIG_EPOCH+
+                " glass="+glassEnabled+" refraction="+REFRACTION_ENABLED+
+                " blurDp="+customBlurDp+" attached="+v.isAttachedToWindow());
+        }catch(Throwable ignored){}
+    }
+    private static int previewIsolationLogs149=0;
     private static void hookPreview(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.OplusPreviewBackground", loader);
         if (c == null) return;
@@ -3070,6 +3112,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam param) {
                         if (!"drawBackground".equals(methodName)) return;
+                        if(previewIsolation149()==1 && glassEnabled){
+                            if(previewIsolationLogs149++<40)log("PREVIEW_SKIP_149 method=drawBackground");
+                            param.setResult(null);
+                            return;
+                        }
                         Integer depth=PREVIEW_DRAW_DEPTH.get();
                         PREVIEW_DRAW_DEPTH.set(depth==null?1:depth+1);
                         if (diagnostics && previewTraceLogs++ < 32) {
@@ -3083,6 +3130,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         try {
                             if ("drawBackground".equals(methodName)) {
+                                if(previewIsolation149()==1 && glassEnabled)return;
                                 // Draw on the preview's actual Canvas after its OEM background has been drawn.
                                 // This avoids hooking an inherited/nonexistent LayerBlurDrawable.draw method.
                                 Canvas targetCanvas=null;
