@@ -2239,6 +2239,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // V1.9.158: per-dispatch accounting; counters do not change rendering behavior.
     private static final ThreadLocal<int[]> COMPOSITE_COUNTS_158=new ThreadLocal<>();
     private static int compositeTraceLogs158=0;
+    // V1.9.159: isolated Canvas compositing A/B; default 0 is bit-for-bit original path.
+    private static volatile int canvasComposite159=0;
+    private static volatile long canvasCompositeRead159=0L;
+    private static int canvasCompositeLogged159=-1;
+    private static int canvasComposite159(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-canvasCompositeRead159>=400L){
+            canvasCompositeRead159=now;
+            try{android.content.Context c=launcherContext;
+                if(c!=null){int v=android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_canvas_composite_159",0);
+                    canvasComposite159=(v>=0&&v<=3)?v:0;}
+            }catch(Throwable ignored){}
+        }
+        if(canvasCompositeLogged159!=canvasComposite159){
+            canvasCompositeLogged159=canvasComposite159;
+            log("CANVAS_MODE_159 mode="+canvasComposite159);
+        }
+        return canvasComposite159;
+    }
+    private static final int[] CANVAS_LOG_COUNTS_159=new int[4];
+    private static final int[] CANVAS_DISPATCH_LOG_COUNTS_159=new int[4];
+
 
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
@@ -2393,7 +2415,37 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
-                    canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
+                    // V159: only the AGSL surface is changed. The native blur,
+                    // tint, rim and children remain on their original Canvas path.
+                    // SRC is NEVER applied directly to the parent Canvas: that would
+                    // erase existing pixels outside the shader's non-opaque area.
+                    final int canvasMode159=canvasComposite159();
+                    int isolatedLayer159=-1;
+                    android.graphics.Xfermode previousXfer159=state.samplePaint.getXfermode();
+                    try{
+                        if(canvasMode159==2 || canvasMode159==3){
+                            // Tight local bounds; restore composites the transparent
+                            // offscreen result back using the default SRC_OVER.
+                            isolatedLayer159=canvas.saveLayer(rect.left,rect.top,rect.right,rect.bottom,null);
+                        }
+                        if(canvasMode159==1){
+                            state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_OVER));
+                        }else if(canvasMode159==2){
+                            state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC));
+                        }else{
+                            state.samplePaint.setXfermode(null);
+                        }
+                        canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
+                    }finally{
+                        state.samplePaint.setXfermode(previousXfer159);
+                        if(isolatedLayer159>=0)canvas.restoreToCount(isolatedLayer159);
+                    }
+                    if(CANVAS_LOG_COUNTS_159[canvasMode159]++<72)
+                        log("CANVAS_SUBMIT_159 mode="+canvasMode159+" view="+System.identityHashCode(view)+
+                            " canvas="+System.identityHashCode(canvas)+" layer="+(isolatedLayer159>=0)+
+                            " attempts="+(compositeCounts158==null?-1:compositeCounts158[0])+
+                            " submissionsBefore="+(compositeCounts158==null?-1:compositeCounts158[1])+
+                            " frame="+System.identityHashCode(frame)+" left="+left+" top="+top);
                     if(compositeCounts158!=null){
                         compositeCounts158[1]++;
                         if(compositeTraceLogs158++<240)log("COMPOSITE_SUBMIT_158 view="+System.identityHashCode(view)+" mode="+composite157+" attempts="+compositeCounts158[0]+" submissions="+compositeCounts158[1]+" canvas="+System.identityHashCode(canvas)+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" frame="+System.identityHashCode(frame));
@@ -2806,6 +2858,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     } finally {
                         int[] counts158=COMPOSITE_COUNTS_158.get();
                         if(counts158!=null){
+                            int mode159=canvasComposite159;
+                            if(CANVAS_DISPATCH_LOG_COUNTS_159[mode159]++<72)
+                                log("CANVAS_DISPATCH_159 mode="+mode159+" view="+System.identityHashCode(p.thisObject)+
+                                    " attempts="+counts158[0]+" submissions="+counts158[1]+
+                                    " canvas="+System.identityHashCode(p.args[0]));
                             if(compositeTraceLogs158++<240)log("COMPOSITE_DISPATCH_158 view="+System.identityHashCode(p.thisObject)+" attempts="+counts158[0]+" submissions="+counts158[1]+" mode="+compositeProbe157+" canvas="+System.identityHashCode(p.args[0]));
                             COMPOSITE_COUNTS_158.remove();
                         }

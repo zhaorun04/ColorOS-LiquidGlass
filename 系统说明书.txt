@@ -1,4 +1,4 @@
-V1.9.158｜环境高光隔离顺序修正与合成次数诊断版
+V1.9.159｜环境高光隔离顺序修正与合成次数诊断版
 
 基于 V1.9.157，保留真实壁纸 AGSL 折射、缓存、描边、模糊及 V1.9.154 解锁即时重绘。
 
@@ -16,3 +16,15 @@ su -c 'settings put global liquidglass_composite_probe_157 1'
 测试结束恢复模式 0。
 
 注意：源码包尚未在此环境完成 Android Gradle 编译或设备验证。
+
+
+V1.9.159 Canvas合成路径隔离诊断
+设置：su -c 'settings put global liquidglass_canvas_composite_159 0'
+模式0：原始绘制，不改变合成逻辑。
+模式1：显式 SRC_OVER，直接在原Canvas绘制。
+模式2：限定玻璃矩形范围的透明离屏图层，图层内以SRC绘制，恢复时SRC_OVER合成。
+模式3：限定玻璃矩形范围的透明离屏图层，图层内默认SRC_OVER绘制，恢复时SRC_OVER合成。
+诊断日志：CANVAS_MODE_159、CANVAS_SUBMIT_159、CANVAS_DISPATCH_159；每种模式分别限制记录条数。
+测试时将 liquidglass_composite_probe_157 和 liquidglass_optical_probe_156 设为0。
+注意：模式2与3在单个空白图层上绘制时可能呈现相同效果，这也是用于验证是否由隔离图层本身影响闪烁。
+本版本仅供定位，尚未完成实机验证。
