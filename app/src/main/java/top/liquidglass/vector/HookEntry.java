@@ -1998,11 +1998,48 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }catch(Throwable ignored){}
         return OPTICAL_AB_133;
     }
+    // V1.9.167: independent displacement/compositing diagnostic. No changes in mode 0.
+    private static volatile int fixedOutput167=0;
+    private static volatile long fixedRead167=0L;
+    private static int fixedOutput167(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-fixedRead167>500L){
+            fixedRead167=now;
+            try{android.content.Context c=launcherContext;
+                if(c!=null)fixedOutput167=Math.max(0,Math.min(2,android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_fixed_output_167",0)));
+            }catch(Throwable t){log("FIXED_MODE_READ_167 error="+t.getClass().getSimpleName());}
+        }
+        return fixedOutput167;
+    }
+    private static int fixedLogs167=0;
+    private static int fixedLastMode167=-1;
+    private static long fixedLogAt167=0L;
+    private static void traceFixed167(View view,android.graphics.Canvas canvas,int mode,float x,float y){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(mode!=fixedLastMode167){fixedLastMode167=mode;log("FIXED_MODE_167 mode="+mode+" legend=0-normal,1-constant-translucent,2-constant-opaque");}
+        if(fixedLogs167>=360 || now-fixedLogAt167<85L)return;
+        fixedLogAt167=now;fixedLogs167++;
+        StringBuilder chain=new StringBuilder();
+        View cur=view;
+        for(int i=0;i<9 && cur!=null;i++){
+            String name=cur.getClass().getSimpleName();
+            if(i>0)chain.append('>');
+            chain.append(name).append(':').append(cur.getScrollX()).append(',').append(cur.getScrollY());
+            android.view.ViewParent parent=cur.getParent();
+            cur=parent instanceof View?(View)parent:null;
+        }
+        int[] loc=new int[2];view.getLocationOnScreen(loc);
+        log("FIXED_DRAW_167 mode="+mode+" view="+System.identityHashCode(view)+
+            " uptime="+now+" xy="+x+","+y+" screen="+loc[0]+","+loc[1]+
+            " canvasHardware="+canvas.isHardwareAccelerated()+" viewAlpha="+view.getAlpha()+
+            " chain="+chain);
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
         "uniform float strength;\n"+
         "uniform float diagnosticMode;\n"+
+        "uniform float fixedOutput167;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
         "uniform float motionHighlight;\n"+
@@ -2022,6 +2059,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " bool outOfDisplay=samplingPoint.x<screenClip.x || samplingPoint.y<screenClip.y || samplingPoint.x>screenClip.z || samplingPoint.y>screenClip.w;\n"+
         " if(sampleIsolation>1.5 && sampleIsolation<2.5){samplingPoint=clamp(samplingPoint,screenClip.xy,screenClip.zw); }\n"+
         " half4 color=wallpaper.eval(samplingPoint);\n"+
+        " if(fixedOutput167>0.5){return fixedOutput167<1.5?half4(0.50,0.50,0.50,0.18):half4(0.50,0.50,0.50,1.0); }\n"+
         " if(sampleIsolation>0.5 && sampleIsolation<1.5){return half4(0.50,0.50,0.50,0.65); }\n"+
         " if(sampleIsolation>3.5 && sampleIsolation<4.5 && outOfDisplay){return half4(1.0,0.48,0.02,0.93); }\n"+
         " if(sampleIsolation>2.5 && sampleIsolation<3.5){float lum=dot(float3(color.rgb),float3(0.2126,0.7152,0.0722));return half4(half3(lum),half(0.65)); }\n"+
@@ -2578,6 +2616,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     int probe156=opticalProbe156();
                     state.continuousShader.setFloatUniform("strength",probe156==1?0.0f:(displacementMode==0?0.0f:22.0f*refractionPercent/35.0f));
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
+                    final int fixed167=fixedOutput167();
+                    state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     int samplingDiagnostic=currentSampleIsolationMode();
                     state.continuousShader.setFloatUniform("sampleIsolation",(float)(probe156==2?1:samplingDiagnostic));
                     final int composite157=compositeProbe157();
@@ -2622,6 +2662,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         state.samplePaint.setXfermode(previousXfer159);
                         if(isolatedLayer159>=0)canvas.restoreToCount(isolatedLayer159);
                     }
+                    traceFixed167(view,canvas,fixed167,left,top);
                     traceFolderMotion161(view,canvas,left,top,frame,sampleMode160,canvasMode159);
                     traceLayerChain162(view,canvas,"AGSL_SUBMIT");
                     if(CANVAS_LOG_COUNTS_159[canvasMode159]++<72)
