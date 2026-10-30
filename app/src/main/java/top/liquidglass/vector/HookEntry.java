@@ -2114,12 +2114,53 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " master="+enabled+" count="+REFRACTION_PATH_COUNTS_169[mode]);
         }
     }
+    // V1.9.173: isolate wallpaper sampling from motion-time layer compositing.
+    // 0=original; 1=constant RGB with original AGSL alpha; 2=no optical displacement;
+    // 3=constant RGB + no displacement. These are diagnostic modes only.
+    private static volatile int motionIsolation173=0;
+    private static volatile long motionIsolationRead173=0L;
+    private static int motionIsolation173(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-motionIsolationRead173>400L){
+            motionIsolationRead173=now;
+            try{android.content.Context c=launcherContext;
+                if(c!=null)motionIsolation173=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_motion_composite_173",0)));
+            }catch(Throwable t){log("MOTION_COMPOSITE_173_READ_ERROR "+t.getClass().getSimpleName());}
+        }
+        return motionIsolation173;
+    }
+    private static int motionIsolationLast173=-1;
+    private static int motionIsolationLogs173=0;
+    private static long motionIsolationAt173=0L;
+    private static void traceMotionIsolation173(View v,int mode,float x,float y,int frameId){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(mode!=motionIsolationLast173){motionIsolationLast173=mode;
+            log("MOTION_COMPOSITE_173_MODE mode="+mode+" legend=0-original,1-flatRGB-originalAlpha,2-noDisplacement,3-flatRGB-noDisplacement");}
+        if(motionIsolationLogs173>=480 || now-motionIsolationAt173<35L)return;
+        motionIsolationAt173=now;motionIsolationLogs173++;
+        int[] xy=new int[2];v.getLocationOnScreen(xy);
+        StringBuilder parents=new StringBuilder();android.view.ViewParent p=v.getParent();
+        for(int i=0;i<7 && p instanceof View;i++){
+            View parent=(View)p;
+            if(i>0)parents.append('>');
+            parents.append(parent.getClass().getSimpleName()).append(':')
+                .append(parent.getScrollX()).append(',').append(parent.getLayerType())
+                .append(',').append(parent.getAlpha());
+            p=parent.getParent();
+        }
+        log("MOTION_COMPOSITE_173 mode="+mode+" id="+System.identityHashCode(v)+
+            " t="+now+" screen="+xy[0]+","+xy[1]+" sample="+x+","+y+
+            " frame="+frameId+" parents="+parents);
+    }
+
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
         "uniform float strength;\n"+
         "uniform float diagnosticMode;\n"+
         "uniform float fixedOutput167;\n"+
+        "uniform float motionIsolation173;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
         "uniform float motionHighlight;\n"+
@@ -2135,7 +2176,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float edge=abs(2.0*u-1.0);\n"+
         " float envelope=edge*edge*(3.0-2.0*edge);\n"+
         " float direction=1.0-2.0*smoothstep(0.47,0.53,u);\n"+
-        " float2 samplingPoint=p+float2(direction*envelope*strength,0.0);\n"+
+        " float displacement173=(motionIsolation173>1.5?0.0:strength);\n"+
+        " float2 samplingPoint=p+float2(direction*envelope*displacement173,0.0);\n"+
         " bool outOfDisplay=samplingPoint.x<screenClip.x || samplingPoint.y<screenClip.y || samplingPoint.x>screenClip.z || samplingPoint.y>screenClip.w;\n"+
         " if(sampleIsolation>1.5 && sampleIsolation<2.5){samplingPoint=clamp(samplingPoint,screenClip.xy,screenClip.zw); }\n"+
         " half4 color=wallpaper.eval(samplingPoint);\n"+
@@ -2165,6 +2207,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  color.a=half(probe143Composite>0.5?0.18:(clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);\n"+
         "  if(compositeProbe157>1.5 && compositeProbe157<2.5){color.a=half(0.15); }\n"+
         "  if(compositeProbe157>2.5 && compositeProbe157<3.5){color.a=half(0.075); }\n"+
+        "  if(motionIsolation173>0.5 && motionIsolation173<1.5 || motionIsolation173>2.5){color.rgb=half3(0.50,0.50,0.50); }\n"+
         "  return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -2776,6 +2819,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
+                    final int isolation173=motionIsolation173();
+                    state.continuousShader.setFloatUniform("motionIsolation173",(float)isolation173);
+                    traceMotionIsolation173(view,isolation173,left,top,System.identityHashCode(frame));
                     int samplingDiagnostic=currentSampleIsolationMode();
                     state.continuousShader.setFloatUniform("sampleIsolation",(float)(probe156==2?1:samplingDiagnostic));
                     final int composite157=compositeProbe157();

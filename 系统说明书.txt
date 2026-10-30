@@ -8,3 +8,12 @@ V1.9.170｜真实壁纸折射合成顺序 A/B 验证版
 本版本为针对性合成实验，未实机验证，不保证已解决异常高亮。
 
 V1.9.172：增加 MOTION_OPTICS_172 逐帧只读诊断，记录桌面短距离单向位移、AGSL采样原点、Canvas矩阵、父容器滚动、Shader参数和Paint透明度；不改变光学输出。每次Launcher进程最多600条，间隔至少14ms。
+
+V1.9.173 运动-合成隔离实验：
+设置 liquidglass_motion_composite_173 = 0/1/2/3（默认0）。
+0 正常真实折射；1 固定 AGSL RGB 为中灰，保留原有 AGSL alpha 与绘制路径；
+2 保留真实壁纸采样，但将像素位移设为0（不改变 alpha 计算所用 strength）；
+3 固定 RGB 且关闭像素位移，保留原有 AGSL alpha。
+以上为定位实验，不是视觉修复。模式1/3会丢失真实壁纸折射颜色。
+日志 MOTION_COMPOSITE_173 含 view id、位置、父容器 scroll/layer/alpha。
+请先将 liquidglass_refraction_composite_170、liquidglass_agsl_paint_alpha_171 等历史实验恢复为0。
