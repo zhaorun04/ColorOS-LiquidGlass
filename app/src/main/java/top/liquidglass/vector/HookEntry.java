@@ -2360,6 +2360,71 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return surfacePass189;
     }
+    // V190: post-blur rounded surface optics. 0=V189, 1=static rim,
+    // 2=directional rim, 3=directional rim + subtle inner shadow.
+    private static volatile int rimMode190=0;
+    private static volatile long rimModeRead190=0L;
+    private static int rimMode190(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-rimModeRead190>350L){
+            rimModeRead190=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)rimMode190=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_rim_mode_190",0)));
+            }catch(Throwable ignored){}
+        }
+        return rimMode190;
+    }
+    private static int rimLogs190=0;
+    private static void drawRoundedRim190(Canvas canvas,android.graphics.RectF bounds,
+            float cornerRadius,float direction,int mode){
+        if(mode==0)return;
+        float w=bounds.width(),h=bounds.height();
+        if(w<4f || h<4f)return;
+        final float edge=Math.max(1.25f,Math.min(3.8f,Math.min(w,h)*0.022f));
+        final float inset=edge*0.72f;
+        android.graphics.RectF r=new android.graphics.RectF(bounds);
+        r.inset(inset,inset);
+        float radius=Math.max(0f,Math.min(Math.min(r.width(),r.height())*0.5f,cornerRadius-inset));
+        float d=mode==1?0f:Math.max(-1f,Math.min(1f,direction));
+        // Reflection travels along the rounded contour rather than across the glass face.
+        // The opposing side stays faint; the entire outline never pulses in unison.
+        float center=r.centerX()+d*r.width()*0.26f;
+        float spread=Math.max(1f,r.width()*0.62f);
+        int save=canvas.save();
+        try{
+            android.graphics.Path clip=new android.graphics.Path();
+            clip.addRoundRect(bounds,cornerRadius,cornerRadius,android.graphics.Path.Direction.CW);
+            canvas.clipPath(clip);
+            Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeWidth(edge);
+            p.setStrokeJoin(Paint.Join.ROUND);
+            p.setShader(new android.graphics.LinearGradient(center-spread,r.top,center+spread,r.top,
+                new int[]{0x18FFFFFF,0xC8FFFFFF,0x18FFFFFF},
+                new float[]{0f,0.5f,1f},android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(r,radius,radius,p);
+            // Narrow secondary highlight near the upper curved rim.
+            android.graphics.RectF upper=new android.graphics.RectF(r);
+            p.setStrokeWidth(Math.max(0.8f,edge*0.42f));
+            p.setShader(new android.graphics.LinearGradient(center-spread,r.top,center+spread,r.top,
+                new int[]{0x00FFFFFF,0xA0FFFFFF,0x00FFFFFF},
+                new float[]{0f,0.5f,1f},android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawArc(upper,195f,150f,false,p);
+            if(mode==3){
+                android.graphics.RectF inner=new android.graphics.RectF(bounds);
+                float offset=edge*2.1f;
+                inner.inset(offset,offset);
+                float innerRadius=Math.max(0f,cornerRadius-offset);
+                Paint shadow=new Paint(Paint.ANTI_ALIAS_FLAG);
+                shadow.setStyle(Paint.Style.STROKE);
+                shadow.setStrokeWidth(Math.max(0.75f,edge*0.65f));
+                shadow.setColor(0x27000000);
+                canvas.drawRoundRect(inner,innerRadius,innerRadius,shadow);
+            }
+        }finally{canvas.restoreToCount(save);}
+    }
     private static int surfaceLogs189=0;
     // Paint on the FINAL local Canvas, after both AGSL and the custom bitmap blur.
     // Its edge softness is in pixels and never derived from customBlurDp.
@@ -3265,7 +3330,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V189: post-blur surface stripe replaces (not stacks over)
                     // the legacy AGSL stripe when the diagnostic pass is enabled.
                     state.continuousShader.setFloatUniform("specularMode184",
-                        (float)(surfacePass189()==0?specular184:0));
+                        (float)((rimMode190()!=0 || surfacePass189()!=0)?0:specular184));
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
                     state.lastSpecularDirection187=motionDirection184;
@@ -3451,7 +3516,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // This is a diagnostic comparison path, not the final curved specular model.
             final int surface189=surfacePass189();
             final int spec189=specularMode184();
-            if(surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
+            final int rim190=rimMode190();
+            if(rim190==0 && surface189!=0 && refractionActive && continuousDrawn && spec189!=0){
                 drawSurfaceStripe189(canvas,rect,contourRadius,
                     state.visualDirection188,spec189,surface189);
                 if(surfaceLogs189++<180)log("SURFACE_PASS_189 pass="+surface189+
@@ -3459,6 +3525,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " composite="+compositeMode170+" afterCustomBlur=true"+
                     " afterTint=true view="+System.identityHashCode(view)+
                     " direction="+state.visualDirection188);
+            }
+            if(rim190!=0 && refractionActive && continuousDrawn){
+                drawRoundedRim190(canvas,rect,contourRadius,state.visualDirection188,rim190);
+                if(rimLogs190++<160)log("SURFACE_RIM_190 mode="+rim190+
+                    " blurDp="+customBlurDp+" radius="+contourRadius+
+                    " direction="+state.visualDirection188+
+                    " view="+System.identityHashCode(view));
             }
             // V1.9.74: the refraction pass must not draw a second outline.
             // The unified highlight renderer owns the complete edge treatment.
