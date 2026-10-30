@@ -1,13 +1,15 @@
-V1.9.142 光学绘制入口隔离与模糊首帧诊断版
+V1.9.143｜真实折射坐标与合成隔离诊断版
 
-保留 V1.9.141 的 0~3 模式；新增：
-模式4：仅允许 afterOEM 绘制入口的 AGSL，屏蔽其他入口的 AGSL。
-模式5：仅允许非 afterOEM 绘制入口的 AGSL，屏蔽 afterOEM 入口的 AGSL。
-两种模式均不主动关闭 AGSL；如果该入口没有实际触发，可能看不到真实折射。
+基于 V1.9.142。保留模式 0~5，新增：
+模式 6：保留 AGSL afterOEM 真实折射，但锁定每个文件夹首次绘制时的壁纸采样矩阵平移。滑动时采样可能错位，仅用于诊断。
+模式 7：保留动态采样坐标与真实折射；将 AGSL 输出 alpha 固定为 0.18，跳过 AGSL 的环境提亮混色。用于隔离颜色和 alpha 合成变化。
 
-Termux: su -c "settings put global liquidglass_optical_probe_141 4"
-或者: su -c "settings put global liquidglass_optical_probe_141 5"
-复原: su -c "settings put global liquidglass_optical_probe_141 0"
+切换命令：
+su -c 'settings put global liquidglass_optical_probe_141 6'
+su -c 'settings put global liquidglass_optical_probe_141 7'
+su -c 'settings put global liquidglass_optical_probe_141 0'
 
-新增 BLUR_CACHE_142 HIT 和 BLUR_DRAW_142 READY/WAIT 日志，用于确认解锁后的首次实际绘制是否命中模糊缓存。
-本版为定位版，不保证已经消除闪烁或解锁模糊延迟。
+建议模糊 0dp，分别记录真实像素折射是否存在、滑动突增高亮是否存在。模式 6 需要切换后重新启动 Launcher 才能确保首次采样锁定位置可复现。
+
+解锁模糊延迟：沿用 V1.9.142 的 BLUR_CACHE_142 / BLUR_DRAW_142 日志，本版未声称解决。
+此版是诊断候选，尚未完成 Gradle 编译或实机验证。

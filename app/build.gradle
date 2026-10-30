@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191420
-        versionName '1.9.142-optical-pass-diagnostics'
+        versionCode 191430
+        versionName '1.9.143-optical-coordinate-composite-ab'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

@@ -1754,6 +1754,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         int coordLogCount=0;
         float prevSampleX=Float.NaN,prevSampleY=Float.NaN;
         float prevLocationX=Float.NaN,prevLocationY=Float.NaN;
+        float probe143LockedLeft=Float.NaN,probe143LockedTop=Float.NaN;
         // Per-folder temporal response: smooth the optical overlay on real movement.
         float opticalOpacity=0f;
         long opticalUpdatedAt=0L;
@@ -1942,6 +1943,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float clearRefraction;\n"+
         "uniform float sampleIsolation;\n"+
         "uniform float4 screenClip;\n"+
+        "uniform float probe143Composite;\n"+
         "half4 main(float2 p) {\n"+
         " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
         " float edge=abs(2.0*u-1.0);\n"+
@@ -1969,10 +1971,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float light=smoothstep(0.58,0.96,lum);\n"+
         "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled;\n"+
         "  float motion=0.0; // No touch-triggered luminance jumps\n"+
-        "  color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));\n"+
+        "  if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));}\n"+
         "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
         "  float strengthFactor=clamp(abs(strength)/22.0,0.0,2.5);\n"+
-        "  color.a=half((clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);return color;\n"+
+        "  color.a=half(probe143Composite>0.5?0.18:(clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
         // 0.439 edge alpha washed out both sides of the glass, especially on
@@ -1990,10 +1992,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " float neutralOpacity=0.055*bright;\n"+
         " // No forced dark tint on bright wallpaper; preserve source colors.\n"+
         " float softSheen=0.0; // V1.9.136: no luminance-triggered overlay sheen\n"+
-        " color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));\n"+
+        " if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));}\n"+
         " float frostedAlpha=(0.045+0.080*edgeWeight);\n"+
         " float clearAlpha=(0.18+0.08*edgeWeight);\n"+
-        " color.a=half(mix(frostedAlpha,clearAlpha,step(0.5,clearRefraction))*temporalOpacity);\n"+
+        " color.a=half(probe143Composite>0.5?0.18:mix(frostedAlpha,clearAlpha,step(0.5,clearRefraction))*temporalOpacity);\n"+
         " return color;\n"+
         "}\n";
     private static int clampInt(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
@@ -2096,7 +2098,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final java.util.concurrent.atomic.AtomicInteger GLASS_PIPELINE_DIAGNOSTICS = new java.util.concurrent.atomic.AtomicInteger();
     // V1.9.141: controlled A/B isolation of the touch-related brightness jump.
     // 0 normal; 1 no AGSL (blur/tint remain); 2 AGSL without ambient light;
-    // 3 skip AGSL after OEM; 4 only draw AGSL after OEM; 5 only draw AGSL before OEM.
+    // 3 skip AGSL after OEM; 4 only after OEM; 5 only before OEM;
+    // 6 freeze sampling transform; 7 fixed AGSL output alpha and no additive sheen.
     private static volatile int opticalProbe141=0;
     private static volatile long opticalProbeReadAt141=0L;
     private static int opticalProbe141(){
@@ -2105,7 +2108,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             opticalProbeReadAt141=now;
             android.content.Context c=launcherContext;
             if(c!=null){
-                try { opticalProbe141=Math.max(0,Math.min(5,
+                try { opticalProbe141=Math.max(0,Math.min(7,
                     android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_optical_probe_141",0)));
                 } catch(Throwable ignored){}
             }
@@ -2207,7 +2210,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                     state.shaderMatrix.reset();
                     state.shaderMatrix.setScale(referenceScaleX,referenceScaleY);
-                    state.shaderMatrix.postTranslate(-left,-top);
+                    // V143 mode 6: freeze the screen-to-wallpaper transform for this view.
+                    // This intentionally makes wallpaper alignment drift during swipes.
+                    // Mode 7 and normal modes continue tracking actual screen position.
+                    if(probe141==6){
+                        if(Float.isNaN(state.probe143LockedLeft)){
+                            state.probe143LockedLeft=left;state.probe143LockedTop=top;
+                            log("OPTICAL_PROBE_143 LOCK id="+System.identityHashCode(view)+" x="+left+" y="+top);
+                        }
+                    }else{state.probe143LockedLeft=Float.NaN;state.probe143LockedTop=Float.NaN;}
+                    float shaderLeft=probe141==6?state.probe143LockedLeft:left;
+                    float shaderTop=probe141==6?state.probe143LockedTop:top;
+                    state.shaderMatrix.postTranslate(-shaderLeft,-shaderTop);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
@@ -2224,6 +2238,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // the actual display rectangle. Only mode 2 clamps p.
                     state.continuousShader.setFloatUniform("screenClip",0.5f-left,0.5f-top,
                         (float)sw-0.5f-left,(float)sh-0.5f-top);
+                    state.continuousShader.setFloatUniform("probe143Composite",probe141==7?1.0f:0.0f);
                     state.continuousShader.setFloatUniform("passId",Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())?2.0f:1.0f);
                     // Only the motion sheen is time-smoothed. Wallpaper sampling
                     // stays locked to the real screen position on every frame.
