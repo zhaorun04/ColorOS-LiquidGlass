@@ -1,7 +1,18 @@
-V1.9.157｜光学高光与折射合成来源定位版
-基于 V1.9.156。保留 V1.9.154 的解锁主动重绘。
-模式设置：settings put global liquidglass_composite_probe_157 N
-0 原样；1 关闭 AGSL 环境高光混合；2 固定 AGSL 输出 Alpha=0.15；3 固定 Alpha=0.075。
-测试时保持 liquidglass_optical_probe_156=0 和 liquidglass_coordinate_probe_155=0。
-新日志：COMPOSITE_PROBE_157、COMPOSITE_DRAW_157。
-本版本是诊断版，未加入亮度渐变；应先验证突增亮度的实际来源。
+V1.9.158｜环境高光隔离顺序修正与合成次数诊断版
+
+基于 V1.9.157，保留真实壁纸 AGSL 折射、缓存、描边、模糊及 V1.9.154 解锁即时重绘。
+
+修正：AGSL 中 compositeProbe157 模式 1 的 ambient=0.0 移到 color.rgb=mix(...) 之前，确保该模式确实关闭环境高光。模式 0、2、3 保持原绘制行为。
+
+新增日志：
+COMPOSITE_SUBMIT_158：AGSL 实际提交时，记录 view/mode/attempts/submissions/canvas/afterOEM/frame。
+COMPOSITE_DISPATCH_158：每次 FolderIcon.dispatchDraw 结束时记录该绘制周期的尝试次数与实际提交次数。
+计数器不影响渲染逻辑。
+
+测试：将模糊半径设为 0dp，分别执行：
+su -c 'settings put global liquidglass_composite_probe_157 0'
+su -c 'settings put global liquidglass_composite_probe_157 1'
+每次等待至少 1 秒，左右滑动同一明亮壁纸区域，记录高亮是否突然出现。
+测试结束恢复模式 0。
+
+注意：源码包尚未在此环境完成 Android Gradle 编译或设备验证。

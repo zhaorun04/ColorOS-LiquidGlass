@@ -2038,8 +2038,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  float light=smoothstep(0.58,0.96,lum);\n"+
         "  float ambient=(0.035+0.090*light)*(0.28+0.72*edgeSheen)*opticalSheenEnabled;\n"+
         "  float motion=0.0; // No touch-triggered luminance jumps\n"+
-        "  if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));}\n"+
         "  if(compositeProbe157>0.5 && compositeProbe157<1.5){ambient=0.0;}\n"+
+        "  if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));}\n"+
         "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
         "  float strengthFactor=clamp(abs(strength)/22.0,0.0,2.5);\n"+
         "  color.a=half(probe143Composite>0.5?0.18:(clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);\n"+
@@ -2236,7 +2236,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return compositeProbe157;
     }
     private static int compositeDrawLogs157=0;
+    // V1.9.158: per-dispatch accounting; counters do not change rendering behavior.
+    private static final ThreadLocal<int[]> COMPOSITE_COUNTS_158=new ThreadLocal<>();
+    private static int compositeTraceLogs158=0;
+
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
+        int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
+        if(compositeCounts158!=null)compositeCounts158[0]++;
         if(rect.width()<80 || rect.height()<80)return;
         scheduleReferenceLoad(view);
         android.graphics.Bitmap frame=REFRACTION_FRAME;
@@ -2388,6 +2394,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.samplePaint.setAlpha(255);
                     state.samplePaint.setShader(state.continuousShader);
                     canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
+                    if(compositeCounts158!=null){
+                        compositeCounts158[1]++;
+                        if(compositeTraceLogs158++<240)log("COMPOSITE_SUBMIT_158 view="+System.identityHashCode(view)+" mode="+composite157+" attempts="+compositeCounts158[0]+" submissions="+compositeCounts158[1]+" canvas="+System.identityHashCode(canvas)+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" frame="+System.identityHashCode(frame));
+                    }
                     if(compositeDrawLogs157++<160)log("COMPOSITE_DRAW_157 mode="+composite157+" view="+System.identityHashCode(view)+" canvas="+System.identityHashCode(canvas)+" frame="+System.identityHashCode(frame)+" afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+" alphaPaint="+state.samplePaint.getAlpha()+" left="+left+" top="+top);
                     continuousDrawn=true;
                     AGSL_SUBMITTED_144.set(Boolean.TRUE);
@@ -2705,6 +2715,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 " glass="+glassEnabled+" hardware="+((Canvas)p.args[0]).isHardwareAccelerated());
 
                         // A new dispatch is a new frame for this folder.
+                        COMPOSITE_COUNTS_158.set(new int[2]);
                         AGSL_SUBMITTED_144.remove();
                         SURFACE_SUBMITTED_144.remove();
                         refresh(v);
@@ -2793,6 +2804,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             if(surfaceOrderLogs++<12)log("REFRACTION_LAYER_ORDER mode=DISPATCH_AFTER_EDGE previewCallback="+callback);
                         }
                     } finally {
+                        int[] counts158=COMPOSITE_COUNTS_158.get();
+                        if(counts158!=null){
+                            if(compositeTraceLogs158++<240)log("COMPOSITE_DISPATCH_158 view="+System.identityHashCode(p.thisObject)+" attempts="+counts158[0]+" submissions="+counts158[1]+" mode="+compositeProbe157+" canvas="+System.identityHashCode(p.args[0]));
+                            COMPOSITE_COUNTS_158.remove();
+                        }
                         AGSL_SUBMITTED_144.remove();
                         SURFACE_SUBMITTED_144.remove();
                         ACTIVE_FOLDER_ICON.remove();
