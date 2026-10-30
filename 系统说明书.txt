@@ -1,12 +1,7 @@
-V1.9.163｜Workspace滚动期间OEM背景隔离A/B诊断版
+V1.9.164｜OEM Hook 安装与模式读取独立验证版
 
-基于V1.9.162，默认模式0不改变绘制。新增Settings.Global键 liquidglass_oem_scroll_isolation_163：
-0：默认不隔离；1：仅Workspace的scrollX偏离页面宽度整数倍超过阈值时跳过OplusPreviewBackground.drawBackground；2：始终跳过该OEM回调。
-
-AGSL折射dispatch路径保持原样；模式1的页面宽度近似判断可能因Launcher页面布局与滚动基准不同而误判。必须检查OEM_SCROLL_DECISION_163中的skip、width、pageOffset，以及PREVIEW_SKIP_149_163日志是否真正出现。
-
-模式2与旧V1.9.149的OEM隔离实验相似，用于验证模式1的条件判断，不是独立的新证据。若没有PREVIEW_SKIP日志，不能认定OEM背景已经隔离。此Hook只覆盖drawBackground方法，不覆盖其他OEM背景层。
-
-测试前将旧键liquidglass_native_preview_isolation_149、liquidglass_sample_anchor_160、liquidglass_canvas_composite_159、liquidglass_composite_probe_157、liquidglass_optical_probe_156均设0。测试模糊0dp，分别测试0/1/2，并上传LSPosed日志。
-
-保持V1.9.154解锁即时重绘、真实AGSL、壁纸缓存及描边。尚未进行Gradle编译和实机验证。
+基于 V1.9.163。保留真实 AGSL 折射和解锁即时显示。
+新增日志 OEM_VERIFY_DISPATCH_164：从已知执行的 FolderIcon.dispatchDraw 读取模式；OEM_VERIFY_INSTALL_164：记录 OEM 类、候选方法、安装成功；OEM_VERIFY_ENTRY_164：记录 OEM drawBackground 是否调用；OEM_VERIFY_SKIP_164：记录实际跳过。
+模式开关仍为 liquidglass_oem_scroll_isolation_163（0/1/2）。
+说明：若没有 OEM_VERIFY_ENTRY_164，即使模式已读取，也不能证明 OEM 背景已被隔离。
+本版仅强化验证，不宣称修复闪烁。

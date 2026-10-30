@@ -2887,6 +2887,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                         View v=(View)p.thisObject;
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
+                        verifyOemModeAtDispatch164(v);
                         traceTouchComposite147(v,(Canvas)p.args[0]);
                         traceComposition151(v,(Canvas)p.args[0],"before");
                         traceLayerChain162(v,(Canvas)p.args[0],"DISPATCH_BEFORE");
@@ -3494,6 +3495,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return oemScrollMode163;
     }
+    // V1.9.164: diagnostics independent of the optional OEM drawBackground callback.
+    private static int oemVerifyDispatchLogs164=0;
+    private static int oemVerifyEntryLogs164=0;
+    private static int oemVerifySkipLogs164=0;
+    private static void verifyOemModeAtDispatch164(View view){
+        try {
+            int mode=oemScrollMode163();
+            if(oemVerifyDispatchLogs164++<120){
+                int[] off=workspaceOffset163();
+                log("OEM_VERIFY_DISPATCH_164 mode="+mode+" context="+(launcherContext!=null)+
+                    " glass="+glassEnabled+" scrollX="+off[0]+" width="+off[1]+
+                    " offset="+off[2]+" view="+System.identityHashCode(view));
+            }
+        }catch(Throwable t){if(oemVerifyDispatchLogs164++<120)log("OEM_VERIFY_DISPATCH_164 error="+t.getClass().getSimpleName());}
+    }
     private static int[] workspaceOffset163(){
         View v=ACTIVE_FOLDER_ICON.get();
         if(v==null){
@@ -3532,9 +3548,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static int previewIsolationLogs149=0;
     private static void hookPreview(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.OplusPreviewBackground", loader);
-        if (c == null) return;
+        if (c == null) {log("OEM_VERIFY_INSTALL_164 class=missing");return;}
+        int drawCandidates164=0;
+        int drawInstalled164=0;
+        log("OEM_VERIFY_INSTALL_164 class="+c.getName()+" declared="+c.getDeclaredMethods().length);
         for (Method m : c.getDeclaredMethods()) {
             String name = m.getName();
+            if("drawBackground".equals(name))drawCandidates164++;
             boolean target = ("drawBackground".equals(name) && m.getParameterTypes().length == 2)
                     || ("getBgDrawable".equals(name) && m.getParameterTypes().length == 0)
                     || ("getBlurProp".equals(name) && m.getParameterTypes().length == 0)
@@ -3545,10 +3565,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             try {
                 m.setAccessible(true);
                 final String methodName = name;
+                if("drawBackground".equals(name))log("OEM_VERIFY_INSTALL_164 attempt="+m.toGenericString());
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam param) {
                         if (!"drawBackground".equals(methodName)) return;
-                        if((previewIsolation149()==1 && glassEnabled) || skipOemForScroll163("BEFORE")){
+                        int verifiedMode164=oemScrollMode163();
+                        if(oemVerifyEntryLogs164++<120)log("OEM_VERIFY_ENTRY_164 method="+param.method+
+                            " mode="+verifiedMode164+" glass="+glassEnabled);
+                        boolean skip149=previewIsolation149()==1 && glassEnabled;
+                        boolean skip163=skipOemForScroll163("BEFORE");
+                        if(skip149 || skip163){
+                            if(oemVerifySkipLogs164++<120)log("OEM_VERIFY_SKIP_164 old="+skip149+" new="+skip163+" mode="+verifiedMode164);
                             if(previewIsolationLogs149++<80)log("PREVIEW_SKIP_149_163 method=drawBackground");
                             param.setResult(null);
                             return;
@@ -3657,9 +3684,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                 });
                 installed++;
+                if("drawBackground".equals(name)){drawInstalled164++;log("OEM_VERIFY_INSTALL_164 success="+m.toGenericString());}
                 log("HOOK_INSTALLED class=" + c.getName() + " method=" + m.toGenericString());
             } catch (Throwable t) { failed++; log("HOOK_FAILED class=" + c.getName() + " method=" + m.toGenericString() + " error=" + t); }
         }
+        log("OEM_VERIFY_INSTALL_164 summary candidates="+drawCandidates164+" installed="+drawInstalled164+" (see success records)");
     }
     // V1.9.12: read-only condition tracing. No forced blur flags or initialization.
     private static final java.util.Map<Object,String> BLUR_SNAPSHOTS =
