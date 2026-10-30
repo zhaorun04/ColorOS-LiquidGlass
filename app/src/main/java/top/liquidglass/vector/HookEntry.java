@@ -1641,6 +1641,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile long REFRACTION_FRAME_MODIFIED = -1L;
     private static volatile long REFRACTION_FRAME_LENGTH = -1L;
     private static volatile boolean REFRACTION_LOADING;
+    // 145: do not allow concurrent boot prewarm loops on repeated unlock broadcasts.
+    private static volatile boolean BOOT_PREWARM_RUNNING;
+    private static volatile long BOOT_PREWARM_GENERATION;
     private static final java.util.Map<View, Boolean> BOOT_FOLDER_VIEWS = java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, Boolean>());
     private static volatile boolean REFRACTION_ENABLED;
     private static int REFRACTION_LOGS;
@@ -1654,7 +1657,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // Retry rapidly until the first valid frame exists; use the longer interval
         // only after the frame is ready, to avoid steady-state disk churn.
         // Metadata checks run on the worker thread; hot wallpaper changes should not wait 30s.
-        long retryMs=REFRACTION_FRAME==null ? 600L : 1000L;
+        long retryMs=REFRACTION_FRAME==null ? 120L : 1000L;
         if(now-REFRACTION_LAST_CHECK<retryMs)return;
         REFRACTION_LAST_CHECK=now;
         REFRACTION_LOADING=true;
@@ -1667,10 +1670,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // V1.9.98: Never call the blocked module provider from Launcher.
                 // A missing file must be retried after CE unlock, not treated as a provider failure.
                 java.io.File local=new java.io.File(app.getFilesDir(),"liquidglass_wallpaper_reference.jpg");
-                if(!local.isFile()){
-                    java.io.File alternate=new java.io.File("/data/user/0/com.android.launcher/files/liquidglass_wallpaper_reference.jpg");
-                    if(alternate.isFile())local=alternate;
-                }
+                // CE storage may become available only after unlock. Check both
+                // locations on every attempt; prefer a valid, nonempty file.
+                java.io.File alternate=new java.io.File("/data/user/0/com.android.launcher/files/liquidglass_wallpaper_reference.jpg");
+                if((!local.isFile() || local.length()<=1024L) && alternate.isFile() && alternate.length()>1024L)
+                    local=alternate;
                 long modified=-1L,length=-1L;
                 if(!local.isFile() || local.length()<=1024L){
                     if(REFRACTION_LOGS++<24)log("BOOT_REFERENCE_WAIT path="+local.getAbsolutePath()+" exists="+local.exists());
@@ -3446,10 +3450,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // independent of FolderIcon drawing/touch. Stop once ready; bounded retries.
     private static void prewarmBootRefraction(final android.content.Context app,
                                                final android.os.Handler handler) {
+        final long generation;
+        synchronized(HookEntry.class){
+            if(BOOT_PREWARM_RUNNING)return;
+            BOOT_PREWARM_RUNNING=true;
+            generation=++BOOT_PREWARM_GENERATION;
+        }
         final Runnable[] task=new Runnable[1];
         task[0]=new Runnable(){
             int attempts=0;
             @Override public void run(){
+                if(generation!=BOOT_PREWARM_GENERATION)return;
                 // Keep checking until both configuration and wallpaper are ready.
                 // A frame alone is not proof that refraction is enabled.
                 restoreBootSnapshot(app);
@@ -3463,17 +3474,22 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     blurredWallpaper(reference,app.getResources().getDisplayMetrics().density,null);
                 }
                 if(frameReady && blurReady){
-                    log("BOOT_MATERIAL_READY source=GLOBAL_SNAPSHOT attempts="+attempts);
+                    BOOT_PREWARM_RUNNING=false;
+                    log("BOOT_MATERIAL_READY_145 attempts="+attempts+" refraction="+REFRACTION_ENABLED);
                     invalidateGlassViews();
                     return;
                 }
-                if(++attempts>180){log("BOOT_PREWARM_TIMEOUT frame="+frameReady+" blur="+blurReady);return;}
+                if(++attempts>180){
+                    BOOT_PREWARM_RUNNING=false;
+                    log("BOOT_PREWARM_TIMEOUT_145 frame="+frameReady+" blur="+blurReady);
+                    return;
+                }
                 // Retry also when the snapshot arrives later than Launcher attach.
                 if(REFRACTION_ENABLED || blurWanted) scheduleReferenceLoad(app,null);
                 if(attempts==1 || attempts%15==0)
                     log("BOOT_PREWARM_WAIT attempt="+attempts+" enabled="+REFRACTION_ENABLED
                         +" loading="+REFRACTION_LOADING);
-                handler.postDelayed(this,frameReady?120L:250L);
+                handler.postDelayed(this,frameReady?120L:120L);
             }
         };
         handler.post(task[0]);
@@ -3549,6 +3565,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         app.registerReceiver(new android.content.BroadcastReceiver(){
                             @Override public void onReceive(android.content.Context c,android.content.Intent i){
                                 lastRead=0L;
+                                // Unlock can make CE wallpaper file readable before
+                                // delayed config restore; request the frame immediately.
+                                REFRACTION_LAST_CHECK=0L;
+                                scheduleReferenceLoad(app,null);
+                                prewarmBootRefraction(app,handler);
                                 handler.postDelayed(restore,1000L);
                                 handler.postDelayed(restore,4000L);
                             }
