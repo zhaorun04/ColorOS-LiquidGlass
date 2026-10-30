@@ -27,3 +27,7 @@ V1.9.174｜父容器合成状态逐帧审计
 
 
 V1.9.175：新增 liquidglass_layer_composite_175：0原始绘制，1局部离屏，2文件夹视图范围离屏，3局部离屏并以128 Alpha合成。仅诊断 AGSL 合成；不修改父容器。配合 liquidglass_motion_composite_173=1 可验证固定颜色。
+
+
+V1.9.176｜桌面滚动文件夹绘制链路审计
+新增 DRAW_TRACE_176：按 FolderIcon dispatch 分配 seq，记录 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END，包含 Canvas 矩阵、裁剪、屏幕位置、提交次数。此版本仅诊断，不修改原有折射强度、模糊、描边及解锁刷新。日志最多 850 条；同一帧可根据 seq 对照。

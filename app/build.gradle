@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191710
-        versionName '1.9.171-agsl-alpha-chain-audit'
+        versionCode 191760
+        versionName '1.9.176-draw-chain-trace'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
