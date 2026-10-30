@@ -1678,7 +1678,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // CE storage may become available only after unlock. Check both
                 // locations on every attempt; prefer a valid, nonempty file.
                 java.io.File alternate=new java.io.File("/data/user/0/com.android.launcher/files/liquidglass_wallpaper_reference.jpg");
-                if((!local.isFile() || local.length()<=1024L) && alternate.isFile() && alternate.length()>1024L)
+                // V147: choose a usable CE/DE reference immediately, without
+                // repeatedly waiting on an unavailable device-protected path.
+                // If both exist, prefer the newest complete frame.
+                boolean localValid=local.isFile() && local.length()>1024L;
+                boolean alternateValid=alternate.isFile() && alternate.length()>1024L;
+                if(alternateValid && (!localValid || alternate.lastModified()>local.lastModified()))
                     local=alternate;
                 long modified=-1L,length=-1L;
                 if(!local.isFile() || local.length()<=1024L){
@@ -2564,6 +2569,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     if (p.thisObject instanceof View && p.args.length > 0 && p.args[0] instanceof Canvas) {
                         View v=(View)p.thisObject;
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
+                        traceTouchComposite147(v,(Canvas)p.args[0]);
                         // A new dispatch is a new frame for this folder.
                         AGSL_SUBMITTED_144.remove();
                         SURFACE_SUBMITTED_144.remove();
@@ -3005,11 +3011,35 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
         }
     }
+    // V147: low-volume native-background state sampling at the real refraction
+    // entry. This does not alter the OEM drawable or the AGSL optical output.
+    private static final java.util.Map<View, String> TOUCH_COMPOSITE_STATE_147 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View, String>());
+    private static int touchCompositeLogs147=0;
+    private static void traceTouchComposite147(View v, Canvas canvas) {
+        if(touchCompositeLogs147>=120)return;
+        try {
+            Drawable bg=v.getBackground();
+            Object nativeBg=null;
+            try { Field f=field(v.getClass(),"mBackground"); nativeBg=f.get(v); }
+            catch(Throwable ignored){}
+            String state="pressed="+v.isPressed()+" selected="+v.isSelected()+
+                " alpha="+v.getAlpha()+" visibility="+v.getVisibility()+
+                " translation="+v.getTranslationX()+","+v.getTranslationY()+
+                " native="+(nativeBg==null?"null":nativeBg.getClass().getSimpleName())+
+                " drawableAlpha="+(bg==null?-1:bg.getAlpha())+
+                " refraction="+REFRACTION_ENABLED+" frame="+(REFRACTION_FRAME!=null)+
+                " hw="+canvas.isHardwareAccelerated();
+            String prior=TOUCH_COMPOSITE_STATE_147.put(v,state);
+            if(!state.equals(prior) && touchCompositeLogs147++<120)
+                log("TOUCH_COMPOSITE_147 view="+System.identityHashCode(v)+" "+state);
+        }catch(Throwable ignored){}
+    }
     private static void inspectFolderBlur(View v) {
         if(!diagnostics || blurStateLogs>24)return;
         try{
             Object flag=field(v.getClass(),"mIsSupportNewBlurLocal").get(v);
-            log("BLUR_PROBE_FOLDER class="+v.getClass().getName()+" localSupport="+safeValue(flag)+" size="+v.getWidth()+"x"+v.getHeight());
+            if(blurStateLogs++<20)log("BLUR_PROBE_FOLDER class="+v.getClass().getName()+" localSupport="+safeValue(flag)+" size="+v.getWidth()+"x"+v.getHeight());
             Object preview=field(v.getClass(),"mBackground").get(v);
             inspectBlurState(preview,"FolderIcon");
             traceConditions(v,"folderIcon");
