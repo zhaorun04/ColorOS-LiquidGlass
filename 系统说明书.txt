@@ -1,46 +1,17 @@
-V1.9.170｜真实壁纸折射合成顺序 A/B 验证版
+ColorOS LiquidGlass V1.9.179 — 稳定折射与 RGB 内合成高光验证版
 
-模式0：保持原有 AGSL 后绘制模糊层的顺序。
-模式1：先绘制不透明模糊壁纸底层，再绘制真实壁纸 AGSL 折射；保留后续 Tint 与材质。
-设置命令：su -c 'settings put global liquidglass_refraction_composite_170 1'
-恢复：su -c 'settings put global liquidglass_refraction_composite_170 0'
-测试前请恢复 liquidglass_refraction_blur_isolation_168=0 和 liquidglass_refraction_path_169=0。
-本版本为针对性合成实验，未实机验证，不保证已解决异常高亮。
+基于 V1.9.178 完整源码。
+实机已确认 V178 Shader Alpha 1.00 可消除桌面运动时突增高亮。
+V179 保留不透明真实壁纸采样折射输出，并在 AGSL 内部 RGB 混合轻微高光，最终 Alpha 始终为 1.00。
+这不是运动动画；先验证自然静态高光是否稳定，避免引入新的动态问题。
 
-V1.9.172：增加 MOTION_OPTICS_172 逐帧只读诊断，记录桌面短距离单向位移、AGSL采样原点、Canvas矩阵、父容器滚动、Shader参数和Paint透明度；不改变光学输出。每次Launcher进程最多600条，间隔至少14ms。
+实验开关：
+su -c 'settings put global liquidglass_stable_sheen_179 0'  # 不透明稳定基线
+su -c 'settings put global liquidglass_stable_sheen_179 1'  # 柔和附加高光
+su -c 'settings put global liquidglass_stable_sheen_179 2'  # 稍强附加高光
+su -c 'settings put global liquidglass_stable_sheen_179 3'  # 关闭附加高光，对照
 
-V1.9.173 运动-合成隔离实验：
-设置 liquidglass_motion_composite_173 = 0/1/2/3（默认0）。
-0 正常真实折射；1 固定 AGSL RGB 为中灰，保留原有 AGSL alpha 与绘制路径；
-2 保留真实壁纸采样，但将像素位移设为0（不改变 alpha 计算所用 strength）；
-3 固定 RGB 且关闭像素位移，保留原有 AGSL alpha。
-以上为定位实验，不是视觉修复。模式1/3会丢失真实壁纸折射颜色。
-日志 MOTION_COMPOSITE_173 含 view id、位置、父容器 scroll/layer/alpha。
-请先将 liquidglass_refraction_composite_170、liquidglass_agsl_paint_alpha_171 等历史实验恢复为0。
-
-
-V1.9.174｜父容器合成状态逐帧审计
-本版不更改真实折射、模糊、父容器 Alpha 或硬件图层，仅新增 PARENT_COMPOSITE_174 日志。
-每个文件夹独立记录 screen/delta、Workspace scroll/delta、DragLayer 与 CellLayout 的 layer/alpha、AGSL Paint Alpha、采样坐标、壁纸帧及 Canvas 硬件状态。
-重点对比：桌面静止、向右短距离移动、再次静止，是否发生父容器 Alpha 或图层切换。
-日志最多 900 条/进程；无需新开关。保留 V1.9.154 解锁即时刷新。
-
-
-V1.9.175：新增 liquidglass_layer_composite_175：0原始绘制，1局部离屏，2文件夹视图范围离屏，3局部离屏并以128 Alpha合成。仅诊断 AGSL 合成；不修改父容器。配合 liquidglass_motion_composite_173=1 可验证固定颜色。
-
-
-V1.9.176｜桌面滚动文件夹绘制链路审计
-新增 DRAW_TRACE_176：按 FolderIcon dispatch 分配 seq，记录 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END，包含 Canvas 矩阵、裁剪、屏幕位置、提交次数。此版本仅诊断，不修改原有折射强度、模糊、描边及解锁刷新。日志最多 850 条；同一帧可根据 seq 对照。
-
-V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。
-
-V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。
-
-V1.9.177: liquidglass_alpha_underlay_177 (0 original, 1 opaque AGSL, 2 constant opaque underlay, 3 underlay grouped saveLayer). Diagnostic only.
-
-V1.9.178｜Shader 输出 Alpha 阈值隔离
-使用前先将 liquidglass_alpha_underlay_177 设为 0，关闭旧版诊断。
-新开关 liquidglass_shader_alpha_178：0=原始 Alpha，1=Shader 输出 Alpha 0.50，2=0.85，3=1.00。
-命令：su -c 'settings put global liquidglass_shader_alpha_178 2'
-日志：SHADER_ALPHA_178。只调整 AGSL Shader 输出 Alpha，不调整 Paint Alpha，不修改原有圆角描边、折射采样、模糊与原生底层。
-这是隔离实验版本，Alpha 1.00 可能遮挡玻璃下层；请对比移动/停止瞬间的突增。
+所有模式保留原有 AGSL 环境光与真实壁纸折射；模式 3 仅关闭 V179 新增的高光。
+旧版 alpha underlay、shader alpha、layer175、canvas159 实验被隔离，防止交叉干扰。
+注意：强制不透明可能改变玻璃层与 Launcher 原生模糊的视觉混合，这是实验方案而非最终确认的视觉修复。
+日志关键字 STABLE_SHEEN_179。

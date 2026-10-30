@@ -2284,6 +2284,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
         log("SHADER_ALPHA_178 mode="+mode+" shaderAlpha="+(mode==0?"original":mode==1?"0.50":mode==2?"0.85":"1.00")+
             " view="+System.identityHashCode(view)+" paintAlpha="+paintAlpha);
     }
+    // V1.9.179: opaque wallpaper-refraction base with sheen composited in RGB.
+    // Modes: 0 stable baseline; 1 subtle sheen; 2 stronger sheen; 3 no added sheen.
+    private static volatile int stableSheenMode179=0;
+    private static volatile long stableSheenRead179=0L;
+    private static int stableSheenMode179(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-stableSheenRead179>350L){
+            stableSheenRead179=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)stableSheenMode179=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_stable_sheen_179",0)));
+            }catch(Throwable ignored){}
+        }
+        return stableSheenMode179;
+    }
+    private static final int[] STABLE_SHEEN_LOGS_179=new int[4];
+    private static void traceStableSheen179(int mode,View view){
+        if(STABLE_SHEEN_LOGS_179[mode]++>=80)return;
+        log("STABLE_SHEEN_179 mode="+mode+" view="+System.identityHashCode(view)+" shaderAlpha=1.0");
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -2292,6 +2313,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float fixedOutput167;\n"+
         "uniform float alphaUnderlay177;\n"+
         "uniform float shaderAlpha178;\n"+
+        "uniform float stableSheen179;\n"+
         "uniform float motionIsolation173;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
@@ -2342,6 +2364,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  if(motionIsolation173>0.5 && motionIsolation173<1.5 || motionIsolation173>2.5){color.rgb=half3(0.50,0.50,0.50); }\n"+
         "  if(alphaUnderlay177>0.5 && alphaUnderlay177<1.5){color.a=half(1.0); }\n"+
         "  if(shaderAlpha178>0.5){color.a=half(shaderAlpha178<1.5?0.50:(shaderAlpha178<2.5?0.85:1.0));}\n"+
+        // Stable RGB-only optical highlight; no translucent shader output or motion switch.
+        "  if(stableSheen179>-0.5){\n"+
+        "   float rim=pow(clamp(abs(2.0*u-1.0),0.0,1.0),3.0);\n"+
+        "   float sheenWeight=(stableSheen179<0.5?0.0:(stableSheen179<1.5?0.035:(stableSheen179<2.5?0.065:0.0)));\n"+
+        "   float sheen=clamp(sheenWeight*(0.30+0.70*rim),0.0,0.09);\n"+
+        "   color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(sheen));\n"+
+        "   color.a=half(1.0);\n"+
+        "  }\n"+
+
         "  return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -2975,10 +3006,14 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     int probe156=opticalProbe156();
                     state.continuousShader.setFloatUniform("strength",probe156==1?0.0f:(displacementMode==0?0.0f:22.0f*refractionPercent/35.0f));
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
-                    final int alphaMode177=alphaUnderlayMode177();
+                    final int alphaMode177=0; // V179: disable legacy gray underlay experiments
                     state.continuousShader.setFloatUniform("alphaUnderlay177",(float)alphaMode177);
-                    final int shaderMode178=shaderAlphaMode178();
+                    final int shaderMode178=0; // V179: alpha controlled by stableSheen179
                     state.continuousShader.setFloatUniform("shaderAlpha178",(float)shaderMode178);
+                    final int stableMode179=stableSheenMode179();
+                    // V179 modes override older alpha experiments inside AGSL.
+                    state.continuousShader.setFloatUniform("stableSheen179",(float)stableMode179);
+                    traceStableSheen179(stableMode179,view);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();
@@ -3010,8 +3045,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // tint, rim and children remain on their original Canvas path.
                     // SRC is NEVER applied directly to the parent Canvas: that would
                     // erase existing pixels outside the shader's non-opaque area.
-                    final int canvasMode159=canvasComposite159();
-                    final int layerMode175=layerExperiment175();
+                    final int canvasMode159=0; // V179: normal SRC_OVER path
+                    final int layerMode175=0; // V179: normal canvas composition
                     int isolatedLayer159=-1;
                     android.graphics.Xfermode previousXfer159=state.samplePaint.getXfermode();
                     Paint restorePaint175=null;
