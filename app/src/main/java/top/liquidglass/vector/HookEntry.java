@@ -1838,6 +1838,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // is deliberately left untouched, preserving V1.9.74 corner geometry.
     // V1.9.131: no motion-triggered invalidate loop. Wallpaper-position updates
     // are already handled by the pre-draw location observer.
+    // V1.9.155: sampling-coordinate A/B probe; mode 0 is byte-for-byte legacy behavior.
+    // 1 uses View.getLocationOnScreen; 2 uses matrix coordinates rounded to physical pixels.
+    private static volatile int coordinateProbe155=0;
+    private static volatile long coordinateProbeRead155=0L;
+    private static int coordinateProbe155(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-coordinateProbeRead155>800L){
+            coordinateProbeRead155=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null){
+                    int next=Math.max(0,Math.min(2,android.provider.Settings.Global.getInt(
+                        c.getContentResolver(),"liquidglass_coordinate_probe_155",0)));
+                    if(next!=coordinateProbe155){coordinateProbe155=next;log("COORD_PROBE_155 mode="+next);}
+                }
+            }catch(Throwable t){log("COORD_PROBE_155 read_failed="+t.getClass().getSimpleName());}
+        }
+        return coordinateProbe155;
+    }
+    private static long coordinateTraceAt155=0L;
+    private static int coordinateTraceCount155=0;
     private static float[] dynamicScreenPosition(View view,DynamicRefraction state) {
         state.transform.reset();
         view.transformMatrixToGlobal(state.transform);
@@ -2192,6 +2213,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
         DynamicRefraction state=dynamicState(view);
         float[] xy=dynamicScreenPosition(view,state);
         float left=xy[0]+rect.left,top=xy[1]+rect.top;
+        final int coordProbe155=coordinateProbe155();
+        if(coordProbe155!=0){
+            int[] screenLoc155=new int[2];
+            view.getLocationOnScreen(screenLoc155);
+            if(coordProbe155==1){left=screenLoc155[0]+rect.left;top=screenLoc155[1]+rect.top;}
+            else if(coordProbe155==2){left=Math.round(left);top=Math.round(top);}
+            long now155=android.os.SystemClock.uptimeMillis();
+            if(coordinateTraceCount155<160 && now155-coordinateTraceAt155>=100L){
+                coordinateTraceAt155=now155;coordinateTraceCount155++;
+                log("COORD_COMPARE_155 mode="+coordProbe155+" matrix="+xy[0]+","+xy[1]+
+                    " screen="+screenLoc155[0]+","+screenLoc155[1]+
+                    " chosen="+left+","+top+" diff="+(xy[0]-screenLoc155[0])+","+(xy[1]-screenLoc155[1])+
+                    " frame="+System.identityHashCode(frame));
+            }
+        }
         // V1.9.112: diagnostic only. No sampling delay, no alpha changes.
         // Compare matrix-derived position with Android's screen location and
         // record abrupt sampling jumps during touch down/move/up.

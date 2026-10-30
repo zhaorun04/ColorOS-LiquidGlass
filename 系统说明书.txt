@@ -1,5 +1,6 @@
-V1.9.154｜解锁重绘与首帧追踪版
-基于实机确认正常的 V1.9.153，未改动主玻璃 Shader、混合和模糊算法。
-新增 ACTION_USER_PRESENT 普通解锁监听（与 ACTION_USER_UNLOCKED 区分），在 0/80/240ms 触发有界重绘。
-日志：UNLOCK_EVENT_154、UNLOCK_REDRAW_154、UNLOCK_DRAW_154。
-仍需实机验证解锁延迟和滑动闪烁；本版不宣称修复滑动闪烁。
+V1.9.155｜折射采样坐标一致性对照版
+基于实机验证正常的 V1.9.154。默认模式0完全沿用旧坐标路径，保留解锁主动重绘、AGSL、模糊与描边。
+设置 liquidglass_coordinate_probe_155：0=原始矩阵坐标；1=getLocationOnScreen整数坐标；2=矩阵坐标像素取整。
+模式1/2仅用于短时诊断，可能改变壁纸对齐。COORD_COMPARE_155记录坐标差异。
+恢复：su -c "settings put global liquidglass_coordinate_probe_155 0"
+未完成Gradle构建及实机验证。

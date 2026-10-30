@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191540
-        versionName '1.9.154-unlock-redraw-trace'
+        versionCode 191550
+        versionName '1.9.155-coordinate-sampling-probe'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
