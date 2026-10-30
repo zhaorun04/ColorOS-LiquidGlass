@@ -2263,6 +2263,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
         log("ALPHA_UNDERLAY_177 mode="+mode+" view="+System.identityHashCode(view)+
             " paintAlpha="+paintAlpha+" hardware="+canvas.isHardwareAccelerated());
     }
+    // V1.9.178: independent shader-output alpha threshold experiment.
+    private static volatile int shaderAlphaMode178=0;
+    private static volatile long shaderAlphaRead178=0L;
+    private static int shaderAlphaMode178(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-shaderAlphaRead178>350L){
+            shaderAlphaRead178=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)shaderAlphaMode178=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_shader_alpha_178",0)));
+            }catch(Throwable ignored){}
+        }
+        return shaderAlphaMode178;
+    }
+    private static final int[] SHADER_ALPHA_LOGS_178=new int[4];
+    private static void traceShaderAlpha178(int mode,View view,int paintAlpha){
+        if(SHADER_ALPHA_LOGS_178[mode]++>=120)return;
+        log("SHADER_ALPHA_178 mode="+mode+" shaderAlpha="+(mode==0?"original":mode==1?"0.50":mode==2?"0.85":"1.00")+
+            " view="+System.identityHashCode(view)+" paintAlpha="+paintAlpha);
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -2270,6 +2291,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float diagnosticMode;\n"+
         "uniform float fixedOutput167;\n"+
         "uniform float alphaUnderlay177;\n"+
+        "uniform float shaderAlpha178;\n"+
         "uniform float motionIsolation173;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
@@ -2319,6 +2341,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  if(compositeProbe157>2.5 && compositeProbe157<3.5){color.a=half(0.075); }\n"+
         "  if(motionIsolation173>0.5 && motionIsolation173<1.5 || motionIsolation173>2.5){color.rgb=half3(0.50,0.50,0.50); }\n"+
         "  if(alphaUnderlay177>0.5 && alphaUnderlay177<1.5){color.a=half(1.0); }\n"+
+        "  if(shaderAlpha178>0.5){color.a=half(shaderAlpha178<1.5?0.50:(shaderAlpha178<2.5?0.85:1.0));}\n"+
         "  return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -2954,6 +2977,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
                     final int alphaMode177=alphaUnderlayMode177();
                     state.continuousShader.setFloatUniform("alphaUnderlay177",(float)alphaMode177);
+                    final int shaderMode178=shaderAlphaMode178();
+                    state.continuousShader.setFloatUniform("shaderAlpha178",(float)shaderMode178);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();
@@ -2992,6 +3017,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     Paint restorePaint175=null;
                     traceLayer175(layerMode175,view,canvas,state.samplePaint.getAlpha());
                     traceAlphaUnderlay177(alphaMode177,view,canvas,state.samplePaint.getAlpha());
+                    traceShaderAlpha178(shaderMode178,view,state.samplePaint.getAlpha());
                     try{
                         if(layerMode175!=0){
                             if(layerMode175==3){

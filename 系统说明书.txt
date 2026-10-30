@@ -37,3 +37,10 @@ V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、
 V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。
 
 V1.9.177: liquidglass_alpha_underlay_177 (0 original, 1 opaque AGSL, 2 constant opaque underlay, 3 underlay grouped saveLayer). Diagnostic only.
+
+V1.9.178｜Shader 输出 Alpha 阈值隔离
+使用前先将 liquidglass_alpha_underlay_177 设为 0，关闭旧版诊断。
+新开关 liquidglass_shader_alpha_178：0=原始 Alpha，1=Shader 输出 Alpha 0.50，2=0.85，3=1.00。
+命令：su -c 'settings put global liquidglass_shader_alpha_178 2'
+日志：SHADER_ALPHA_178。只调整 AGSL Shader 输出 Alpha，不调整 Paint Alpha，不修改原有圆角描边、折射采样、模糊与原生底层。
+这是隔离实验版本，Alpha 1.00 可能遮挡玻璃下层；请对比移动/停止瞬间的突增。
