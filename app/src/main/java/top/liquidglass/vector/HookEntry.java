@@ -211,7 +211,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             String raw=android.provider.Settings.Global.getString(context.getContentResolver(),BOOT_SNAPSHOT_KEY);
             if(raw==null || !raw.startsWith("LG1|"))return false;
             String[] v=raw.split("\\|",-1);
-            if(v.length!=16 && v.length!=20 && v.length!=21 && v.length!=22){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
+            if(v.length!=16 && v.length!=20 && v.length!=21 && v.length!=22 && v.length!=25){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
             // Parse all fields first: never partially apply a corrupt snapshot.
             int[] x=new int[15];
             for(int i=0;i<x.length;i++)x[i]=Integer.parseInt(v[i+1]);
@@ -224,6 +224,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             nativeAlphaProbe=false;wallpaperCompare=x[13]==1;REFRACTION_ENABLED=x[14]==1;
             if(v.length>=20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
             if(v.length>=21)clearRefraction="1".equals(v[20]);
+            // V196: launcher reads root-published snapshot, not the APK ContentProvider.
+            if(v.length>=25){surfaceMode194=clampInt(Integer.parseInt(v[22]),0,3);surfaceStrength194=clampInt(Integer.parseInt(v[23]),0,200);surfaceSoftness194=clampInt(Integer.parseInt(v[24]),50,200);}
             configEverLoaded=true;
             CONFIG_READY_AT_146=android.os.SystemClock.uptimeMillis();
             if(previousRefraction!=REFRACTION_ENABLED){
@@ -286,6 +288,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 ci=c.getColumnIndex("surface_strength_195");if(ci>=0)surfaceStrength194=clampInt(c.getInt(ci),0,200);
                 ci=c.getColumnIndex("surface_softness_195");if(ci>=0)surfaceSoftness194=clampInt(c.getInt(ci),50,200);
                 String summary="enabled="+glassEnabled+" alpha="+glassAlpha+" tint="+tintMode+" tintStrength="+tintStrength+" highlight="+highlightEnabled+" highlightStrength="+highlightStrength+" highlightWidth="+highlightWidth+" directional="+directionalLight+" probeMode="+probeMode+" nativeBlurExperiment="+nativeBlurExperiment+" blurRadiusPercent="+blurRadiusPercent+" nativeAlphaProbe="+nativeAlphaProbe;
+                summary += " surfaceMode="+surfaceMode194+" surfaceStrength="+surfaceStrength194+" surfaceSoftness="+surfaceSoftness194;
                 summary += " realRefraction="+REFRACTION_ENABLED+" wallpaperCompare="+wallpaperCompare+" customBlurDp="+customBlurDp+" refractionPercent="+refractionPercent+" glassTintOpacity="+glassTintOpacity+" customBlurMode="+customBlurMode+" clearRefraction="+clearRefraction;
                 if(!summary.equals(lastConfigSummary)){lastConfigSummary=summary;log("CONFIG_SYNC "+summary);}
             }
@@ -3639,7 +3642,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(surface194Logs++<120)log("SURFACE_MODE_194 mode="+surfaceMode194()+
                 " rollback="+(!surface194Enabled())+" strength="+surfaceStrength194()+
                 " softness="+surfaceSoftness194()+" rim="+rim190+
-                " blurDp="+customBlurDp+" direction="+state.visualDirection188);
+                " blurDp="+customBlurDp+" refraction="+refractionActive+" agsl="+continuousDrawn+" direction="+state.visualDirection188);
             if(unified192!=0 && surfaceUnifiedLogs192++<160)
                 log("SURFACE_UNIFIED_192 mode="+unified192+
                     " legacyNative="+(unified192==1 || unified192==3)+
@@ -3657,7 +3660,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " afterTint=true view="+System.identityHashCode(view)+
                     " direction="+state.visualDirection188);
             }
-            if(rim190!=0 && refractionActive && continuousDrawn){
+            if(rim190!=0){ // V196: surface optics independent of wallpaper refraction and AGSL success
                 drawRoundedRim190(canvas,rect,contourRadius,state.visualDirection188,rim190);
                 if(rimLogs190++<160)log("SURFACE_RIM_190 mode="+rim190+
                     " blurDp="+customBlurDp+" radius="+contourRadius+
