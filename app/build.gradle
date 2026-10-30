@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 191620
-        versionName '1.9.162-transform-layer-correlation'
+        versionName '1.9.163-oem-scroll-isolation'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

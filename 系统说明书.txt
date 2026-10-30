@@ -1,17 +1,12 @@
-V1.9.162｜桌面位移与折射层同步诊断版
+V1.9.163｜Workspace滚动期间OEM背景隔离A/B诊断版
 
-本版基于 V1.9.160。新增 MOTION_CHAIN_161 诊断日志，记录文件夹屏幕坐标与前一次差值、Canvas Matrix、View 平移与滚动、最多五层父 View 的 left/scrollX/translationX/alpha、壁纸参考帧及折射提交位置。
+基于V1.9.162，默认模式0不改变绘制。新增Settings.Global键 liquidglass_oem_scroll_isolation_163：
+0：默认不隔离；1：仅Workspace的scrollX偏离页面宽度整数倍超过阈值时跳过OplusPreviewBackground.drawBackground；2：始终跳过该OEM回调。
 
-本版仅增加日志，不改变任何正常模式的真实 AGSL 折射、模糊、描边、透明度、壁纸缓存、解锁即时重绘逻辑。仍保留 V1.9.160 的采样锚点 A/B 模式。
+AGSL折射dispatch路径保持原样；模式1的页面宽度近似判断可能因Launcher页面布局与滚动基准不同而误判。必须检查OEM_SCROLL_DECISION_163中的skip、width、pageOffset，以及PREVIEW_SKIP_149_163日志是否真正出现。
 
-测试：
-1. 将 liquidglass_sample_anchor_160 设置为 0；将旧版诊断开关设为 0。
-2. 在相同桌面页面静止约 2 秒，左右拖动文件夹所在页面，保持中间位置约 2 秒，然后放回原始位置。
-3. 导出 LSPosed 日志，检索 MOTION_CHAIN_161。日志最多 320 条，每条间隔至少 55ms，可能无法覆盖每一帧。
-4. 可将 sample_anchor_160 设为 1 重复测试。
+模式2与旧V1.9.149的OEM隔离实验相似，用于验证模式1的条件判断，不是独立的新证据。若没有PREVIEW_SKIP日志，不能认定OEM背景已经隔离。此Hook只覆盖drawBackground方法，不覆盖其他OEM背景层。
 
-注意：MOTION_CHAIN_161 的 moving 是相邻两次诊断采样之间的坐标差，不能单独等同 Launcher 的动画状态。静止在偏移位置仍可能出现高光，因此要比较绝对位置与父层变换，而非只看 moving。
+测试前将旧键liquidglass_native_preview_isolation_149、liquidglass_sample_anchor_160、liquidglass_canvas_composite_159、liquidglass_composite_probe_157、liquidglass_optical_probe_156均设0。测试模糊0dp，分别测试0/1/2，并上传LSPosed日志。
 
-未在本环境完成 Android Gradle 编译或设备验证。
-
-V1.9.162：新增 LAYER_CHAIN_162，只读记录文件夹及最多9级父容器的滚动、平移、矩阵、alpha、layerType、全局坐标与 Canvas 矩阵，并关联 AGSL 提交及 dispatch 前后阶段。无新增绘制或亮度修正。
+保持V1.9.154解锁即时重绘、真实AGSL、壁纸缓存及描边。尚未进行Gradle编译和实机验证。

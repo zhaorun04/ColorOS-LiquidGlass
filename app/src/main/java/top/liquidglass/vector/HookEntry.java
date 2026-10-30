@@ -3472,6 +3472,63 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 " blurDp="+customBlurDp+" attached="+v.isAttachedToWindow());
         }catch(Throwable ignored){}
     }
+    // V1.9.163: OEM preview isolation correlated with Workspace page offset.
+    // 0=untouched; 1=skip OEM preview only between page resting positions;
+    // 2=skip OEM preview at all positions. AGSL is never disabled here.
+    private static volatile int oemScrollMode163=0;
+    private static volatile long oemScrollModeRead163=0L;
+    private static int[] oemScrollLogCount163=new int[3];
+    private static int oemScrollMode163(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-oemScrollModeRead163>400L){
+            oemScrollModeRead163=now;
+            try{
+                android.content.Context ctx=launcherContext;
+                if(ctx!=null){
+                    int v=android.provider.Settings.Global.getInt(ctx.getContentResolver(),
+                        "liquidglass_oem_scroll_isolation_163",0);
+                    if(v<0||v>2)v=0;
+                    if(v!=oemScrollMode163){oemScrollMode163=v;log("OEM_SCROLL_MODE_163 mode="+v);}
+                }
+            }catch(Throwable ignored){}
+        }
+        return oemScrollMode163;
+    }
+    private static int[] workspaceOffset163(){
+        View v=ACTIVE_FOLDER_ICON.get();
+        if(v==null){
+            synchronized(BOOT_FOLDER_VIEWS){
+                for(View candidate:BOOT_FOLDER_VIEWS.keySet()){
+                    if(candidate!=null && candidate.isAttachedToWindow()){v=candidate;break;}
+                }
+            }
+        }
+        while(v!=null){
+            if(v.getClass().getName().contains("Workspace")){
+                int w=v.getWidth();
+                int scroll=v.getScrollX();
+                if(w<=0)return new int[]{scroll,w,-1};
+                int remainder=Math.floorMod(scroll,w);
+                int distance=Math.min(remainder,w-remainder);
+                return new int[]{scroll,w,distance};
+            }
+            android.view.ViewParent parent=v.getParent();
+            v=parent instanceof View?(View)parent:null;
+        }
+        return new int[]{0,0,-1};
+    }
+    private static boolean skipOemForScroll163(String stage){
+        int mode=oemScrollMode163();
+        if(mode==0||!glassEnabled)return false;
+        int[] offset=workspaceOffset163();
+        // Unknown workspace: fail open in mode 1 rather than disable OEM globally.
+        boolean skip=mode==2 || (offset[2]>=0 && offset[2]>Math.max(12,offset[1]/100));
+        if(oemScrollLogCount163[mode]++<120)
+            log("OEM_SCROLL_DECISION_163 stage="+stage+" mode="+mode+" skip="+skip+
+                " scrollX="+offset[0]+" width="+offset[1]+" pageOffset="+offset[2]+
+                " glass="+glassEnabled+" icon="+(ACTIVE_FOLDER_ICON.get()!=null));
+        return skip;
+    }
     private static int previewIsolationLogs149=0;
     private static void hookPreview(ClassLoader loader) {
         Class<?> c = find("com.android.launcher3.folder.OplusPreviewBackground", loader);
@@ -3491,8 +3548,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 XposedBridge.hookMethod(m, new XC_MethodHook() {
                     @Override protected void beforeHookedMethod(MethodHookParam param) {
                         if (!"drawBackground".equals(methodName)) return;
-                        if(previewIsolation149()==1 && glassEnabled){
-                            if(previewIsolationLogs149++<40)log("PREVIEW_SKIP_149 method=drawBackground");
+                        if((previewIsolation149()==1 && glassEnabled) || skipOemForScroll163("BEFORE")){
+                            if(previewIsolationLogs149++<80)log("PREVIEW_SKIP_149_163 method=drawBackground");
                             param.setResult(null);
                             return;
                         }
@@ -3509,7 +3566,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
                         try {
                             if ("drawBackground".equals(methodName)) {
-                                if(previewIsolation149()==1 && glassEnabled)return;
+                                if((previewIsolation149()==1 && glassEnabled) || skipOemForScroll163("AFTER"))return;
                                 // Draw on the preview's actual Canvas after its OEM background has been drawn.
                                 // This avoids hooking an inherited/nonexistent LayerBlurDrawable.draw method.
                                 Canvas targetCanvas=null;
