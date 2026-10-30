@@ -1722,7 +1722,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 modified=local.lastModified();length=local.length();
                 if(REFRACTION_FRAME!=null && !REFRACTION_FRAME.isRecycled() && modified==REFRACTION_FRAME_MODIFIED && length==REFRACTION_FRAME_LENGTH){
                     if(REFRACTION_LOGS++<24)log("REFERENCE_REUSE_148 memory_hit=true source="+local.getAbsolutePath());
-                    if(customBlurMode==1 && customBlurDp>0){
+                    if(pathMode169!=2 && customBlurMode==1 && customBlurDp>0){
                         android.util.DisplayMetrics metrics=app.getResources().getDisplayMetrics();
                         blurredWallpaper(REFRACTION_FRAME,metrics.density,null);
                     }
@@ -2045,6 +2045,25 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return 0;
     }
 
+    // V1.9.169: isolate the real-refraction switch without changing other settings.
+    // 0=baseline; 1=skip AGSL while preserving refraction-active blur alpha;
+    // 2=AGSL only, omit custom blur/tint/surface material (edge pass unchanged).
+    private static final int[] REFRACTION_PATH_COUNTS_169=new int[3];
+    private static int refractionPathMode169(){
+        try{
+            android.content.Context ctx=launcherContext;
+            if(ctx!=null)return Math.max(0,Math.min(2,android.provider.Settings.Global.getInt(
+                ctx.getContentResolver(),"liquidglass_refraction_path_169",0)));
+        }catch(Throwable ignored){}
+        return 0;
+    }
+    private static void logRefractionPath169(int mode,String stage,boolean enabled){
+        synchronized(REFRACTION_PATH_COUNTS_169){
+            if(REFRACTION_PATH_COUNTS_169[mode]++<120)
+                log("REFRACTION_PATH_169 mode="+mode+" stage="+stage+
+                    " master="+enabled+" count="+REFRACTION_PATH_COUNTS_169[mode]);
+        }
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -2578,7 +2597,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             // Strict master switch: clear-refraction and blur must never activate AGSL.
             final boolean refractionActive=REFRACTION_ENABLED && refractionPercent>0;
-            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==4 && !Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==5 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && canvas.isHardwareAccelerated() && !state.continuousUnavailable && !Boolean.TRUE.equals(AGSL_SUBMITTED_144.get())){
+            final int pathMode169=refractionPathMode169();
+            logRefractionPath169(pathMode169,"ENTER",refractionActive);
+            if(opticalAb!=2 && probe141!=1 && !(probe141==3 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==4 && !Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && !(probe141==5 && Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())) && refractionActive && pathMode169!=1 && canvas.isHardwareAccelerated() && !state.continuousUnavailable && !Boolean.TRUE.equals(AGSL_SUBMITTED_144.get())){
                 try {
                     if(state.continuousShader==null){
                         state.continuousShader=new android.graphics.RuntimeShader(REFRACTION_AGSL);
@@ -2708,6 +2729,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // visible vertical seams. Keep the native folder blur intact.
                 if(!state.shaderStatusLogged){state.shaderStatusLogged=true;log("REFRACTION_SHADER_STATUS mode=NATIVE_BLUR_FALLBACK");}
             }
+            logRefractionPath169(pathMode169,continuousDrawn?"AGSL_DRAWN":"AGSL_NOT_DRAWN",refractionActive);
             state.samplePaint.setShader(null);
             // Independent background blur and tint: always visible with refraction OFF.
             // With refraction ON, retain some optical detail beneath the blur.
@@ -2738,13 +2760,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }else if(blurHitLogs142++<24){log("BLUR_DRAW_142 WAIT radius="+customBlurDp+" frame="+System.identityHashCode(frame)+" pending="+BLUR_PENDING);}
             }
             // Glass material is last, so AGSL cannot overwrite its opacity/style.
-            if(glassTintOpacity>0){
+            if(pathMode169!=2 && glassTintOpacity>0){
                 Paint tintPaint=state.cachedTintPaint;
                 int tint=tintColor();
                 tintPaint.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
                 canvas.drawRoundRect(rect,contourRadius,contourRadius,tintPaint);
             }
-            if(tintMode!=0 && tintStrength>0){
+            if(pathMode169!=2 && tintMode!=0 && tintStrength>0){
                 Paint stylePaint=state.cachedTintPaint;
                 int styleColor=tintColor();
                 stylePaint.setColor(Color.argb(Math.round(0.72f*255f*tintStrength/90f), Color.red(styleColor),Color.green(styleColor),Color.blue(styleColor)));
@@ -2848,7 +2870,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     DynamicRefraction animation=dynamicState(v);
                     envelope=1.0f; // keep the native outline static; motion sheen lives in AGSL only
                 }
-                drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
+                if(edgeOnly || refractionPathMode169()!=2)drawUnifiedMaterial(canvas,mask,edgeOnly,envelope);
                 if(folderFusionLogs++<16)log("UNIFIED_MATERIAL_DRAW phase="+(edgeOnly?"edge":"surface")+
                     " rect="+rect+" radius="+radius+" nativeOutline="+nativeOutline+
                     " geometryInsetPx=0 maskSource=corner-only-synthetic-mask cornerDeltaPx="+BLUR_CORNER_RADIUS_DELTA_PX+" alphaMask=true");
