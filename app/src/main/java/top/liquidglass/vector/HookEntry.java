@@ -2240,12 +2240,36 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }catch(Throwable e){if(parentTraceCount174++<900)log("PARENT_COMPOSITE_174_ERROR "+e.getClass().getSimpleName());}
     }
 
+    // V1.9.177: separate AGSL opacity from the pixels beneath the glass.
+    // 0=baseline; 1=opaque AGSL; 2=opaque local underlay + original AGSL;
+    // 3=same underlay and AGSL grouped in a local saveLayer.
+    private static volatile int alphaUnderlay177=0;
+    private static volatile long alphaUnderlayRead177=0L;
+    private static int alphaUnderlayMode177(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-alphaUnderlayRead177>350L){
+            alphaUnderlayRead177=now;
+            try{
+                android.content.Context c=launcherContext;
+                if(c!=null)alphaUnderlay177=Math.max(0,Math.min(3,
+                    android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_alpha_underlay_177",0)));
+            }catch(Throwable ignored){}
+        }
+        return alphaUnderlay177;
+    }
+    private static final int[] ALPHA_UNDERLAY_LOGS_177=new int[4];
+    private static void traceAlphaUnderlay177(int mode,View view,Canvas canvas,int paintAlpha){
+        if(ALPHA_UNDERLAY_LOGS_177[mode]++>=120)return;
+        log("ALPHA_UNDERLAY_177 mode="+mode+" view="+System.identityHashCode(view)+
+            " paintAlpha="+paintAlpha+" hardware="+canvas.isHardwareAccelerated());
+    }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
         "uniform float strength;\n"+
         "uniform float diagnosticMode;\n"+
         "uniform float fixedOutput167;\n"+
+        "uniform float alphaUnderlay177;\n"+
         "uniform float motionIsolation173;\n"+
         "uniform float passId;\n"+
         "uniform float temporalOpacity;\n"+
@@ -2294,6 +2318,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  if(compositeProbe157>1.5 && compositeProbe157<2.5){color.a=half(0.15); }\n"+
         "  if(compositeProbe157>2.5 && compositeProbe157<3.5){color.a=half(0.075); }\n"+
         "  if(motionIsolation173>0.5 && motionIsolation173<1.5 || motionIsolation173>2.5){color.rgb=half3(0.50,0.50,0.50); }\n"+
+        "  if(alphaUnderlay177>0.5 && alphaUnderlay177<1.5){color.a=half(1.0); }\n"+
         "  return color;\n"+
         " }\n"+
         // Keep optical displacement separate from the overlay opacity. The old
@@ -2927,6 +2952,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     int probe156=opticalProbe156();
                     state.continuousShader.setFloatUniform("strength",probe156==1?0.0f:(displacementMode==0?0.0f:22.0f*refractionPercent/35.0f));
                     state.continuousShader.setFloatUniform("diagnosticMode",(float)shaderMode);
+                    final int alphaMode177=alphaUnderlayMode177();
+                    state.continuousShader.setFloatUniform("alphaUnderlay177",(float)alphaMode177);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();
@@ -2964,6 +2991,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     android.graphics.Xfermode previousXfer159=state.samplePaint.getXfermode();
                     Paint restorePaint175=null;
                     traceLayer175(layerMode175,view,canvas,state.samplePaint.getAlpha());
+                    traceAlphaUnderlay177(alphaMode177,view,canvas,state.samplePaint.getAlpha());
                     try{
                         if(layerMode175!=0){
                             if(layerMode175==3){
@@ -2987,7 +3015,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                 state.samplePaint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC));
                             else state.samplePaint.setXfermode(null);
                         }
-                        canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
+                        // V177 modes 2/3: constant opaque local base, not wallpaper-derived.
+                        // Mode 3 groups base+AGSL into a saveLayer before restoring.
+                        int localLayer177=-1;
+                        try{
+                            if(alphaMode177==3)
+                                localLayer177=canvas.saveLayer(rect.left,rect.top,rect.right,rect.bottom,null);
+                            if(alphaMode177>=2){
+                                Paint base177=new Paint(Paint.ANTI_ALIAS_FLAG);
+                                base177.setColor(Color.rgb(100,100,100));
+                                canvas.drawRoundRect(rect,contourRadius,contourRadius,base177);
+                            }
+                            canvas.drawRoundRect(rect,contourRadius,contourRadius,state.samplePaint);
+                        }finally{
+                            if(localLayer177>=0)canvas.restoreToCount(localLayer177);
+                        }
                     }finally{
                         state.samplePaint.setXfermode(previousXfer159);
                         if(isolatedLayer159>=0)canvas.restoreToCount(isolatedLayer159);

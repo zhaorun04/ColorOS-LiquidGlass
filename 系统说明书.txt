@@ -35,3 +35,5 @@ V1.9.176｜桌面滚动文件夹绘制链路审计
 V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。
 
 V1.9.176.1：补齐 DRAW_TRACE_176 实际源码插桩。包含 DISPATCH_BEGIN、FUSION_ENTRY、AGSL_ATTEMPT、AGSL_SUBMIT、DISPATCH_END；seq 关联同次 dispatch，记录次数、矩阵和裁剪。仅诊断，不改变光学算法。
+
+V1.9.177: liquidglass_alpha_underlay_177 (0 original, 1 opaque AGSL, 2 constant opaque underlay, 3 underlay grouped saveLayer). Diagnostic only.
