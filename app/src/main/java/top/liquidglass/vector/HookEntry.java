@@ -2045,6 +2045,38 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return 0;
     }
 
+    // V1.9.171: isolate only the AGSL Paint alpha, keeping Shader, blur, tint,
+    // geometry and original draw order unchanged. 0=255, 1=128, 2=64, 3=0.
+    private static int agslPaintAlphaMode171(){
+        try{
+            android.content.Context ctx=launcherContext;
+            if(ctx!=null)return Math.max(0,Math.min(3,android.provider.Settings.Global.getInt(
+                ctx.getContentResolver(),"liquidglass_agsl_paint_alpha_171",0)));
+        }catch(Throwable ignored){}
+        return 0;
+    }
+    private static final int[] AGSL_ALPHA_LOG_COUNTS_171=new int[4];
+    private static void traceAgslAlpha171(View view,Canvas canvas,int mode,Paint paint){
+        synchronized(AGSL_ALPHA_LOG_COUNTS_171){
+            if(AGSL_ALPHA_LOG_COUNTS_171[mode]++>=96)return;
+        }
+        StringBuilder parents=new StringBuilder();
+        android.view.ViewParent par=view.getParent();
+        for(int i=0;i<5 && par instanceof View;i++){
+            View v=(View)par;
+            if(i>0)parents.append('>');
+            parents.append(v.getClass().getSimpleName()).append("(a=").append(v.getAlpha())
+                .append(",layer=").append(v.getLayerType()).append(",sx=").append(v.getScaleX())
+                .append(",tx=").append(v.getTranslationX()).append(",scroll=").append(v.getScrollX()).append(')');
+            par=v.getParent();
+        }
+        log("AGSL_ALPHA_CHAIN_171 mode="+mode+" paintAlpha="+paint.getAlpha()+
+            " xfer="+(paint.getXfermode()==null?"default":paint.getXfermode().getClass().getSimpleName())+
+            " colorFilter="+(paint.getColorFilter()==null?"null":paint.getColorFilter().getClass().getSimpleName())+
+            " viewAlpha="+view.getAlpha()+" hardware="+canvas.isHardwareAccelerated()+
+            " parents="+parents);
+    }
+
     // V1.9.170: compositing order experiment. 0=legacy AGSL->blur;
     // 1=opaque blur foundation->AGSL. This keeps actual AGSL pixels visible.
     private static int refractionComposite170(){
@@ -2714,8 +2746,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.continuousShader.setFloatUniform("opticalSheenEnabled",probe141==2?0.0f:1.0f); // V141: isolate AGSL ambient without disabling displacement
                     state.continuousShader.setFloatUniform("motionHighlight",0.0f); // legacy uniform disabled; no touch-driven sheen
                     state.continuousShader.setFloatUniform("temporalOpacity",1.0f); // keep wallpaper refraction stable; animate only highlight
-                    state.samplePaint.setAlpha(255);
+                    final int alphaMode171=agslPaintAlphaMode171();
+                    state.samplePaint.setAlpha(alphaMode171==0?255:(alphaMode171==1?128:(alphaMode171==2?64:0)));
                     state.samplePaint.setShader(state.continuousShader);
+                    traceAgslAlpha171(view,canvas,alphaMode171,state.samplePaint);
                     // V159: only the AGSL surface is changed. The native blur,
                     // tint, rim and children remain on their original Canvas path.
                     // SRC is NEVER applied directly to the parent Canvas: that would
@@ -2779,6 +2813,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             logRefractionPath169(pathMode169,continuousDrawn?"AGSL_DRAWN":"AGSL_NOT_DRAWN",refractionActive);
             logComposite170(compositeMode170,continuousDrawn?"AGSL_DRAWN":"AGSL_NOT_DRAWN",-1);
             state.samplePaint.setShader(null);
+            state.samplePaint.setAlpha(255);
             // Independent background blur and tint: always visible with refraction OFF.
             // With refraction ON, retain some optical detail beneath the blur.
             if(compositeMode170==0 && customBlurMode==1 && customBlurDp>0){
