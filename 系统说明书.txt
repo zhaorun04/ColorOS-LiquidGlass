@@ -1,7 +1,6 @@
-ColorOS-LiquidGlass V1.9.182｜运动状态连续性修正版
+V1.9.183 全局运动状态统一与自然衰减诊断版
 
-以 V1.9.181 为基础，修复独立帧调度：回调自行续帧，直到运动速度与高光驱动值平滑衰减到静止阈值；避免重复调度。
-新增 MOTION_SIGNAL_182 日志：frame、dtMs、signedDx、discontinuity、velocityPxS、filteredPxS、signedPxS、highlight、active、scheduled、settleTicks。
-对大幅坐标突跳进行重新布局识别，避免误判为物理运动。
-本版仍为运动诊断版，未将运动信号接入 AGSL 动态高光。
-测试：静止2秒→慢滑→停止2秒→反向慢滑→停止2秒→快速滑动；导出 LSPosed 日志。
+统一 Workspace 运动采样和帧调度，所有文件夹共享同一运动信号。
+日志：MOTION_SIGNAL_183、MOTION_SETTLED_183。
+继续使用不透明 AGSL 真实折射基底；本版不添加动态高光视觉渲染。
+请测试静止、左右滑动、停止两秒、快速惯性滑动，并导出 LSPosed 日志。
