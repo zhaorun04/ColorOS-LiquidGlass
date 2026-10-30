@@ -2284,48 +2284,80 @@ public final class HookEntry implements IXposedHookLoadPackage {
         log("SHADER_ALPHA_178 mode="+mode+" shaderAlpha="+(mode==0?"original":mode==1?"0.50":mode==2?"0.85":"1.00")+
             " view="+System.identityHashCode(view)+" paintAlpha="+paintAlpha);
     }
-    // V1.9.180: observe real movement without changing the stable shader output.
-    // Weak keys avoid keeping detached Launcher folder views alive.
-    private static final java.util.WeakHashMap<View, float[]> MOTION_SIGNAL_180=new java.util.WeakHashMap<>();
-    private static int motionSignalLogs180=0;
-    private static void traceMotionSignal180(View view){
+    // V1.9.181: per-view motion state. This diagnostic driver does NOT modify the shader.
+    // Use screen displacement for signed motion, and keep a short frame loop only while
+    // filtered motion decays. Weak keys avoid retaining detached folder views.
+    private static final java.util.WeakHashMap<View, MotionState181> MOTION_STATES_181=new java.util.WeakHashMap<>();
+    private static int motionLogs181=0;
+    private static final class MotionState181 {
+        long timeNs;
+        float x,y,scroll,raw,filtered,signed,highlight;
+        boolean scheduled;
+        int ticks;
+    }
+    private static void updateMotion181(View view,boolean fromFrame){
+        if(view==null || !view.isAttachedToWindow())return;
         try{
-            long now=android.os.SystemClock.uptimeMillis();
-            int[] pos=new int[2];view.getLocationOnScreen(pos);
+            long now=android.os.SystemClock.elapsedRealtimeNanos();
+            int[] p=new int[2];view.getLocationOnScreen(p);
             int[] workspace=workspaceOffset163();
-            float screenX=pos[0], screenY=pos[1];
-            float scroll=workspace[0];
-            float velocity=0f, filtered=0f, direction=0f, dt=0f;
-            boolean reset=false;
-            synchronized(MOTION_SIGNAL_180){
-                float[] prev=MOTION_SIGNAL_180.get(view);
-                if(prev!=null){
-                    dt=now-prev[0];
-                    if(dt>0f && dt<=250f){
-                        // Screen displacement is authoritative for the folder; workspace
-                        // scroll is independently reported to detect moving-page cases.
-                        float dx=screenX-prev[1],dy=screenY-prev[2];
-                        velocity=(float)Math.hypot(dx,dy)*1000f/dt;
-                        direction=dx>0.25f?1f:(dx< -0.25f?-1f:0f);
-                        float tau=velocity>prev[4]?85f:180f;
-                        float a=1f-(float)Math.exp(-dt/tau);
-                        filtered=prev[4]+a*(Math.min(2500f,velocity)-prev[4]);
-                    }else reset=true;
-                }else reset=true;
-                MOTION_SIGNAL_180.put(view,new float[]{now,screenX,screenY,scroll,filtered});
+            float x=p[0],y=p[1],scroll=workspace[0];
+            MotionState181 st;
+            float dtMs=0f;
+            synchronized(MOTION_STATES_181){
+                st=MOTION_STATES_181.get(view);
+                if(st==null){st=new MotionState181();MOTION_STATES_181.put(view,st);}
+                if(st.timeNs!=0L){
+                    dtMs=Math.max(0f,(now-st.timeNs)/1000000f);
+                    if(dtMs>0.1f){
+                        float dx=x-st.x;
+                        // For stationary glass, scrolling workspace still gives direction.
+                        float scrollDx=scroll-st.scroll;
+                        float signedDx=Math.abs(dx)>0.25f?dx:-scrollDx;
+                        float velocity=Math.min(2500f,Math.abs(signedDx)*1000f/dtMs);
+                        // Long frames represent elapsed time, NOT a forced reset.
+                        float tau=velocity>st.filtered?85f:220f;
+                        float blend=1f-(float)Math.exp(-dtMs/tau);
+                        st.raw=velocity;
+                        st.filtered+=blend*(velocity-st.filtered);
+                        float signedTarget=velocity*(signedDx>0f?1f:(signedDx<0f?-1f:0f));
+                        st.signed+=blend*(signedTarget-st.signed);
+                        float target=Math.min(1f,st.filtered/950f);
+                        float highlightTau=target>st.highlight?120f:220f;
+                        st.highlight+=(1f-(float)Math.exp(-dtMs/highlightTau))*(target-st.highlight);
+                    }
+                }
+                st.timeNs=now;st.x=x;st.y=y;st.scroll=scroll;
+                if(motionLogs181<400 && (motionLogs181<50 || st.ticks%4==0)){
+                    motionLogs181++;
+                    log("MOTION_SIGNAL_181 id="+System.identityHashCode(view)+" frame="+fromFrame+
+                        " dtMs="+dtMs+" screenX="+x+" workspaceScroll="+scroll+
+                        " velocityPxS="+st.raw+" filteredPxS="+st.filtered+
+                        " signedPxS="+st.signed+" highlight="+st.highlight+
+                        " scheduled="+st.scheduled);
+                }
+                st.ticks++;
+                if(!st.scheduled && (st.filtered>1.0f || st.highlight>0.003f)){
+                    st.scheduled=true;
+                    final java.lang.ref.WeakReference<View> weak=new java.lang.ref.WeakReference<>(view);
+                    view.postOnAnimation(new Runnable(){
+                        @Override public void run(){
+                            View v=weak.get();if(v==null || !v.isAttachedToWindow())return;
+                            synchronized(MOTION_STATES_181){
+                                MotionState181 state=MOTION_STATES_181.get(v);
+                                if(state==null)return;
+                                state.scheduled=false;
+                            }
+                            updateMotion181(v,true);
+                            // Keep rendering only while a nonzero motion signal remains.
+                            MotionState181 state;
+                            synchronized(MOTION_STATES_181){state=MOTION_STATES_181.get(v);}
+                            if(state!=null && (state.filtered>1f || state.highlight>0.003f))v.postInvalidateOnAnimation();
+                        }
+                    });
+                }
             }
-            // Limit logging, but capture both motion and rest in each short gesture.
-            if(motionSignalLogs180<320){
-                motionSignalLogs180++;
-                if(motionSignalLogs180<=40 || motionSignalLogs180%3==0)
-                    log("MOTION_SIGNAL_180 id="+System.identityHashCode(view)+
-                        " dtMs="+dt+" screenX="+screenX+" screenY="+screenY+
-                        " workspaceScroll="+scroll+" workspaceWidth="+workspace[1]+
-                        " pageOffset="+workspace[2]+" velocityPxS="+velocity+
-                        " filteredPxS="+filtered+" direction="+direction+
-                        " reset="+reset+" alphaBase=1.0");
-            }
-        }catch(Throwable t){if(motionSignalLogs180++<8)log("MOTION_SIGNAL_180_ERROR "+t.getClass().getSimpleName());}
+        }catch(Throwable t){if(motionLogs181++<8)log("MOTION_SIGNAL_181_ERROR "+t.getClass().getSimpleName());}
     }
     // V1.9.179: opaque wallpaper-refraction base with sheen composited in RGB.
     // Modes: 0 stable baseline; 1 subtle sheen; 2 stronger sheen; 3 no added sheen.
@@ -3057,7 +3089,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V179 modes override older alpha experiments inside AGSL.
                     state.continuousShader.setFloatUniform("stableSheen179",(float)stableMode179);
                     traceStableSheen179(stableMode179,view);
-                    traceMotionSignal180(view);
+                    updateMotion181(view,false);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();

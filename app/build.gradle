@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191790
-        versionName '1.9.180-motion-signal-diagnostics'
+        versionCode 191810
+        versionName '1.9.181-motion-frame-driver'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
