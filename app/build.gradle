@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191580
-        versionName '1.9.159-canvas-composite-isolation'
+        versionCode 191610
+        versionName '1.9.161-motion-layer-trace'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

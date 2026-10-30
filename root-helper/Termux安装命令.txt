@@ -1,6 +1,4 @@
-V1.9.80 壁纸同步：事件优先 + 每 5 分钟低频兜底。
-在解压后的 root-helper 目录运行：
-su -c 'cp 99-liquidglass-wallpaper.sh 99-liquidglass-wallpaper-notify.sh /data/adb/service.d/ && chmod 755 /data/adb/service.d/99-liquidglass-wallpaper*.sh'
-然后重启手机；避免在已有进程运行时手动重复启动。
-卸载：su -c 'rm -f /data/adb/service.d/99-liquidglass-wallpaper.sh /data/adb/service.d/99-liquidglass-wallpaper-notify.sh'，重启。
-注意：inotifyd 不可用时每 5 分钟检查源文件大小/修改时间。通知后仍需 Launcher 原有的最多 30 秒刷新检查。
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.161 桌面位移与折射层同步诊断"
+git push origin main

@@ -1,22 +1,15 @@
-V1.9.160｜真实壁纸采样基准 A/B 诊断版
+V1.9.161｜桌面位移与折射层同步诊断版
 
-基于 V1.9.159，保留 V1.9.154 解锁即时显示、AGSL 真实折射、壁纸缓存、模糊、描边及原有 Canvas 合成路径。
+本版基于 V1.9.160。新增 MOTION_CHAIN_161 诊断日志，记录文件夹屏幕坐标与前一次差值、Canvas Matrix、View 平移与滚动、最多五层父 View 的 left/scrollX/translationX/alpha、壁纸参考帧及折射提交位置。
 
-新增采样锚点开关 liquidglass_sample_anchor_160：
-模式 0：原始实时位置纹理映射（默认，不修改渲染行为）。
-模式 1：每个文件夹首次采样位置锁定为纹理映射基准，滑动时仍实时绘制真实 AGSL 折射，但纹理基准不随文件夹移动。该模式可能产生壁纸错位，仅用于定位。
-切换模式时会重置采样锚点；如需重新锁定基准，请先切回 0 再切 1。
+本版仅增加日志，不改变任何正常模式的真实 AGSL 折射、模糊、描边、透明度、壁纸缓存、解锁即时重绘逻辑。仍保留 V1.9.160 的采样锚点 A/B 模式。
 
-测试前重置其他诊断开关：
-su -c 'settings put global liquidglass_composite_probe_157 0'
-su -c 'settings put global liquidglass_optical_probe_156 0'
-su -c 'settings put global liquidglass_coordinate_probe_155 0'
-su -c 'settings put global liquidglass_canvas_composite_159 0'
+测试：
+1. 将 liquidglass_sample_anchor_160 设置为 0；将旧版诊断开关设为 0。
+2. 在相同桌面页面静止约 2 秒，左右拖动文件夹所在页面，保持中间位置约 2 秒，然后放回原始位置。
+3. 导出 LSPosed 日志，检索 MOTION_CHAIN_161。日志最多 320 条，每条间隔至少 55ms，可能无法覆盖每一帧。
+4. 可将 sample_anchor_160 设为 1 重复测试。
 
-模式 0：su -c 'settings put global liquidglass_sample_anchor_160 0'
-模式 1：su -c 'settings put global liquidglass_sample_anchor_160 1'
-每次切换等待至少 1 秒后，在同一明亮壁纸区域滑动并观察是否突增高光。
-日志：SAMPLE_MODE_160 / SAMPLE_TRACE_160，含 live、anchor、delta、frame、scale、afterOEM。
+注意：MOTION_CHAIN_161 的 moving 是相邻两次诊断采样之间的坐标差，不能单独等同 Launcher 的动画状态。静止在偏移位置仍可能出现高光，因此要比较绝对位置与父层变换，而非只看 moving。
 
-注意：模式 1 的纹理坐标固定会导致折射图像错位，这是预期的诊断现象，不是最终修复方案。
-本包尚未完成 Android Gradle 编译或设备验证。
+未在本环境完成 Android Gradle 编译或设备验证。

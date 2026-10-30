@@ -2286,6 +2286,52 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return sampleAnchor160;
     }
 
+    // V1.9.161: diagnostic-only correlation between Launcher horizontal motion,
+    // the parent transform chain and the real AGSL submit. Never modifies Canvas.
+    private static final java.util.WeakHashMap<View, float[]> MOTION_LAST_161=new java.util.WeakHashMap<>();
+    private static int motionTraceCount161=0;
+    private static long motionTraceAt161=0L;
+    private static void traceFolderMotion161(View view, Canvas canvas, float sampleLeft, float sampleTop,
+                                              android.graphics.Bitmap frame, int sampleMode, int canvasMode) {
+        try {
+            long now=android.os.SystemClock.uptimeMillis();
+            if(motionTraceCount161>=320 || now-motionTraceAt161<55L)return;
+            motionTraceAt161=now;
+            int[] screen=new int[2];view.getLocationOnScreen(screen);
+            float[] prev=MOTION_LAST_161.get(view);
+            float delta=prev==null?0f:screen[0]-prev[0];
+            float deltaY=prev==null?0f:screen[1]-prev[1];
+            MOTION_LAST_161.put(view,new float[]{screen[0],screen[1]});
+            StringBuilder parents=new StringBuilder();
+            android.view.ViewParent node=view.getParent();
+            for(int depth=0;depth<5 && node instanceof View;depth++){
+                View v=(View)node;
+                if(depth>0)parents.append('>');
+                parents.append(v.getClass().getSimpleName())
+                    .append('(').append(v.getLeft()).append(',').append(v.getScrollX())
+                    .append(',').append(v.getTranslationX()).append(',').append(v.getAlpha()).append(')');
+                node=v.getParent();
+            }
+            android.graphics.Matrix cm=new android.graphics.Matrix();
+            canvas.getMatrix(cm);
+            float[] vals=new float[9];cm.getValues(vals);
+            boolean moving=Math.abs(delta)>0.5f || Math.abs(deltaY)>0.5f;
+            motionTraceCount161++;
+            log("MOTION_CHAIN_161 id="+System.identityHashCode(view)+
+                " t="+now+" moving="+moving+" screen="+screen[0]+","+screen[1]+
+                " delta="+delta+","+deltaY+" sample="+sampleLeft+","+sampleTop+
+                " local="+view.getLeft()+","+view.getTop()+
+                " translation="+view.getTranslationX()+","+view.getTranslationY()+
+                " scroll="+view.getScrollX()+","+view.getScrollY()+
+                " alpha="+view.getAlpha()+" layer="+view.getLayerType()+
+                " canvasMatrix="+vals[0]+","+vals[1]+","+vals[2]+","+vals[3]+","+vals[4]+","+vals[5]+
+                " sampleMode="+sampleMode+" compositeMode="+canvasMode+
+                " frame="+System.identityHashCode(frame)+
+                " afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get())+
+                " parents="+parents);
+        }catch(Throwable t){if(motionTraceCount161++<4)log("MOTION_CHAIN_161_ERROR "+t.getClass().getSimpleName());}
+    }
+
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
         if(compositeCounts158!=null)compositeCounts158[0]++;
@@ -2483,6 +2529,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         state.samplePaint.setXfermode(previousXfer159);
                         if(isolatedLayer159>=0)canvas.restoreToCount(isolatedLayer159);
                     }
+                    traceFolderMotion161(view,canvas,left,top,frame,sampleMode160,canvasMode159);
                     if(CANVAS_LOG_COUNTS_159[canvasMode159]++<72)
                         log("CANVAS_SUBMIT_159 mode="+canvasMode159+" view="+System.identityHashCode(view)+
                             " canvas="+System.identityHashCode(canvas)+" layer="+(isolatedLayer159>=0)+
