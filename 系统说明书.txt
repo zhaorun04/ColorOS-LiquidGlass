@@ -13,3 +13,12 @@ ColorOS Liquid Glass V1.9.195｜模糊折射同源采样与 APK 表面光学 UI 
 尚未经过 Android Gradle 编译和实机验证。若壁纸模糊位图尚未生成，会暂时采样原始壁纸并在后续帧切换为模糊纹理。
 
 V1.9.196：修复 Launcher 仅读取 root Settings.Global 快照导致表面光学 UI 参数未同步；快照新增表面模式、强度、宽度三项；表面圆角反射不再依赖真实壁纸折射或 AGSL 成功。安装新版后须同步更新 root-helper 服务脚本并重启服务/设备，使新快照字段生效。
+
+
+V1.9.197｜统一表面光学配置部署修复
+1. APK 内置 assets 主服务脚本与 root-helper 主服务脚本字节一致，均包含 surface_mode_195 / surface_strength_195 / surface_softness_195。
+2. 修复 RootHelperUpdater 显示的旧安装版本；安装后明确提示重启手机。仅替换磁盘脚本不会使已经运行的旧 shell 服务进程热更新。
+3. Launcher 日志新增 SURFACE_SNAPSHOT_197_MISSING 和快照字段数量及表面光学参数诊断。
+4. 安装新版 APK、授予 root 并等待脚本校验后重启手机；在 Termux 执行 settings get global liquidglass_boot_snapshot_v1，预期为 LG1 + 24 个数字（25 字段）。
+5. 改变 UI 模式 0/3、强度 0/200、宽度 50/200，重新检查快照和实际反射变化。
+6. 本版不更改已经稳定的折射和高光算法。

@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.195  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.197  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
         slider("高光强度 (%)","highlight_strength",30,0,100);
         slider("描边宽度（像素）","highlight_width",2,1,5);
         toggle("方向性反射","directional_light",true);
-        section("统一表面光学 · V1.9.195","新版圆角反射独立于背景模糊；设置保存后会同步给 Launcher。");
+        section("统一表面光学 · V1.9.197","新版圆角反射独立于背景模糊；设置保存后会同步给 Launcher。");
         TextView surfaceLabel=text("表面反射模式",13,false);current.addView(surfaceLabel);
         Spinner surfaceSpinner=new Spinner(this);
         String[] surfaceModes={"0 · 关闭表面反射","1 · 静态圆角反射","2 · 动态圆角反射","3 · 动态反射 + 柔和暗边"};
@@ -117,6 +117,7 @@ public final class MainActivity extends Activity {
         section("维护与状态","高级实验已从首页隐藏，保留必要的 Root 脚本更新与日志开关。");
         TextView status=text("检查 Root 辅助脚本中…",12,false);current.addView(status);
         action("检查并更新 Root 辅助脚本",()->RootHelperUpdater.runAsync(this,status::setText));
+        TextView serviceHint=text("安装或更新脚本后请重启手机：旧版服务进程不会因文件被覆盖而自动重启。重启后配置快照应包含 25 个字段。",12,false);current.addView(serviceHint);
         toggle("详细诊断日志","diagnostics",false);
         TextView foot=text("提示：旧版校准、对照图和诊断模式不再显示在首页，已有数据不会自动删除。",12,false);body.addView(foot);
         setContentView(scroll);

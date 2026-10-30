@@ -225,6 +225,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(v.length>=20){customBlurDp=clampInt(Integer.parseInt(v[16]),0,40);refractionPercent=clampInt(Integer.parseInt(v[17]),0,100);glassTintOpacity=clampInt(Integer.parseInt(v[18]),0,100);customBlurMode=clampInt(Integer.parseInt(v[19]),0,2);}
             if(v.length>=21)clearRefraction="1".equals(v[20]);
             // V196: launcher reads root-published snapshot, not the APK ContentProvider.
+            if(v.length<25 && !raw.equals(lastBootSnapshot))log("SURFACE_SNAPSHOT_197_MISSING count="+v.length+" expected=25");
             if(v.length>=25){surfaceMode194=clampInt(Integer.parseInt(v[22]),0,3);surfaceStrength194=clampInt(Integer.parseInt(v[23]),0,200);surfaceSoftness194=clampInt(Integer.parseInt(v[24]),50,200);}
             configEverLoaded=true;
             CONFIG_READY_AT_146=android.os.SystemClock.uptimeMillis();
@@ -236,7 +237,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
             if(!raw.equals(lastBootSnapshot)){
                 lastBootSnapshot=raw;
-                log("BOOT_SNAPSHOT_APPLIED enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED);
+                log("BOOT_SNAPSHOT_APPLIED enabled="+glassEnabled+" highlight="+highlightEnabled+" refraction="+REFRACTION_ENABLED+" fields="+v.length+" surface="+surfaceMode194+" strength="+surfaceStrength194+" softness="+surfaceSoftness194);
                 if(CONFIG_LOGS_146++<32)log("CONFIG_FIRST_FRAME_146 snapshotReady="+CONFIG_READY_AT_146+" unlockAt="+CONFIG_UNLOCK_AT_146+" blur="+customBlurDp+" alpha="+glassAlpha+" refract="+refractionPercent);
                 return true;
             }
