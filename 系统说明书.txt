@@ -1,20 +1,19 @@
-ColorOS-LiquidGlass V1.9.166｜DragLayer硬件图层A/B验证版
+ColorOS-LiquidGlass V1.9.168｜真实壁纸折射链路审计版
 
-基于 V1.9.165。保留原有 AGSL 壁纸像素折射、壁纸缓存及 V1.9.154 解锁即时重绘。
+基于 V1.9.167，默认绘制路径保持不变；本版不宣称已修复闪烁。
+审计重点：AGSL Shader、BitmapShader 屏幕坐标映射、折射开关、模糊 Alpha 耦合、Canvas 合成、FolderIcon 前后绘制阶段、壁纸帧缓存、诊断开关。
 
-新增全局设置：liquidglass_draglayer_layer_probe_166
-0：原始 Launcher 图层类型（默认）；若本进程此前在模式1中更改过图层，则在下次文件夹 dispatchDraw 时尝试恢复。
-1：文件夹绘制时，定位父链中的 OplusDragLayer，暂时将显式图层类型设置为 LAYER_TYPE_NONE。
-注意：NONE 仅表示不显式缓存为 View 硬件图层，不代表禁用 GPU 硬件加速。
+已确认的结构问题：
+1. 开启折射同时改变模糊层 Alpha（235/145 对比关闭时 255），导致总开关对照并非单变量。
+2. AGSL 在模糊层之前绘制；模糊层随后覆盖折射输出，且边缘材质另行绘制。
+3. 固定灰色 AGSL 测试仍保留其他模糊/材质层，不能直接判定 Shader 是根因。
+4. FolderIcon.getBackground() 为 null 不等于私有 mBackground 为 null。
+5. 历史诊断开关众多，测试时应恢复默认值。
 
-新增日志：DRAG_LAYER_166，包含 mode/action/before/after/original/scale/translate/alpha/canvasHardware。
+本版增加可恢复的单变量测试：
+settings put global liquidglass_refraction_blur_isolation_168 0  # 旧版原样
+settings put global liquidglass_refraction_blur_isolation_168 1  # 模糊 Alpha 固定 255，不随折射开关改变
+日志：REFRACTION_BLUR_168
+测试后恢复 0。模式 1 可能改变模糊视觉，不是最终修复方案。
 
-测试：安装 APK 后重启手机；在亮色壁纸下分别测试模式0与1，左右滑动桌面，观察玻璃是否突然增亮。切回0后需触发一次文件夹绘制以恢复图层，或重启 Launcher。
-
-Termux:
-su -c 'settings put global liquidglass_draglayer_layer_probe_166 0'
-su -c 'settings put global liquidglass_draglayer_layer_probe_166 1'
-su -c 'settings put global liquidglass_draglayer_layer_probe_166 0'
-
-重要：这是诊断版本，模式1可能影响 Launcher 动画流畅度；如出现异常立即切回0并重启 Launcher。
-源码未经 Android Gradle 编译及实机验证。
+保留 AGSL 真实壁纸折射与 V1.9.154 解锁重绘。

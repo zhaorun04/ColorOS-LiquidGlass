@@ -2034,6 +2034,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             " canvasHardware="+canvas.isHardwareAccelerated()+" viewAlpha="+view.getAlpha()+
             " chain="+chain);
     }
+    // V1.9.168: read live Settings.Global to avoid requiring a Launcher restart.
+    private static int REFRACTION_BLUR_LOGS_168=0;
+    private static int refractionBlurIsolation168(){
+        try{
+            android.content.Context ctx=launcherContext;
+            if(ctx!=null)return Math.max(0,Math.min(1,android.provider.Settings.Global.getInt(
+                ctx.getContentResolver(),"liquidglass_refraction_blur_isolation_168",0)));
+        }catch(Throwable ignored){}
+        return 0;
+    }
+
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
         "uniform float4 bounds;\n"+
@@ -2709,7 +2720,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         state.cachedBlurShader=new android.graphics.BitmapShader(blurred,android.graphics.Shader.TileMode.CLAMP,android.graphics.Shader.TileMode.CLAMP);
                         state.cachedBlurPaint.setShader(state.cachedBlurShader);
                     }
-                    state.cachedBlurPaint.setAlpha(refractionActive ? (clearRefraction?145:235) : 255);
+                    // V1.9.168: audit isolation: preserve the historical alpha by default.
+                    // Setting mode=1 keeps the same blur opacity when refraction is toggled,
+                    // isolating the AGSL contribution from the blur-alpha coupling.
+                    final int blurIsolation168=refractionBlurIsolation168();
+                    final int blurAlpha168=blurIsolation168==1 ? 255 : (refractionActive ? (clearRefraction?145:235) : 255);
+                    state.cachedBlurPaint.setAlpha(blurAlpha168);
+                    if(REFRACTION_BLUR_LOGS_168++<80)log("REFRACTION_BLUR_168 isolation="+blurIsolation168+
+                        " refractionActive="+refractionActive+" alpha="+blurAlpha168+
+                        " blurDp="+customBlurDp+" frame="+System.identityHashCode(frame));
                     state.cachedBlurMatrix.reset();
                     state.cachedBlurMatrix.setScale((float)sw/blurred.getWidth(),(float)sh/blurred.getHeight());
                     state.cachedBlurMatrix.postTranslate(-left,-top);
