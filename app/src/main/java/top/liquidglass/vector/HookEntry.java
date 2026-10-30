@@ -2373,6 +2373,58 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }catch(Throwable e){if(layerTrace162++<5)log("LAYER_CHAIN_162_ERROR "+e.getClass().getSimpleName());}
     }
 
+    // V1.9.166: reversible, diagnostic-only DragLayer hardware-layer A/B test.
+    // Mode 0 = original, mode 1 = temporarily disable explicit hardware layer.
+    // Do not modify AGSL, wallpaper coordinates, or unlock redraw logic.
+    private static final java.util.WeakHashMap<View,Integer> DRAG_LAYER_ORIGINAL_166 = new java.util.WeakHashMap<>();
+    private static int dragLayerMode166=-1, dragLayerLog166=0;
+    private static long dragLayerModeReadAt166=0L;
+    private static int readDragLayerMode166(View v){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(dragLayerMode166<0 || now-dragLayerModeReadAt166>250L){
+            dragLayerModeReadAt166=now;
+            try { dragLayerMode166=android.provider.Settings.Global.getInt(v.getContext().getContentResolver(),
+                "liquidglass_draglayer_layer_probe_166",0); }
+            catch(Throwable e){dragLayerMode166=0;if(dragLayerLog166++<12)log("DRAG_LAYER_MODE_166 read_error="+e.getClass().getSimpleName());}
+            if(dragLayerMode166!=1)dragLayerMode166=0;
+        }
+        return dragLayerMode166;
+    }
+    private static void traceDragLayer166(View folder, Canvas canvas){
+        try {
+            int mode=readDragLayerMode166(folder);
+            View layer=null; android.view.ViewParent parent=folder.getParent();
+            for(int i=0;i<14 && parent instanceof View;i++){
+                View v=(View)parent;
+                if(v.getClass().getName().contains("OplusDragLayer")){layer=v;break;}
+                parent=v.getParent();
+            }
+            if(layer==null){if(dragLayerLog166++<70)log("DRAG_LAYER_166 missing mode="+mode);return;}
+            int before=layer.getLayerType();
+            Integer saved=DRAG_LAYER_ORIGINAL_166.get(layer);
+            String action="observe";
+            if(mode==1){
+                if(saved==null){DRAG_LAYER_ORIGINAL_166.put(layer,before);saved=before;}
+                if(before!=View.LAYER_TYPE_NONE){layer.setLayerType(View.LAYER_TYPE_NONE,null);action="set_none";}
+            }else if(saved!=null){
+                // Restore only when our test left the layer as NONE; avoid overwriting
+                // another component's independent change to a different layer type.
+                if(before==View.LAYER_TYPE_NONE && saved!=View.LAYER_TYPE_NONE){
+                    layer.setLayerType(saved,null);action="restore_"+saved;
+                }
+                DRAG_LAYER_ORIGINAL_166.remove(layer);
+            }
+            if(dragLayerLog166++<180 || !"observe".equals(action)){
+                float[] m=new float[9];layer.getMatrix().getValues(m);
+                log("DRAG_LAYER_166 mode="+mode+" action="+action+
+                    " before="+before+" after="+layer.getLayerType()+" original="+saved+
+                    " layer="+System.identityHashCode(layer)+" scale="+m[0]+","+m[4]+
+                    " translate="+m[2]+","+m[5]+" alpha="+layer.getAlpha()+
+                    " canvasHardware="+canvas.isHardwareAccelerated());
+            }
+        }catch(Throwable e){if(dragLayerLog166++<180)log("DRAG_LAYER_166 error="+e.getClass().getSimpleName()+" "+e.getMessage());}
+    }
+
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
         if(compositeCounts158!=null)compositeCounts158[0]++;
@@ -2960,6 +3012,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         traceTouchComposite147(v,(Canvas)p.args[0]);
                         traceComposition151(v,(Canvas)p.args[0],"before");
                         traceLayerChain162(v,(Canvas)p.args[0],"DISPATCH_BEFORE");
+                        traceDragLayer166(v,(Canvas)p.args[0]);
                         traceFirstDraw149(v,"dispatch");
                         if(UNLOCK_EVENT_AT_154>0 && android.os.SystemClock.uptimeMillis()-UNLOCK_EVENT_AT_154<2500L
                                 && UNLOCK_DRAW_LOGS_154++<36)
@@ -4227,7 +4280,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
         hookBootConfigRestore();
-        log("GLASS165_BUILD_ID version=V1.9.165 package="+p.packageName+" process="+p.processName);
+        log("GLASS166_BUILD_ID version=V1.9.166 package="+p.packageName+" process="+p.processName);
         log("V1.9.21 NATIVE_CONTOUR_ALIGNMENT_LOADED package=" + p.packageName + " process=" + p.processName);
         Class<?>[] layout = {boolean.class, int.class, int.class, int.class, int.class};
         if ("com.android.systemui".equals(p.packageName)) {
