@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191850
-        versionName '1.9.185-shader-visibility-diagnostic'
+        versionCode 191860
+        versionName '1.9.186-motion-recenter-fix'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

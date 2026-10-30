@@ -2305,7 +2305,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final MotionState183 MOTION_183 = new MotionState183();
     private static int motionLogs183=0;
     private static final class MotionState183 {
-        long timeNs;
+        long timeNs, lastMovementNs;
         float x, scroll, raw, filtered, signed, highlight;
         boolean scheduled, active;
         int ticks, settleTicks;
@@ -2322,7 +2322,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 synchronized(MOTION_183){
                     st.scheduled=false;
                     if(v==null || !v.isAttachedToWindow()){
-                        st.owner=null;st.active=false;
+                        st.owner=null;st.active=false;st.filtered=0f;st.signed=0f;st.highlight=0f;st.lastMovementNs=0L;
                         if(motionLogs183++<900)log("MOTION_SETTLED_183 reason=detached");
                         return;
                     }
@@ -2347,7 +2347,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(!fromFrame && owner!=null && owner.isAttachedToWindow() && st.scheduled)return;
                 if(owner==null || !owner.isAttachedToWindow()){
                     st.owner=new java.lang.ref.WeakReference<>(view);
-                    st.timeNs=0L;
+                    st.timeNs=0L;st.lastMovementNs=0L;st.filtered=0f;st.signed=0f;st.highlight=0f;
                 }
                 float x=p[0], scroll=workspace[0];
                 float dtMs=st.timeNs==0L?0f:Math.max(0f,(now-st.timeNs)/1000000f);
@@ -2359,6 +2359,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     float screenDx=x-st.x;
                     signedDx=Math.abs(scrollDx)>0.25f?-scrollDx:screenDx;
                     discontinuity=Math.abs(signedDx)>Math.max(80f,dtMs*2.5f);
+                    if(!discontinuity && Math.abs(signedDx)>0.35f)st.lastMovementNs=now;
                     float velocity=discontinuity?0f:Math.min(2500f,Math.abs(signedDx)*1000f/dtMs);
                     float tau=velocity>st.filtered?85f:220f;
                     float blend=1f-(float)Math.exp(-Math.min(dtMs,100f)/tau);
@@ -3144,12 +3145,19 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     float motionLevel184, motionDirection184;
                     synchronized(MOTION_183){
                         motionLevel184=Math.max(0f,Math.min(1f,MOTION_183.highlight));
-                        motionDirection184=Math.max(-1f,Math.min(1f,MOTION_183.signed/900f));
+                        // V186: direction is transient velocity, NEVER a persistent page offset.
+                        // Wall-clock timeout also handles detached/replaced folder views.
+                        long ageNs=MOTION_183.lastMovementNs==0L?Long.MAX_VALUE:
+                            Math.max(0L,android.os.SystemClock.elapsedRealtimeNanos()-MOTION_183.lastMovementNs);
+                        float ageMs=ageNs==Long.MAX_VALUE?100000f:ageNs/1000000f;
+                        float recenter=ageMs<=120f?1f:(float)Math.exp(-Math.min(2000f,ageMs-120f)/180f);
+                        if(ageMs>=1100f)recenter=0f;
+                        motionDirection184=Math.max(-1f,Math.min(1f,MOTION_183.signed/900f))*recenter;
                     }
                     state.continuousShader.setFloatUniform("specularMode184",(float)specular184);
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
-                    if(specularLogs184++<250)log("SPECULAR_DIAG_185 shaderCreated="+(state.continuousShader!=null)+" uniformApplied=true drawPathActive=true mode="+specular184+
+                    if(specularLogs184++<250)log("SPECULAR_DIAG_186 shaderCreated="+(state.continuousShader!=null)+" uniformApplied=true drawPathActive=true mode="+specular184+
                         " level="+motionLevel184+" direction="+motionDirection184+
                         " view="+System.identityHashCode(view));
                     final int fixed167=fixedOutput167();
