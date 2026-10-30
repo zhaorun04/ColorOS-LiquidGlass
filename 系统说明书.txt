@@ -1,4 +1,4 @@
-ColorOS-LiquidGlass V1.9.150｜Launcher 图层合成与解锁首帧诊断版
+ColorOS-LiquidGlass V1.9.151｜Launcher 图层合成与解锁首帧诊断版
 
 基于 V1.9.149；保留原有 AGSL 真实折射、壁纸参考缓存、圆角描边和原生背景隔离开关。
 

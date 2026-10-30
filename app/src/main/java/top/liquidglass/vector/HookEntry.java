@@ -2576,6 +2576,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         View v=(View)p.thisObject;
                         BOOT_FOLDER_VIEWS.put(v,Boolean.TRUE);
                         traceTouchComposite147(v,(Canvas)p.args[0]);
+                        traceComposition151(v,(Canvas)p.args[0],"before");
                         traceFirstDraw149(v,"dispatch");
                         // A new dispatch is a new frame for this folder.
                         AGSL_SUBMITTED_144.remove();
@@ -2607,7 +2608,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         // Do not use a post-children overlay: it washes out icons.
                         if(currentCompositionIsolationMode()!=2 && glassEnabled){
                             REFRACTION_AFTER_OEM.set(Boolean.TRUE);
-                            try { drawFolderIconFusion(v,(Canvas)p.args[0],false); }
+                            try { if(layerProbe151()!=1)drawFolderIconFusion(v,(Canvas)p.args[0],false); }
                             finally { REFRACTION_AFTER_OEM.remove(); traceFirstDraw149(v,"surface"); }
                             EARLY_SURFACE_DRAWN.set(Boolean.TRUE);
                             if(GLASS_PIPELINE_DIAGNOSTICS.getAndIncrement()<64)
@@ -2628,7 +2629,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             // For launchers without this callback, retain the clipped fallback.
                             // V1.9.120: never redraw glass after children in normal mode.
                             // The pre-children pass owns the complete rounded surface.
-                            drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
+                            traceComposition151((View)p.thisObject,(Canvas)p.args[0],"after");
+                            if(layerProbe151()!=2)drawFolderIconFusion((View)p.thisObject,(Canvas)p.args[0],true);
                             int v122=visibilityProbe122();
                             if(v122==2){
                                 // Small clipped post-children AGSL diagnostic; icon overlap is intentional.
@@ -3052,6 +3054,50 @@ public final class HookEntry implements IXposedHookLoadPackage {
             traceConditions(v,"folderIcon");
             traceConditions(preview,"preview");
         }catch(Throwable e){if(blurStateLogs++<8)log("BLUR_PROBE_FOLDER_ERROR="+e.getClass().getSimpleName());}
+    }
+    // V151: unconditional first entry + bounded periodic composition sampling.
+    private static final java.util.Map<View,long[]> COMPOSITION_STATE_151 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View,long[]>());
+    private static int compositionLogs151=0;
+    private static volatile int layerProbe151=0;
+    private static volatile long layerProbeRead151=0;
+    private static int layerProbe151(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-layerProbeRead151>500L){
+            layerProbeRead151=now;
+            try { if(launcherContext!=null)layerProbe151=android.provider.Settings.Global.getInt(
+                launcherContext.getContentResolver(),"liquidglass_layer_probe_151",0); }
+            catch(Throwable ignored){}
+        }
+        return layerProbe151;
+    }
+    private static void traceComposition151(View v, Canvas c, String stage){
+        try {
+            long now=android.os.SystemClock.uptimeMillis();
+            long[] state=COMPOSITION_STATE_151.get(v);
+            if(state==null){state=new long[]{0L,0L};COMPOSITION_STATE_151.put(v,state);
+                log("COMPOSITION_151_INIT view="+System.identityHashCode(v)+" stage="+stage);}
+            if(compositionLogs151>=280 || now-state[0]<120L)return;
+            state[0]=now;
+            StringBuilder sb=new StringBuilder("COMPOSITION_151 stage=").append(stage)
+                .append(" view=").append(System.identityHashCode(v))
+                .append(" uptime=").append(now).append(" canvasHW=").append(c.isHardwareAccelerated())
+                .append(" frame=").append(REFRACTION_FRAME!=null&&!REFRACTION_FRAME.isRecycled())
+                .append(" blurDp=").append(customBlurDp)
+                .append(" probe=").append(layerProbe151());
+            View cur=v;
+            for(int i=0;i<5 && cur!=null;i++){
+                sb.append(" |p").append(i).append('=')
+                    .append(cur.getClass().getSimpleName()).append('@').append(System.identityHashCode(cur))
+                    .append(" a=").append(cur.getAlpha()).append(" l=").append(cur.getLayerType())
+                    .append(" xy=").append(cur.getTranslationX()).append(',').append(cur.getTranslationY())
+                    .append(" scroll=").append(cur.getScrollX()).append(',').append(cur.getScrollY())
+                    .append(" pressed=").append(cur.isPressed());
+                android.view.ViewParent parent=cur.getParent();
+                cur=parent instanceof View?(View)parent:null;
+            }
+            if(compositionLogs151++<280)log(sb.toString());
+        }catch(Throwable t){if(compositionLogs151++<280)log("COMPOSITION_151_ERROR "+t.getClass().getSimpleName());}
     }
     // V149: opt-in native preview draw isolation. Default 0 never changes OEM behavior.
     // 1 skips only OplusPreviewBackground.drawBackground while retaining AGSL dispatch.
