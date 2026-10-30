@@ -1800,6 +1800,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float prevSampleX=Float.NaN,prevSampleY=Float.NaN;
         float prevLocationX=Float.NaN,prevLocationY=Float.NaN;
         float probe143LockedLeft=Float.NaN,probe143LockedTop=Float.NaN;
+        float sample160AnchorX=Float.NaN,sample160AnchorY=Float.NaN;
+        int sample160LastMode=-1;
         // Per-folder temporal response: smooth the optical overlay on real movement.
         float opticalOpacity=0f;
         long opticalUpdatedAt=0L;
@@ -2262,6 +2264,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static final int[] CANVAS_DISPATCH_LOG_COUNTS_159=new int[4];
 
 
+    // V1.9.160: wallpaper sampling anchor A/B. Mode 0 preserves the original path.
+    // Mode 1 freezes only the texture transform per folder; geometry and AGSL stay live.
+    private static volatile int sampleAnchor160=0;
+    private static volatile long sampleAnchorRead160=0L;
+    private static int sampleAnchorLogged160=-1;
+    private static final int[] SAMPLE_TRACE_COUNTS_160=new int[2];
+    private static int sampleAnchor160(){
+        long now=android.os.SystemClock.uptimeMillis();
+        if(now-sampleAnchorRead160>=400L){
+            sampleAnchorRead160=now;
+            try{android.content.Context c=launcherContext;
+                if(c!=null){int v=android.provider.Settings.Global.getInt(c.getContentResolver(),"liquidglass_sample_anchor_160",0);
+                    sampleAnchor160=(v==1?1:0);}
+            }catch(Throwable ignored){}
+        }
+        if(sampleAnchorLogged160!=sampleAnchor160){
+            sampleAnchorLogged160=sampleAnchor160;
+            log("SAMPLE_MODE_160 mode="+sampleAnchor160);
+        }
+        return sampleAnchor160;
+    }
+
     private static void drawReferenceRefraction(View view,Canvas canvas,RectF rect,float radius) {
         int[] compositeCounts158=COMPOSITE_COUNTS_158.get();
         if(compositeCounts158!=null)compositeCounts158[0]++;
@@ -2382,8 +2406,27 @@ public final class HookEntry implements IXposedHookLoadPackage {
                             log("OPTICAL_PROBE_143 LOCK id="+System.identityHashCode(view)+" x="+left+" y="+top);
                         }
                     }else{state.probe143LockedLeft=Float.NaN;state.probe143LockedTop=Float.NaN;}
-                    float shaderLeft=probe141==6?state.probe143LockedLeft:left;
-                    float shaderTop=probe141==6?state.probe143LockedTop:top;
+                    final int sampleMode160=sampleAnchor160();
+                    if(state.sample160LastMode!=sampleMode160){
+                        state.sample160AnchorX=Float.NaN;
+                        state.sample160AnchorY=Float.NaN;
+                        state.sample160LastMode=sampleMode160;
+                    }
+                    if(sampleMode160==1 && Float.isNaN(state.sample160AnchorX)){
+                        state.sample160AnchorX=left;
+                        state.sample160AnchorY=top;
+                    }
+                    float shaderLeft=sampleMode160==1?state.sample160AnchorX:(probe141==6?state.probe143LockedLeft:left);
+                    float shaderTop=sampleMode160==1?state.sample160AnchorY:(probe141==6?state.probe143LockedTop:top);
+                    if(SAMPLE_TRACE_COUNTS_160[sampleMode160]<120){
+                        SAMPLE_TRACE_COUNTS_160[sampleMode160]++;
+                        log("SAMPLE_TRACE_160 mode="+sampleMode160+" view="+System.identityHashCode(view)+
+                            " canvas="+System.identityHashCode(canvas)+" frame="+System.identityHashCode(frame)+
+                            " live="+left+","+top+" anchor="+shaderLeft+","+shaderTop+
+                            " delta="+(left-shaderLeft)+","+(top-shaderTop)+
+                            " scale="+referenceScaleX+","+referenceScaleY+
+                            " afterOEM="+Boolean.TRUE.equals(REFRACTION_AFTER_OEM.get()));
+                    }
                     state.shaderMatrix.postTranslate(-shaderLeft,-shaderTop);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",state.shader);
