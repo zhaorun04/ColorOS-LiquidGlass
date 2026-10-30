@@ -1813,6 +1813,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         long lastSpecularDrawNs187=0L;
         boolean recenterPending187=false;
         boolean recenterRedrawScheduled187=false;
+        // V188: per-view visual direction is eased independently of the motion sensor.
+        float visualDirection188=0f;
+        long visualUpdatedNs188=0L;
+        long lastVisibleFrameNs188=0L;
+        boolean redrawScheduled188=false;
     }
     private static DynamicRefraction dynamicState(final View view) {
         DynamicRefraction state=DYNAMIC_REFRACTION.get(view);
@@ -1836,17 +1841,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
         };
         view.getViewTreeObserver().addOnPreDrawListener(tracked.listener);
-        // A page transition can reuse the cached folder display list. On the
-        // next Workspace pre-draw, explicitly invalidate a stale specular frame.
+        // V188: page-return detection is observational. Never start a burst of
+        // delayed redraws for all folder views while the Workspace is animating.
         view.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener(){
             @Override public boolean onPreDraw(){
                 if(specularMode184()!=3 || !view.isAttachedToWindow())return true;
                 if(!tracked.recenterPending187)return true;
-                long age=android.os.SystemClock.elapsedRealtimeNanos()-tracked.lastSpecularDrawNs187;
-                if(age>350000000L){
-                    tracked.recenterPending187=false;
-                    view.postInvalidateOnAnimation();
-                    if(recenterLogs187++<100)log("SPECULAR_PAGE_RETURN_187 view="+System.identityHashCode(view)+" staleMs="+(age/1000000L)+" previousDirection="+tracked.lastSpecularDirection187);
+                long now=android.os.SystemClock.elapsedRealtimeNanos();
+                if(now-tracked.lastVisibleFrameNs188>350000000L && Math.abs(tracked.visualDirection188)>0.005f){
+                    tracked.lastVisibleFrameNs188=now;
+                    scheduleRecenter188(view,tracked);
+                    if(recenterLogs187++<100)log("SPECULAR_PAGE_RETURN_188 view="+System.identityHashCode(view)+" visual="+tracked.visualDirection188);
                 }
                 return true;
             }
@@ -1856,35 +1861,24 @@ public final class HookEntry implements IXposedHookLoadPackage {
         return state;
     }
     private static int recenterLogs187=0;
-    // V187: independent, bounded settle redraw on the actual folder view.
-    // Motion-owner callbacks can belong to a different page; they are not a
-    // reliable way to update this folder's cached Shader uniforms.
-    private static void scheduleRecenter187(final View view,final DynamicRefraction state){
-        if(state.recenterRedrawScheduled187)return;
-        state.recenterRedrawScheduled187=true;
-        view.postDelayed(new Runnable(){
+    // V188: exactly one pending vsync callback per folder. Only animate when
+    // the view is visible; hidden pages must not generate redundant GPU work.
+    private static void scheduleRecenter188(final View view,final DynamicRefraction state){
+        if(state.redrawScheduled188 || !view.isAttachedToWindow() || !view.isShown())return;
+        if(Math.abs(state.visualDirection188)<0.005f)return;
+        state.redrawScheduled188=true;
+        view.postOnAnimation(new Runnable(){
             @Override public void run(){
-                state.recenterRedrawScheduled187=false;
-                if(!view.isAttachedToWindow())return;
-                if(specularMode184()!=3){state.recenterPending187=false;return;}
-                long age=android.os.SystemClock.elapsedRealtimeNanos()-state.lastSpecularDrawNs187;
-                // Force one final neutral uniform even if no movement or draw
-                // occurs while the user is visiting another Workspace page.
-                if(age>=110000000L && state.recenterPending187){
-                    view.postInvalidateOnAnimation();
-                    if(recenterLogs187++<100)log("SPECULAR_RECENTER_REDRAW_187 view="+System.identityHashCode(view)+" ageMs="+(age/1000000L)+" previousDirection="+state.lastSpecularDirection187);
-                }
-                // Continue briefly while settling; never create a permanent loop.
-                long motionAge;
-                synchronized(MOTION_183){motionAge=MOTION_183.lastMovementNs==0L?Long.MAX_VALUE:
-                    android.os.SystemClock.elapsedRealtimeNanos()-MOTION_183.lastMovementNs;}
-                if(state.recenterPending187 && motionAge<1600000000L){
-                    scheduleRecenter187(view,state);
-                }else if(motionAge>=1600000000L){
-                    state.recenterPending187=false;
-                }
+                state.redrawScheduled188=false;
+                if(!view.isAttachedToWindow() || !view.isShown() || specularMode184()!=3)return;
+                android.graphics.Rect visible=new android.graphics.Rect();
+                if(!view.getGlobalVisibleRect(visible) || visible.isEmpty())return;
+                // The shader's time-based envelope is applied during onDraw.
+                // Avoid repeated invalidations in the same vsync.
+                view.postInvalidateOnAnimation();
+                if(recenterLogs187++<100)log("SPECULAR_RECENTER_FRAME_188 view="+System.identityHashCode(view)+" visual="+state.visualDirection188);
             }
-        },160L);
+        });
     }
     // V1.9.104: a single per-folder animation envelope shared by the optical
     // sampling pass and the extra native-shaped highlight. Static edge lighting
@@ -3205,18 +3199,36 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         if(ageMs>=650f)recenter=0f;
                         motionDirection184=Math.max(-1f,Math.min(1f,MOTION_183.signed/900f))*recenter;
                     }
+                    // V188: ease the *rendered* direction with wall-clock time.
+                    // After returning from another Workspace page, do not jump
+                    // directly to the sensor's already-settled zero value.
+                    final long drawNs188=android.os.SystemClock.elapsedRealtimeNanos();
+                    if(specular184==3){
+                        if(state.visualUpdatedNs188==0L){
+                            state.visualDirection188=motionDirection184;
+                        }else{
+                            float dt188=Math.max(0f,Math.min(120f,(drawNs188-state.visualUpdatedNs188)/1000000f));
+                            float tau188=Math.abs(motionDirection184)>Math.abs(state.visualDirection188)?85f:180f;
+                            float alpha188=1f-(float)Math.exp(-dt188/tau188);
+                            state.visualDirection188+=alpha188*(motionDirection184-state.visualDirection188);
+                            if(Math.abs(state.visualDirection188)<0.004f && Math.abs(motionDirection184)<0.004f)state.visualDirection188=0f;
+                        }
+                        motionDirection184=state.visualDirection188;
+                    }else{state.visualDirection188=0f;}
+                    state.visualUpdatedNs188=drawNs188;
+                    state.lastVisibleFrameNs188=drawNs188;
                     state.continuousShader.setFloatUniform("specularMode184",(float)specular184);
                     state.continuousShader.setFloatUniform("specularLevel184",motionLevel184);
                     state.continuousShader.setFloatUniform("specularDirection184",motionDirection184);
-                    // V187: record the last direction actually sent to the shader.
-                    // The page can become hardware-cached before the final settle draw.
-                    state.lastSpecularDirection187=specular184==3?motionDirection184:0f;
-                    state.lastSpecularDrawNs187=android.os.SystemClock.elapsedRealtimeNanos();
+                    state.lastSpecularDirection187=motionDirection184;
+                    state.lastSpecularDrawNs187=drawNs188;
                     state.recenterPending187=specular184==3 && Math.abs(motionDirection184)>0.005f;
-                    if(state.recenterPending187)scheduleRecenter187(view,state);
+                    if(state.recenterPending187)scheduleRecenter188(view,state);
                     if(specularLogs184++<250)log("SPECULAR_DIAG_186 shaderCreated="+(state.continuousShader!=null)+" uniformApplied=true drawPathActive=true mode="+specular184+
                         " level="+motionLevel184+" direction="+motionDirection184+
                         " view="+System.identityHashCode(view));
+                    if(specular184==3 && recenterLogs187<100 && state.recenterPending187)
+                        log("SPECULAR_EASE_188 view="+System.identityHashCode(view)+" direction="+motionDirection184+" scheduled="+state.redrawScheduled188);
                     final int fixed167=fixedOutput167();
                     state.continuousShader.setFloatUniform("fixedOutput167",(float)fixed167);
                     final int isolation173=motionIsolation173();

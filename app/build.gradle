@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191870
-        versionName '1.9.187-page-return-redraw-fix'
+        versionCode 191880
+        versionName '1.9.188-smooth-recenter-frame-scheduler'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

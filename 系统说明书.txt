@@ -1,8 +1,7 @@
-V1.9.187｜跨桌面返回后高光归中重绘修正版
+V1.9.188｜动态高光归中帧调度优化版
 
-原因：V186只在实际绘制时刷新高光方向，离开文件夹所在桌面后，硬件缓存可能保留旧方向。
-修复：为每个文件夹视图记录最近一次真正写入Shader的方向；在运动收敛阶段安排有限次定时重绘；在页面返回后的预绘制回调检查过期画面并触发重绘。
-保留V185模式0/1/2/3与Alpha1.00稳定折射。
-设置：su -c 'settings put global liquidglass_specular_185 3'
-日志：SPECULAR_RECENTER_REDRAW_187、SPECULAR_PAGE_RETURN_187、SPECULAR_DIAG_186。
-未完成Android Gradle编译和实机验证。
+基于V187。删除每个文件夹每160ms的延迟重绘链；改为每个View最多一个postOnAnimation请求，且仅在View实际可见时运行。
+新增每View独立的视觉方向缓动（85ms跟随、180ms归中），跨桌面返回时从最后显示的方向逐渐归中，不直接跳零。
+模式3：su -c 'settings put global liquidglass_specular_185 3'
+日志：SPECULAR_RECENTER_FRAME_188、SPECULAR_PAGE_RETURN_188、SPECULAR_EASE_188。
+保留模式0/1/2、Alpha1.00折射。未进行Android Gradle编译或实机验证。
