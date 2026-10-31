@@ -41,6 +41,8 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   mkdir "$LOCK" 2>/dev/null || exit 0
 fi
 printf '%s' "$$" > "$LOCK/pid"
+# V1.9.203: identify the exact script revision used by this running process.
+sha256sum /data/adb/service.d/99-liquidglass-wallpaper.sh 2>/dev/null | cut -d ' ' -f1 > "$LOCK/running_sha256"
 sed 's/.*) //' "/proc/$$/stat" 2>/dev/null | awk '{print $20}' > "$LOCK/starttime"
 cleanup_all() { cleanup; rm -rf "$LOCK"; }
 trap cleanup_all EXIT INT TERM
