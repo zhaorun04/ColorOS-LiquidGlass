@@ -5382,6 +5382,65 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("HOTSEAT_204_HOOK_READY");
         }catch(Throwable t){log("HOTSEAT_204_HOOK_FAILED "+t.getClass().getSimpleName());}
     }
+    // V1.9.205: lightweight edge optics over an actual icon drawable only.
+    // Hook only Launcher icon TextViews, never create an overlay View or touch target.
+    private static final Paint ICON_EDGE_205=new Paint(Paint.ANTI_ALIAS_FLAG);
+    private static final java.util.Set<String> ICON_HOOK_CLASSES_205=new java.util.HashSet<String>();
+    private static void drawIconEdge205(android.widget.TextView v,Canvas c){
+        if(!iconOptics204 || !v.isShown() || v.getWidth()<=0 || v.getHeight()<=0)return;
+        // Folder labels, toolbar labels and widgets must never get icon optics.
+        if(v.getContentDescription()==null || v.getContentDescription().length()==0)return;
+        Drawable[] ds=v.getCompoundDrawables();
+        Drawable d=ds==null?null:ds[1];
+        if(d==null){
+            Drawable[] rel=v.getCompoundDrawablesRelative();
+            d=rel==null?null:rel[1];
+        }
+        if(d==null)return;
+        Rect bounds=d.getBounds();
+        if(bounds.width()<8 || bounds.height()<8)return;
+        float density=v.getResources().getDisplayMetrics().density;
+        float w=bounds.width(),h=bounds.height();
+        // Compound drawable bounds are local to the icon, not the full cell/label.
+        float left=(v.getWidth()-w)*.5f;
+        float top=v.getPaddingTop();
+        if(top+h>v.getHeight())return;
+        float pad=Math.max(1f,density*.65f);
+        RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
+        float corner=Math.min(r.width(),r.height())*.23f;
+        ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
+        ICON_EDGE_205.setStyle(Paint.Style.STROKE);
+        ICON_EDGE_205.setStrokeWidth(Math.max(density*.7f,1f));
+        ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
+            new int[]{0x8AFFFFFF,0x24FFFFFF,0x00FFFFFF,0x50FFFFFF},null,
+            android.graphics.Shader.TileMode.CLAMP));
+        c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
+        ICON_EDGE_205.setShader(null);ICON_EDGE_205.setStyle(Paint.Style.FILL);
+    }
+    private static void hookIconOptics205(ClassLoader loader){
+        String[] candidates={"com.android.launcher3.BubbleTextView",
+            "com.android.launcher3.views.BubbleTextView",
+            "com.android.launcher3.widget.BubbleTextView"};
+        int count=0;
+        for(String name:candidates){
+            try{
+                Class<?> cls=find(name,loader);
+                if(cls==null || !android.widget.TextView.class.isAssignableFrom(cls))continue;
+                if(!ICON_HOOK_CLASSES_205.add(cls.getName()))continue;
+                // Hook the concrete icon view's draw. Some OEM subclasses may override onDraw.
+                XposedBridge.hookAllMethods(cls,"onDraw",new XC_MethodHook(){
+                    @Override protected void afterHookedMethod(MethodHookParam p){
+                        try{
+                            if(p.thisObject instanceof android.widget.TextView && p.args.length>0 && p.args[0] instanceof Canvas)
+                                drawIconEdge205((android.widget.TextView)p.thisObject,(Canvas)p.args[0]);
+                        }catch(Throwable t){if(diagnostics)log("ICON_OPTICS_205_DRAW_FAILED "+t.getClass().getSimpleName());}
+                    }
+                });
+                count++;
+            }catch(Throwable t){log("ICON_OPTICS_205_HOOK_FAILED "+name+" "+t.getClass().getSimpleName());}
+        }
+        log("ICON_OPTICS_205_HOOK_CLASSES="+count);
+    }
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
@@ -5394,6 +5453,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.systemui.qs.QSPanel", p.classLoader), "onLayout", layout, "QSPanel", false);
         } else {
             hookLauncherOptics204(p.classLoader);
+            hookIconOptics205(p.classLoader);
             hookWallpaperOffsetRequests();
             hookNativeDrawableDraw();
             // V1.9.18: render from the confirmed preview drawBackground entry, not a nonexistent LayerBlurDrawable.draw override.
