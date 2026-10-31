@@ -1861,7 +1861,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(now-tracked.lastVisibleFrameNs188>350000000L && Math.abs(tracked.visualDirection188)>0.005f){
                     tracked.lastVisibleFrameNs188=now;
                     scheduleRecenter188(view,tracked);
-                    if(recenterLogs187++<100)log("SPECULAR_PAGE_RETURN_188 view="+System.identityHashCode(view)+" visual="+tracked.visualDirection188);
+                    if(recenterLogs187++<24)log("SPECULAR_PAGE_RETURN_188 view="+System.identityHashCode(view)+" visual="+tracked.visualDirection188);
                 }
                 return true;
             }
@@ -1886,7 +1886,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 // The shader's time-based envelope is applied during onDraw.
                 // Avoid repeated invalidations in the same vsync.
                 view.postInvalidateOnAnimation();
-                if(recenterLogs187++<100)log("SPECULAR_RECENTER_FRAME_188 view="+System.identityHashCode(view)+" visual="+state.visualDirection188);
+                if(recenterLogs187++<24)log("SPECULAR_RECENTER_FRAME_188 view="+System.identityHashCode(view)+" visual="+state.visualDirection188);
             }
         });
     }
@@ -2596,7 +2596,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     st.scheduled=false;
                     if(v==null || !v.isAttachedToWindow()){
                         st.owner=null;st.active=false;st.filtered=0f;st.signed=0f;st.highlight=0f;st.lastMovementNs=0L;
-                        if(motionLogs183++<900)log("MOTION_SETTLED_183 reason=detached");
+                        if(motionLogs183++<120)log("MOTION_SETTLED_183 reason=detached");
                         return;
                     }
                 }
@@ -2610,14 +2610,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(view==null || !view.isAttachedToWindow())return;
         try{
             final long now=android.os.SystemClock.elapsedRealtimeNanos();
-            final int[] workspace=workspaceOffset163();
-            final int[] p=new int[2];view.getLocationOnScreen(p);
+            // V200: reject redundant motion probes before allocating coordinate arrays
+            // or querying the Workspace. This does not change motion filtering.
             synchronized(MOTION_183){
                 MotionState183 st=MOTION_183;
                 View owner=st.owner==null?null:st.owner.get();
                 if(fromFrame && owner!=null && owner!=view)return;
                 // A single owner controls frame callbacks. Other views consume the shared state.
                 if(!fromFrame && owner!=null && owner.isAttachedToWindow() && st.scheduled)return;
+                final int[] workspace=workspaceOffset163();
+                final int[] p=new int[2];view.getLocationOnScreen(p);
                 if(owner==null || !owner.isAttachedToWindow()){
                     st.owner=new java.lang.ref.WeakReference<>(view);
                     st.timeNs=0L;st.lastMovementNs=0L;st.filtered=0f;st.signed=0f;st.highlight=0f;
@@ -2650,11 +2652,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 else if(st.active){
                     if(++st.settleTicks>=3){
                         st.active=false;st.filtered=0f;st.signed=0f;st.highlight=0f;
-                        if(motionLogs183<900){motionLogs183++;log("MOTION_SETTLED_183 frames="+st.ticks+" highlight="+st.highlight);}
+                        if(motionLogs183<120){motionLogs183++;log("MOTION_SETTLED_183 frames="+st.ticks+" highlight="+st.highlight);}
                     }
                 }
                 if(st.active)scheduleMotion183(view);
-                if(motionLogs183<900 && (st.ticks<55 || st.ticks%5==0 || !st.active)){
+                if(motionLogs183<120 && (st.ticks<55 || st.ticks%5==0 || !st.active)){
                     motionLogs183++;
                     log("MOTION_SIGNAL_183 owner="+System.identityHashCode(view)+" frame="+fromFrame+
                         " dtMs="+dtMs+" screenX="+x+" workspaceScroll="+scroll+
@@ -3666,18 +3668,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
             final int surface189=surfacePass189();
             final int spec189=specularMode184();
             final int unified192=effectiveUnified193();
-            if(surfaceDefaultLogs193++<100)
+            if(surfaceDefaultLogs193++<24)
                 log("SURFACE_DEFAULT_193 selection="+surfaceDefault193()+
                     " effectiveUnified="+unified192+
                     " rimMode="+rimMode190()+
                     " blurDp="+customBlurDp+
                     " direction="+state.visualDirection188);
             final int rim190=effectiveRim192();
-            if(surface194Logs++<120)log("SURFACE_MODE_194 mode="+surfaceMode194()+
+            if(surface194Logs++<24)log("SURFACE_MODE_194 mode="+surfaceMode194()+
                 " rollback="+(!surface194Enabled())+" strength="+surfaceStrength194()+
                 " softness="+surfaceSoftness194()+" rim="+rim190+
                 " blurDp="+customBlurDp+" refraction="+refractionActive+" agsl="+continuousDrawn+" direction="+state.visualDirection188);
-            if(unified192!=0 && surfaceUnifiedLogs192++<160)
+            if(unified192!=0 && surfaceUnifiedLogs192++<24)
                 log("SURFACE_UNIFIED_192 mode="+unified192+
                     " legacyNative="+(unified192==1 || unified192==3)+
                     " newRim="+(rim190!=0)+
@@ -3697,7 +3699,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(rim190!=0){ // V198: independent motion and size-normalized rim
                 float surfaceDirection198=updateSurfaceMotion198(view,state,rim190);
                 drawRoundedRim190(canvas,rect,contourRadius,surfaceDirection198,rim190);
-                if(rimLogs190++<160)log("SURFACE_RIM_190 mode="+rim190+
+                if(rimLogs190++<24)log("SURFACE_RIM_190 mode="+rim190+
                     " blurDp="+customBlurDp+" radius="+contourRadius+
                     " direction="+state.visualDirection188+
                     " view="+System.identityHashCode(view));
