@@ -2693,6 +2693,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
     }
     private static final String REFRACTION_AGSL =
         "uniform shader wallpaper;\n"+
+        "uniform shader wallpaperClear201;\n"+
+        "uniform float clearDetailMix201;\n"+
         "uniform float4 bounds;\n"+
         "uniform float strength;\n"+
         "uniform float diagnosticMode;\n"+
@@ -2724,6 +2726,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " bool outOfDisplay=samplingPoint.x<screenClip.x || samplingPoint.y<screenClip.y || samplingPoint.x>screenClip.z || samplingPoint.y>screenClip.w;\n"+
         " if(sampleIsolation>1.5 && sampleIsolation<2.5){samplingPoint=clamp(samplingPoint,screenClip.xy,screenClip.zw); }\n"+
         " half4 color=wallpaper.eval(samplingPoint);\n"+
+        // V201: blend only texture detail, never sampling displacement or output alpha.
+        " if(clearDetailMix201>0.001){half4 crisp=wallpaperClear201.eval(samplingPoint);color.rgb=mix(color.rgb,crisp.rgb,half(clamp(clearDetailMix201,0.0,1.0)));}\n"+
         " if(fixedOutput167>0.5){return fixedOutput167<1.5?half4(0.50,0.50,0.50,0.18):half4(0.50,0.50,0.50,1.0); }\n"+
         " if(sampleIsolation>0.5 && sampleIsolation<1.5){return half4(0.50,0.50,0.50,0.65); }\n"+
         " if(sampleIsolation>3.5 && sampleIsolation<4.5 && outOfDisplay){return half4(1.0,0.48,0.02,0.93); }\n"+
@@ -2747,7 +2751,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.97,0.98,1.0),half(min(ambient+motion,0.125)));}\n"+
         "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
         "  float strengthFactor=clamp(abs(strength)/22.0,0.0,2.5);\n"+
-        "  color.a=half(probe143Composite>0.5?0.18:(clearRefraction>0.5?0.32:0.15)*min(1.0,strengthFactor)*temporalOpacity);\n"+
+        "  color.a=half(probe143Composite>0.5?0.18:0.15*min(1.0,strengthFactor)*temporalOpacity);\n"+
         "  if(compositeProbe157>1.5 && compositeProbe157<2.5){color.a=half(0.15); }\n"+
         "  if(compositeProbe157>2.5 && compositeProbe157<3.5){color.a=half(0.075); }\n"+
         "  if(motionIsolation173>0.5 && motionIsolation173<1.5 || motionIsolation173>2.5){color.rgb=half3(0.50,0.50,0.50); }\n"+
@@ -2795,7 +2799,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         " if(probe143Composite<0.5){color.rgb=mix(color.rgb,half3(0.96,0.97,1.0),half(softSheen));}\n"+
         " float frostedAlpha=(0.045+0.080*edgeWeight);\n"+
         " float clearAlpha=(0.18+0.08*edgeWeight);\n"+
-        " color.a=half(probe143Composite>0.5?0.18:mix(frostedAlpha,clearAlpha,step(0.5,clearRefraction))*temporalOpacity);\n"+
+        " color.a=half(probe143Composite>0.5?0.18:frostedAlpha*temporalOpacity);\n"+
         " return color;\n"+
         "}\n";
     private static int clampInt(int v,int lo,int hi){return Math.max(lo,Math.min(hi,v));}
@@ -3425,6 +3429,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     state.shaderMatrix.postTranslate(-shaderLeft,-shaderTop);
                     state.shader.setLocalMatrix(state.shaderMatrix);
                     state.continuousShader.setInputShader("wallpaper",opticalInput195);
+                    // V201: clear mode restores original wallpaper detail at the SAME refracted coordinate.
+                    // Blur=0 / unavailable: both inputs are identical, so no forced blur or visual shift.
+                    state.continuousShader.setInputShader("wallpaperClear201",state.shader);
+                    state.continuousShader.setFloatUniform("clearDetailMix201",
+                        clearRefraction && blurredInput195 ? 0.70f : 0.0f);
                     if(opticalPipelineLogs195++<100)log("OPTICAL_PIPELINE_195 source="+
                         (blurredInput195?"BLURRED_WALLPAPER":"CLEAR_WALLPAPER")+
                         " blurDp="+customBlurDp+" refractPercent="+refractionPercent+
@@ -3637,7 +3646,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // Setting mode=1 keeps the same blur opacity when refraction is toggled,
                     // isolating the AGSL contribution from the blur-alpha coupling.
                     final int blurIsolation168=refractionBlurIsolation168();
-                    final int blurAlpha168=blurIsolation168==1 ? 255 : (refractionActive ? (clearRefraction?145:235) : 255);
+                    final int blurAlpha168=blurIsolation168==1 ? 255 : (refractionActive ? 235 : 255);
                     state.cachedBlurPaint.setAlpha(blurAlpha168);
                     if(REFRACTION_BLUR_LOGS_168++<80)log("REFRACTION_BLUR_168 isolation="+blurIsolation168+
                         " refractionActive="+refractionActive+" alpha="+blurAlpha168+
