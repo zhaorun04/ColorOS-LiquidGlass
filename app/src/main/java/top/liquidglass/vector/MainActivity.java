@@ -74,10 +74,10 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.205.6  ·  图标轮廓与 Dock 留白修复",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.205.7  ·  图标内侧高光与轮廓安全修复",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
-        TextView presetInfo=text("推荐预设 · V1.9.205.6。仅在点击时应用，不会在升级时覆盖自定义参数。",12,false);current.addView(presetInfo);
+        TextView presetInfo=text("推荐预设 · V1.9.205.7。仅在点击时应用，不会在升级时覆盖自定义参数。",12,false);current.addView(presetInfo);
         action("应用清透玻璃预设",()->{
             prefs.edit().putBoolean("enabled",true).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0)
                 .putInt("glass_tint_opacity",0).putInt("custom_blur_dp",4).putInt("custom_blur_mode",1).putInt("refraction_percent",45)

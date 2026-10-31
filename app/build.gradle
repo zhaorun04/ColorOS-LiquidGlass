@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 192056
-        versionName '1.9.205.6-icon-restore-dock-shared-glass'
+        versionCode 192057
+        versionName '1.9.205.7-icon-highlight-geometry-safe'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
