@@ -5432,7 +5432,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("DOCK_2052_CONFIG_OBSERVER_READY");
         }catch(Throwable t){log("DOCK_2052_CONFIG_OBSERVER_FAILED "+t.getClass().getSimpleName());}
     }
-    // V1.9.205.8: restore V1.9.205.6 visible optics and log geometry for OEM mapping.
+    // V1.9.205.9: OEM alpha silhouette path, no speculative rounded rectangle.
     // Lightweight edge optics over an actual icon drawable only.
     // Hook only Launcher icon TextViews, never create an overlay View or touch target.
     private static final Paint ICON_EDGE_205=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -5466,70 +5466,101 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 " density="+v.getResources().getDisplayMetrics().density);
         }catch(Throwable t){log("ICON_GEOMETRY_2058_FAILED "+t.getClass().getSimpleName());}
     }
+    // V1.9.205.9: sample the OEM drawable's final alpha, not a guessed corner radius.
+    // A fully opaque raster cannot reveal its visible mask: never draw a false rim.
+    private static final java.util.Map<Drawable,android.graphics.Path> ICON_CONTOUR_2059 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,android.graphics.Path>());
+    private static final java.util.Set<String> ICON_CONTOUR_LOG_2059 =
+        java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    private static android.graphics.Path computeIconContour2059(Drawable drawable){
+        final int n=128;
+        android.graphics.Bitmap bitmap=null;
+        try{
+            bitmap=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
+            Canvas off=new Canvas(bitmap);
+            Rect original=new Rect(drawable.getBounds());
+            try{
+                drawable.setBounds(0,0,n,n);
+                drawable.draw(off);
+            }finally{drawable.setBounds(original);}
+            int[] pixels=new int[n*n];bitmap.getPixels(pixels,0,n,0,0,n,n);
+            // OEM precomposed icons sometimes have an opaque square backing. Its
+            // visual contour cannot be determined from alpha, so fail closed.
+            int corners=0;
+            int[] samples={0,n-1,(n-1)*n,n*n-1};
+            for(int pos:samples)if((pixels[pos]>>>24)>40)corners++;
+            if(corners>=2)return null;
+            int[] left=new int[n],right=new int[n];
+            int valid=0;
+            for(int y=0;y<n;y++){
+                left[y]=n;right[y]=-1;
+                for(int x=0;x<n;x++){
+                    if((pixels[y*n+x]>>>24)>=96){
+                        if(x<left[y])left[y]=x;
+                        right[y]=x;
+                    }
+                }
+                if(right[y]>=left[y])valid++;
+            }
+            if(valid<n*.70f)return null;
+            android.graphics.Path path=new android.graphics.Path();
+            int first=-1,last=-1;
+            for(int y=0;y<n;y++)if(right[y]>=left[y]){if(first<0)first=y;last=y;}
+            if(first<0)return null;
+            // Build the silhouette on the alpha boundary, with both left and
+            // right sides sampled from the same OEM drawable raster.
+            path.moveTo(left[first],first);
+            for(int y=first+1;y<=last;y++)if(right[y]>=left[y])path.lineTo(left[y],y);
+            for(int y=last;y>=first;y--)if(right[y]>=left[y])path.lineTo(right[y],y);
+            path.close();
+            return path;
+        }catch(Throwable t){
+            if(diagnostics)log("ICON_CONTOUR_2059_FAILED "+t.getClass().getSimpleName());
+            return null;
+        }finally{if(bitmap!=null)bitmap.recycle();}
+    }
     private static void drawIconEdge205(android.widget.TextView v,Canvas c){
         if(!iconOptics204 || !v.isShown() || v.getWidth()<=0 || v.getHeight()<=0)return;
-        // Folder labels, toolbar labels and widgets must never get icon optics.
         if(v.getContentDescription()==null || v.getContentDescription().length()==0)return;
         Drawable[] ds=v.getCompoundDrawables();
         Drawable d=ds==null?null:ds[1];
-        if(d==null){
-            Drawable[] rel=v.getCompoundDrawablesRelative();
-            d=rel==null?null:rel[1];
-        }
+        if(d==null){Drawable[] rel=v.getCompoundDrawablesRelative();d=rel==null?null:rel[1];}
         if(d==null)return;
         Rect bounds=d.getBounds();
         if(bounds.width()<8 || bounds.height()<8)return;
         diagnoseIcon2058(v,d,bounds);
         float density=v.getResources().getDisplayMetrics().density;
         float w=bounds.width(),h=bounds.height();
-        // Compound drawable bounds are local to the icon, not the full cell/label.
         float left=(v.getWidth()-w)*.5f;
         float top=v.getPaddingTop();
         if(top+h>v.getHeight())return;
-        // V1.9.205.4: avoid tracing the square drawable allocation as though
-        // it were the visible icon silhouette. Keep a subpixel anti-alias margin.
-        float stroke=Math.max(density*.65f,1f);
-        float pad=stroke*.5f;
-        RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
-        float corner=Math.min(r.width(),r.height())*.265f;
+        android.graphics.Path contour;
+        synchronized(ICON_CONTOUR_2059){
+            if(ICON_CONTOUR_2059.containsKey(d))contour=ICON_CONTOUR_2059.get(d);
+            else{contour=computeIconContour2059(d);ICON_CONTOUR_2059.put(d,contour);}
+        }
+        String type=d.getClass().getName();
+        if(diagnostics && ICON_CONTOUR_LOG_2059.size()<40 && ICON_CONTOUR_LOG_2059.add(type+"|"+v.getContentDescription()))
+            log("ICON_CONTOUR_2059 label="+v.getContentDescription()+" drawable="+type+
+                " alphaContour="+(contour!=null)+" bounds="+bounds.toShortString());
+        // No guessed rounded rectangle: opaque OEM icons have no reliable
+        // alpha silhouette. Avoid a visibly detached second edge entirely.
+        if(contour==null)return;
+        float stroke=Math.max(density*.52f,1f);
         ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
         ICON_EDGE_205.setStyle(Paint.Style.STROKE);
         ICON_EDGE_205.setStrokeWidth(stroke);
-        ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
-            new int[]{0x64FFFFFF,0x1CFFFFFF,0x00FFFFFF,0x38FFFFFF},null,
+        ICON_EDGE_205.setStrokeJoin(Paint.Join.ROUND);
+        ICON_EDGE_205.setStrokeCap(Paint.Cap.ROUND);
+        ICON_EDGE_205.setShader(new android.graphics.LinearGradient(left,top,left+w,top+h,
+            new int[]{0x54FFFFFF,0x20FFFFFF,0x08FFFFFF,0x26FFFFFF},null,
             android.graphics.Shader.TileMode.CLAMP));
-        // V1.9.205.4: only trust the adaptive icon mask when its visible bounds
-        // match the icon's allocation. OEM theme wrappers may apply extra masks,
-        // in which case the generic mask is NOT the final visible contour.
-        boolean maskDrawn=false;
-        try{
-            Drawable unwrapped=d;
-            for(int depth=0;depth<3 && unwrapped instanceof android.graphics.drawable.InsetDrawable;depth++){
-                unwrapped=((android.graphics.drawable.InsetDrawable)unwrapped).getDrawable();
-            }
-            if(unwrapped instanceof android.graphics.drawable.AdaptiveIconDrawable){
-                android.graphics.Path mask=((android.graphics.drawable.AdaptiveIconDrawable)unwrapped).getIconMask();
-                if(mask!=null && !mask.isEmpty()){
-                    android.graphics.RectF maskBounds=new android.graphics.RectF();
-                    mask.computeBounds(maskBounds,true);
-                    float aspect=maskBounds.height()>0?maskBounds.width()/maskBounds.height():0f;
-                    if(maskBounds.width()>1f && maskBounds.height()>1f && aspect>.92f && aspect<1.08f){
-                        android.graphics.Matrix matrix=new android.graphics.Matrix();
-                        // Respect the adaptive icon path aspect ratio; do not stretch it.
-                        matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.CENTER);
-                        android.graphics.Path mapped=new android.graphics.Path();
-                        mask.transform(matrix,mapped);
-                        c.drawPath(mapped,ICON_EDGE_205);
-                        maskDrawn=true;
-                    }
-                }
-            }
-        }catch(Throwable t){if(diagnostics)log("ICON_MASK_2053_FALLBACK "+t.getClass().getSimpleName());}
-        if(!maskDrawn){
-            // OEM-themed drawables can differ from Android's adaptive icon mask.
-            // Fall back to a restrained highlight rather than an oversized white rim.
-            c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
-        }
+        android.graphics.Matrix matrix=new android.graphics.Matrix();
+        matrix.setScale(w/128f,h/128f);
+        matrix.postTranslate(left,top);
+        android.graphics.Path mapped=new android.graphics.Path();
+        contour.transform(matrix,mapped);
+        c.drawPath(mapped,ICON_EDGE_205);
         ICON_EDGE_205.setShader(null);ICON_EDGE_205.setStyle(Paint.Style.FILL);
     }
     private static void hookIconOptics205(ClassLoader loader){
