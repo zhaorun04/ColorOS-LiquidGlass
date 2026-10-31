@@ -5331,7 +5331,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             final float density=target.getResources().getDisplayMetrics().density;
             final Rect b=getBounds();
             // Use Hotseat's native bounds; clamp horizontal edge inset to keep all corners on screen.
-            final float inset=Math.max(3*density,Math.min(5*density,b.width()*.008f));
+            // V1.9.205.4: approximately 92% screen width, centered.
+            // The measured Hotseat icon DRAWABLES (not their 284px cells) remain inside.
+            final float inset=Math.max(12*density,b.width()*.04f);
             final float top=Math.max(0,2*density),bottom=Math.max(top,b.height()-2*density);
             final float r=(bottom-top)*.495f;
             RectF rect=new RectF(b.left+inset,b.top+top,b.right-inset,b.top+bottom);
@@ -5436,21 +5438,21 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float left=(v.getWidth()-w)*.5f;
         float top=v.getPaddingTop();
         if(top+h>v.getHeight())return;
-        // V1.9.205.2: the old inset made the reflection visibly smaller
-        // than the actual icon. Place the stroke on the outer drawable bounds.
-        float stroke=Math.max(density*.8f,1f);
+        // V1.9.205.4: avoid tracing the square drawable allocation as though
+        // it were the visible icon silhouette. Keep a subpixel anti-alias margin.
+        float stroke=Math.max(density*.65f,1f);
         float pad=stroke*.5f;
         RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
-        float corner=Math.min(r.width(),r.height())*.23f;
+        float corner=Math.min(r.width(),r.height())*.265f;
         ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
         ICON_EDGE_205.setStyle(Paint.Style.STROKE);
         ICON_EDGE_205.setStrokeWidth(stroke);
         ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
-            new int[]{0x8AFFFFFF,0x24FFFFFF,0x00FFFFFF,0x50FFFFFF},null,
+            new int[]{0x64FFFFFF,0x1CFFFFFF,0x00FFFFFF,0x38FFFFFF},null,
             android.graphics.Shader.TileMode.CLAMP));
-        // V1.9.205.3: prefer the actual adaptive icon mask over an approximate round rect.
-        // The mask is returned in the drawable's coordinate space; normalize its bounds
-        // to the visible compound drawable rectangle. Keep the old shape as fallback.
+        // V1.9.205.4: only trust the adaptive icon mask when its visible bounds
+        // match the icon's allocation. OEM theme wrappers may apply extra masks,
+        // in which case the generic mask is NOT the final visible contour.
         boolean maskDrawn=false;
         try{
             Drawable unwrapped=d;
@@ -5462,9 +5464,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(mask!=null && !mask.isEmpty()){
                     android.graphics.RectF maskBounds=new android.graphics.RectF();
                     mask.computeBounds(maskBounds,true);
-                    if(maskBounds.width()>1f && maskBounds.height()>1f){
+                    float aspect=maskBounds.height()>0?maskBounds.width()/maskBounds.height():0f;
+                    if(maskBounds.width()>1f && maskBounds.height()>1f && aspect>.92f && aspect<1.08f){
                         android.graphics.Matrix matrix=new android.graphics.Matrix();
-                        matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.FILL);
+                        // Respect the adaptive icon path aspect ratio; do not stretch it.
+                        matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.CENTER);
                         android.graphics.Path mapped=new android.graphics.Path();
                         mask.transform(matrix,mapped);
                         c.drawPath(mapped,ICON_EDGE_205);
@@ -5473,7 +5477,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
             }
         }catch(Throwable t){if(diagnostics)log("ICON_MASK_2053_FALLBACK "+t.getClass().getSimpleName());}
-        if(!maskDrawn)c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
+        if(!maskDrawn){
+            // OEM-themed drawables can differ from Android's adaptive icon mask.
+            // Fall back to a restrained highlight rather than an oversized white rim.
+            c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
+        }
         ICON_EDGE_205.setShader(null);ICON_EDGE_205.setStyle(Paint.Style.FILL);
     }
     private static void hookIconOptics205(ClassLoader loader){

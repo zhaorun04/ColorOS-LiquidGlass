@@ -1,7 +1,8 @@
-V1.9.205.3｜图标遮罩贴合与 Dock 几何优化测试版
+V1.9.205.4 图标轮廓与 Dock 留白修正版
 
-1. 对 AdaptiveIconDrawable 优先使用 getIconMask() 路径描边，普通图标保留圆角矩形回退。
-2. Dock 水平内缩从约 12dp/1.5% 降至 3～5dp，扩大可见宽度，避免越过屏幕边界。
-3. Dock 上下内缩缩小为 2dp，胶囊端部圆角接近高度的一半。
-4. 不改变 Hotseat 原生图标布局，不拦截触摸；保留独立开关与既有材质。
-5. 这是几何调整测试版，尚未增加真实壁纸折射；需 GitHub Actions 编译与实机验证。
+- Dock 水平宽度调整为 Hotseat 的约 92%，左右各预留约 4% 宽度；保留原生四图标位置。
+- 图标边缘高光减弱并收窄；AdaptiveIconDrawable 遮罩保持等比映射。
+- 对非 AdaptiveIconDrawable 的 ColorOS 主题图标仍使用近似圆角回退，无法保证百分百贴合。
+- 保留 V1.9.205.3 其他功能与独立开关。
+
+未完成 Android Gradle 编译及实机验证。
