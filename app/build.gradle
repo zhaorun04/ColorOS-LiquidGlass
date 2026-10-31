@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 192057
-        versionName '1.9.205.9-oplus-icon-contour'
+        versionCode 192058
+        versionName '1.9.205.10-icon-fallback-diagnostics'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

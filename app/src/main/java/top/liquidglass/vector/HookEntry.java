@@ -5470,6 +5470,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // A fully opaque raster cannot reveal its visible mask: never draw a false rim.
     private static final java.util.Map<Drawable,android.graphics.Path> ICON_CONTOUR_2059 =
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,android.graphics.Path>());
+    // Failed samples are retried at most once per minute, never on every frame.
+    private static final java.util.Map<Drawable,Long> ICON_CONTOUR_RETRY_20510 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Long>());
     private static final java.util.Set<String> ICON_CONTOUR_LOG_2059 =
         java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     private static android.graphics.Path computeIconContour2059(Drawable drawable){
@@ -5515,7 +5518,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             path.close();
             return path;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_CONTOUR_2059_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_CONTOUR_20510_FAILED drawable="+drawable.getClass().getName()+
+                " error="+t.getClass().getName()+" message="+String.valueOf(t.getMessage())+
+                " at="+(t.getStackTrace().length>0?t.getStackTrace()[0].toString():"unknown"));
             return null;
         }finally{if(bitmap!=null)bitmap.recycle();}
     }
@@ -5534,18 +5539,60 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float left=(v.getWidth()-w)*.5f;
         float top=v.getPaddingTop();
         if(top+h>v.getHeight())return;
-        android.graphics.Path contour;
+        android.graphics.Path contour=null;
+        long now=android.os.SystemClock.uptimeMillis();
         synchronized(ICON_CONTOUR_2059){
-            if(ICON_CONTOUR_2059.containsKey(d))contour=ICON_CONTOUR_2059.get(d);
-            else{contour=computeIconContour2059(d);ICON_CONTOUR_2059.put(d,contour);}
+            contour=ICON_CONTOUR_2059.get(d);
+            Long retry=ICON_CONTOUR_RETRY_20510.get(d);
+            if(contour==null && (retry==null || now>=retry.longValue())){
+                contour=computeIconContour2059(d);
+                if(contour!=null){
+                    ICON_CONTOUR_2059.put(d,contour);
+                    ICON_CONTOUR_RETRY_20510.remove(d);
+                }else ICON_CONTOUR_RETRY_20510.put(d,now+60000L);
+            }
         }
         String type=d.getClass().getName();
         if(diagnostics && ICON_CONTOUR_LOG_2059.size()<40 && ICON_CONTOUR_LOG_2059.add(type+"|"+v.getContentDescription()))
-            log("ICON_CONTOUR_2059 label="+v.getContentDescription()+" drawable="+type+
-                " alphaContour="+(contour!=null)+" bounds="+bounds.toShortString());
-        // No guessed rounded rectangle: opaque OEM icons have no reliable
-        // alpha silhouette. Avoid a visibly detached second edge entirely.
-        if(contour==null)return;
+            log("ICON_CONTOUR_20510 label="+v.getContentDescription()+" drawable="+type+
+                " alphaContour="+(contour!=null)+" fallback="+(contour==null)+" bounds="+bounds.toShortString());
+        if(contour==null){
+            // Restore the V1.9.205.6 visible optics rather than disappearing.
+            // This is intentionally a compatibility fallback, NOT a precise OEM silhouette.
+            float stroke=Math.max(density*.65f,1f);
+            float pad=stroke*.5f;
+            RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
+            float corner=Math.min(r.width(),r.height())*.265f;
+            ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
+            ICON_EDGE_205.setStyle(Paint.Style.STROKE);
+            ICON_EDGE_205.setStrokeWidth(stroke);
+            ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
+                new int[]{0x64FFFFFF,0x1CFFFFFF,0x00FFFFFF,0x38FFFFFF},null,
+                android.graphics.Shader.TileMode.CLAMP));
+            boolean maskDrawn=false;
+            try{
+                Drawable unwrapped=d;
+                for(int depth=0;depth<3 && unwrapped instanceof android.graphics.drawable.InsetDrawable;depth++)
+                    unwrapped=((android.graphics.drawable.InsetDrawable)unwrapped).getDrawable();
+                if(unwrapped instanceof android.graphics.drawable.AdaptiveIconDrawable){
+                    android.graphics.Path mask=((android.graphics.drawable.AdaptiveIconDrawable)unwrapped).getIconMask();
+                    if(mask!=null && !mask.isEmpty()){
+                        RectF maskBounds=new RectF();mask.computeBounds(maskBounds,true);
+                        float aspect=maskBounds.height()>0?maskBounds.width()/maskBounds.height():0f;
+                        if(maskBounds.width()>1f && maskBounds.height()>1f && aspect>.92f && aspect<1.08f){
+                            android.graphics.Matrix matrix=new android.graphics.Matrix();
+                            matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.CENTER);
+                            android.graphics.Path mapped=new android.graphics.Path();
+                            mask.transform(matrix,mapped);c.drawPath(mapped,ICON_EDGE_205);
+                            maskDrawn=true;
+                        }
+                    }
+                }
+            }catch(Throwable t){if(diagnostics)log("ICON_MASK_20510_FALLBACK "+t.getClass().getSimpleName());}
+            if(!maskDrawn)c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
+            ICON_EDGE_205.setShader(null);ICON_EDGE_205.setStyle(Paint.Style.FILL);
+            return;
+        }
         float stroke=Math.max(density*.52f,1f);
         ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
         ICON_EDGE_205.setStyle(Paint.Style.STROKE);
