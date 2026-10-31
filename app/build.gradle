@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 192040
-        versionName '1.9.205.2-icon-edge-dock-toggle-fix'
+        versionCode 192053
+        versionName '1.9.205.3-icon-mask-dock-geometry'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

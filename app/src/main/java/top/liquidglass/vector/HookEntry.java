@@ -5331,9 +5331,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
             final float density=target.getResources().getDisplayMetrics().density;
             final Rect b=getBounds();
             // Use Hotseat's native bounds; clamp horizontal edge inset to keep all corners on screen.
-            final float inset=Math.min(12*density,Math.max(4*density,b.width()*0.015f));
-            final float top=Math.max(0,8*density),bottom=Math.max(top,b.height()-8*density);
-            final float r=Math.min((bottom-top)*0.48f,32*density);
+            final float inset=Math.max(3*density,Math.min(5*density,b.width()*.008f));
+            final float top=Math.max(0,2*density),bottom=Math.max(top,b.height()-2*density);
+            final float r=(bottom-top)*.495f;
             RectF rect=new RectF(b.left+inset,b.top+top,b.right-inset,b.top+bottom);
             paint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
                 new int[]{0x40FFFFFF,0x20B4CEE7,0x38FFFFFF},null,android.graphics.Shader.TileMode.CLAMP));
@@ -5448,7 +5448,32 @@ public final class HookEntry implements IXposedHookLoadPackage {
         ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
             new int[]{0x8AFFFFFF,0x24FFFFFF,0x00FFFFFF,0x50FFFFFF},null,
             android.graphics.Shader.TileMode.CLAMP));
-        c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
+        // V1.9.205.3: prefer the actual adaptive icon mask over an approximate round rect.
+        // The mask is returned in the drawable's coordinate space; normalize its bounds
+        // to the visible compound drawable rectangle. Keep the old shape as fallback.
+        boolean maskDrawn=false;
+        try{
+            Drawable unwrapped=d;
+            for(int depth=0;depth<3 && unwrapped instanceof android.graphics.drawable.InsetDrawable;depth++){
+                unwrapped=((android.graphics.drawable.InsetDrawable)unwrapped).getDrawable();
+            }
+            if(unwrapped instanceof android.graphics.drawable.AdaptiveIconDrawable){
+                android.graphics.Path mask=((android.graphics.drawable.AdaptiveIconDrawable)unwrapped).getIconMask();
+                if(mask!=null && !mask.isEmpty()){
+                    android.graphics.RectF maskBounds=new android.graphics.RectF();
+                    mask.computeBounds(maskBounds,true);
+                    if(maskBounds.width()>1f && maskBounds.height()>1f){
+                        android.graphics.Matrix matrix=new android.graphics.Matrix();
+                        matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.FILL);
+                        android.graphics.Path mapped=new android.graphics.Path();
+                        mask.transform(matrix,mapped);
+                        c.drawPath(mapped,ICON_EDGE_205);
+                        maskDrawn=true;
+                    }
+                }
+            }
+        }catch(Throwable t){if(diagnostics)log("ICON_MASK_2053_FALLBACK "+t.getClass().getSimpleName());}
+        if(!maskDrawn)c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
         ICON_EDGE_205.setShader(null);ICON_EDGE_205.setStyle(Paint.Style.FILL);
     }
     private static void hookIconOptics205(ClassLoader loader){

@@ -1,1 +1,7 @@
-V1.9.205.2 图标边缘与 Dock 开关修复版\n\n1. 修复应用图标光学边缘向内缩小的问题：描边贴合图标 Drawable 外边界。\n2. 修复 Dock 开关仅保存配置、不通知 Launcher 刷新的问题。\n3. Launcher 监听配置 Provider 与 Settings.Global 快照变更，重新读取 Dock 状态并刷新 Hotseat。\n4. 保留 V1.9.205.1 的其他功能。\n\n验证：需要 GitHub Actions 编译及 ColorOS 15 实机测试。\n
+V1.9.205.3｜图标遮罩贴合与 Dock 几何优化测试版
+
+1. 对 AdaptiveIconDrawable 优先使用 getIconMask() 路径描边，普通图标保留圆角矩形回退。
+2. Dock 水平内缩从约 12dp/1.5% 降至 3～5dp，扩大可见宽度，避免越过屏幕边界。
+3. Dock 上下内缩缩小为 2dp，胶囊端部圆角接近高度的一半。
+4. 不改变 Hotseat 原生图标布局，不拦截触摸；保留独立开关与既有材质。
+5. 这是几何调整测试版，尚未增加真实壁纸折射；需 GitHub Actions 编译与实机验证。
