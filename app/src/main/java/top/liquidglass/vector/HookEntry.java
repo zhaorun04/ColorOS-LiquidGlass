@@ -5475,17 +5475,55 @@ public final class HookEntry implements IXposedHookLoadPackage {
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Long>());
     private static final java.util.Set<String> ICON_CONTOUR_LOG_2059 =
         java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    // V1.9.205.11: inspect the OEM drawable for a hardware-backed Bitmap.
+    // Copying the bitmap to ARGB_8888 is safe for a software sampling Canvas.
+    // Do not change the OEM drawable's backing bitmap or permanent bounds.
+    private static android.graphics.Bitmap extractSoftwareIconBitmap20511(Drawable d){
+        Class<?> cls=d.getClass();
+        for(int depth=0;cls!=null && depth<5;depth++,cls=cls.getSuperclass()){
+            for(java.lang.reflect.Field f:cls.getDeclaredFields()){
+                if(!android.graphics.Bitmap.class.isAssignableFrom(f.getType()))continue;
+                try{
+                    f.setAccessible(true);
+                    Object value=f.get(d);
+                    if(!(value instanceof android.graphics.Bitmap))continue;
+                    android.graphics.Bitmap source=(android.graphics.Bitmap)value;
+                    if(source.isRecycled() || source.getWidth()<8 || source.getHeight()<8)continue;
+                    android.graphics.Bitmap copy=source.copy(android.graphics.Bitmap.Config.ARGB_8888,false);
+                    if(copy!=null){
+                        if(diagnostics && ICON_BITMAP_LOG_20511.add(d.getClass().getName()+"|"+f.getName()))
+                            log("ICON_BITMAP_20511 field="+f.getName()+" config="+source.getConfig()+
+                                " size="+source.getWidth()+"x"+source.getHeight());
+                        return copy;
+                    }
+                }catch(Throwable ignored){}
+            }
+        }
+        return null;
+    }
+    private static final java.util.Set<String> ICON_BITMAP_LOG_20511 =
+        java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
     private static android.graphics.Path computeIconContour2059(Drawable drawable){
         final int n=128;
         android.graphics.Bitmap bitmap=null;
         try{
             bitmap=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
             Canvas off=new Canvas(bitmap);
-            Rect original=new Rect(drawable.getBounds());
-            try{
-                drawable.setBounds(0,0,n,n);
-                drawable.draw(off);
-            }finally{drawable.setBounds(original);}
+            android.graphics.Bitmap source=extractSoftwareIconBitmap20511(drawable);
+            if(source!=null){
+                try{
+                    Paint p=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                    off.drawBitmap(source,null,new Rect(0,0,n,n),p);
+                }finally{source.recycle();}
+            }else{
+                // No safe bitmap accessor: preserve previous behavior, including
+                // the visible optics fallback on unsupported hardware drawing.
+                Rect original=new Rect(drawable.getBounds());
+                try{
+                    drawable.setBounds(0,0,n,n);
+                    drawable.draw(off);
+                }finally{drawable.setBounds(original);}
+            }
             int[] pixels=new int[n*n];bitmap.getPixels(pixels,0,n,0,0,n,n);
             // OEM precomposed icons sometimes have an opaque square backing. Its
             // visual contour cannot be determined from alpha, so fail closed.
@@ -5518,7 +5556,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             path.close();
             return path;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_CONTOUR_20510_FAILED drawable="+drawable.getClass().getName()+
+            if(diagnostics)log("ICON_CONTOUR_20511_FAILED drawable="+drawable.getClass().getName()+
                 " error="+t.getClass().getName()+" message="+String.valueOf(t.getMessage())+
                 " at="+(t.getStackTrace().length>0?t.getStackTrace()[0].toString():"unknown"));
             return null;
@@ -5554,7 +5592,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         String type=d.getClass().getName();
         if(diagnostics && ICON_CONTOUR_LOG_2059.size()<40 && ICON_CONTOUR_LOG_2059.add(type+"|"+v.getContentDescription()))
-            log("ICON_CONTOUR_20510 label="+v.getContentDescription()+" drawable="+type+
+            log("ICON_CONTOUR_20511 label="+v.getContentDescription()+" drawable="+type+
                 " alphaContour="+(contour!=null)+" fallback="+(contour==null)+" bounds="+bounds.toShortString());
         if(contour==null){
             // Restore the V1.9.205.6 visible optics rather than disappearing.
