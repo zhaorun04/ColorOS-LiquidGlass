@@ -2719,16 +2719,36 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "uniform float sampleIsolation;\n"+
         "uniform float compositeProbe157;\n"+
         "uniform float4 screenClip;\n"+
+        "uniform float glassCornerRadius20513;\n"+
         "uniform float probe143Composite;\n"+
         "half4 main(float2 p) {\n"+
         " float u=clamp((p.x-bounds.x)/max(bounds.z,1.0),0.0,1.0);\n"+
         " float edge=abs(2.0*u-1.0);\n"+
         " float envelope=edge*edge*(3.0-2.0*edge);\n"+
         " float direction=1.0-2.0*smoothstep(0.47,0.53,u);\n"+
+        // V205.13: signed distance to the ACTUAL rounded-rectangle boundary,
+        // producing a two-dimensional edge normal (including the four corners).
+        " float2 center=bounds.xy+0.5*bounds.zw;\n"+
+        " float radius20513=clamp(glassCornerRadius20513,0.0,0.5*min(bounds.z,bounds.w));\n"+
+        " float2 q20513=abs(p-center)-(0.5*bounds.zw-float2(radius20513));\n"+
+        " float2 outside20513=max(q20513,0.0);\n"+
+        " float signed20513=length(outside20513)+min(max(q20513.x,q20513.y),0.0)-radius20513;\n"+
+        " float2 axis20513=sign(p-center);\n"+
+        " float2 normal20513=length(outside20513)>0.001?normalize(outside20513)*axis20513:(q20513.x>q20513.y?float2(axis20513.x,0.0):float2(0.0,axis20513.y));\n"+
+        " float rimWidth20513=min(45.0,max(9.0,0.18*min(bounds.z,bounds.w)));\n"+
+        " float rim20513=1.0-smoothstep(0.0,rimWidth20513,max(0.0,-signed20513));\n"+
         " float displacement173=(motionIsolation173>1.5?0.0:strength);\n"+
-        " float2 samplingPoint=p+float2(direction*envelope*displacement173,0.0);\n"+
+        " float2 samplingPoint=p-normal20513*rim20513*displacement173*0.70;\n"+
         " bool outOfDisplay=samplingPoint.x<screenClip.x || samplingPoint.y<screenClip.y || samplingPoint.x>screenClip.z || samplingPoint.y>screenClip.w;\n"+
-        " if(sampleIsolation>1.5 && sampleIsolation<2.5){samplingPoint=clamp(samplingPoint,screenClip.xy,screenClip.zw); }\n"+
+        // The visible display is the only valid wallpaper sample region. A
+        // folder may be partly offscreen while swiping; never sample a CLAMP
+        // repeated dark boundary pixel outside the visible screen.
+        " float2 safe20513=clamp(samplingPoint,screenClip.xy,screenClip.zw);\n"+
+        " float2 base20513=clamp(p,screenClip.xy,screenClip.zw);\n"+
+        " float2 delta20513=abs(samplingPoint-safe20513);\n"+
+        " float outsideDistance20513=max(delta20513.x,delta20513.y);\n"+
+        " float edgeGuard20513=1.0-smoothstep(0.0,18.0,outsideDistance20513);\n"+
+        " samplingPoint=mix(base20513,safe20513,edgeGuard20513);\n"+
         " half4 color=wallpaper.eval(samplingPoint);\n"+
         // V201: blend only texture detail, never sampling displacement or output alpha.
         " if(clearDetailMix201>0.001){half4 crisp=wallpaperClear201.eval(samplingPoint);color.rgb=mix(color.rgb,crisp.rgb,half(clamp(clearDetailMix201,0.0,1.0)));}\n"+
@@ -2756,6 +2776,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         "  if(stableOpticalMode>0.5){ color.rgb=min(color.rgb,half3(0.92,0.92,0.92)); }\n"+
         "  float strengthFactor=clamp(abs(strength)/22.0,0.0,2.5);\n"+
         "  color.a=half(probe143Composite>0.5?0.18:0.15*min(1.0,strengthFactor)*temporalOpacity);\n"+
+        "  float visible20513=smoothstep(-1.0,12.0,min(min(p.x-screenClip.x,screenClip.z-p.x),min(p.y-screenClip.y,screenClip.w-p.y)));\n"+
+        "  color.a*=half(visible20513);\n"+
         "  if(compositeProbe157>1.5 && compositeProbe157<2.5){color.a=half(0.15); }\n"+
         "  if(compositeProbe157>2.5 && compositeProbe157<3.5){color.a=half(0.075); }\n"+
         "  if(motionIsolation173>0.5 && motionIsolation173<1.5 || motionIsolation173>2.5){color.rgb=half3(0.50,0.50,0.50); }\n"+
@@ -3449,6 +3471,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                         " composite="+compositeMode170+" clear="+clearRefraction+
                         " detailMix202="+detailMix202+" view="+System.identityHashCode(view));
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
+                    state.continuousShader.setFloatUniform("glassCornerRadius20513",Math.max(0f,Math.min(radius,Math.min(rect.width(),rect.height())*0.5f)));
                     int visibilityTest=currentRefractionVisibilityTest();
                     // V1.9.93: mode 0 uses the exact proven mode-2 optical profile.
                     // Keep the requested mode 1/3 diagnostics available.
