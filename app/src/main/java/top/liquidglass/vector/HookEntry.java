@@ -1839,7 +1839,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // Only invalidate on actual screen-coordinate change, never every frame.
         tracked.listener=new android.view.ViewTreeObserver.OnPreDrawListener(){
             @Override public boolean onPreDraw(){
-                if(!(REFRACTION_ENABLED || (customBlurMode==1 && customBlurDp>0)) || REFRACTION_FRAME==null || !view.isAttachedToWindow())return true;
+                if(!(REFRACTION_ENABLED || (customBlurMode==1 && customBlurDp>0) || effectiveRim192()>=2) || !view.isAttachedToWindow())return true;
                 try {
                     float[] xy=dynamicScreenPosition(view,tracked);
                     if(Float.isNaN(tracked.lastX) || Math.abs(xy[0]-tracked.lastX)>0.5f || Math.abs(xy[1]-tracked.lastY)>0.5f){
@@ -1855,7 +1855,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         // delayed redraws for all folder views while the Workspace is animating.
         view.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener(){
             @Override public boolean onPreDraw(){
-                if(specularMode184()!=3 || !view.isAttachedToWindow())return true;
+                if((specularMode184()!=3 && effectiveRim192()<2) || !view.isAttachedToWindow())return true;
                 if(!tracked.recenterPending187)return true;
                 long now=android.os.SystemClock.elapsedRealtimeNanos();
                 if(now-tracked.lastVisibleFrameNs188>350000000L && Math.abs(tracked.visualDirection188)>0.005f){
@@ -1880,7 +1880,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
         view.postOnAnimation(new Runnable(){
             @Override public void run(){
                 state.redrawScheduled188=false;
-                if(!view.isAttachedToWindow() || !view.isShown() || specularMode184()!=3)return;
+                if(!view.isAttachedToWindow() || !view.isShown() || (specularMode184()!=3 && effectiveRim192()<2))return;
                 android.graphics.Rect visible=new android.graphics.Rect();
                 if(!view.getGlobalVisibleRect(visible) || visible.isEmpty())return;
                 // The shader's time-based envelope is applied during onDraw.
@@ -2466,6 +2466,29 @@ public final class HookEntry implements IXposedHookLoadPackage {
         }
         return rimMode190(); // original V191 baseline
     }
+    // V198: independent post-blur surface motion. Do not rely on the AGSL/refraction branch.
+    private static float updateSurfaceMotion198(View view, DynamicRefraction state, int mode){
+        if(mode<2){state.visualDirection188=0f;return 0f;}
+        updateMotion183(view,false);
+        float target;
+        synchronized(MOTION_183){
+            long age= MOTION_183.lastMovementNs==0L?Long.MAX_VALUE:
+                Math.max(0L,android.os.SystemClock.elapsedRealtimeNanos()-MOTION_183.lastMovementNs);
+            float ageMs=age==Long.MAX_VALUE?100000f:age/1000000f;
+            float decay=ageMs<=120f?1f:(float)Math.exp(-Math.min(2000f,ageMs-120f)/180f);
+            if(ageMs>=650f)decay=0f;
+            target=Math.max(-1f,Math.min(1f,MOTION_183.signed/900f))*decay;
+        }
+        long now=android.os.SystemClock.elapsedRealtimeNanos();
+        float dt=state.visualUpdatedNs188==0L?16f:Math.max(0f,Math.min(120f,(now-state.visualUpdatedNs188)/1000000f));
+        float tau=Math.abs(target)>Math.abs(state.visualDirection188)?85f:180f;
+        state.visualDirection188+=(1f-(float)Math.exp(-dt/tau))*(target-state.visualDirection188);
+        if(Math.abs(state.visualDirection188)<0.004f && Math.abs(target)<0.004f)state.visualDirection188=0f;
+        state.visualUpdatedNs188=now;
+        state.recenterPending187=Math.abs(state.visualDirection188)>0.005f;
+        if(state.recenterPending187)scheduleRecenter188(view,state);
+        return state.visualDirection188;
+    }
     private static int surfaceUnifiedLogs192=0;
     private static int rimLogs190=0;
     private static void drawRoundedRim190(Canvas canvas,android.graphics.RectF bounds,
@@ -2473,7 +2496,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(mode==0)return;
         float w=bounds.width(),h=bounds.height();
         if(w<4f || h<4f)return;
-        final float edge=Math.max(0.7f,Math.min(7.6f,Math.min(w,h)*0.022f*(surface194Enabled()?surfaceSoftness194()/100f:1f)));
+        // V198: physical-pixel edge thickness is bounded by density, not folder size.
+        // Large folders must not inherit a proportionally heavier double outline.
+        float density=launcherContext==null?1f:launcherContext.getResources().getDisplayMetrics().density;
+        float softness=surface194Enabled()?surfaceSoftness194()/100f:1f;
+        final float edge=Math.max(0.65f*density,Math.min(1.45f*density,1.05f*density*softness));
         final float inset=edge*0.72f;
         android.graphics.RectF r=new android.graphics.RectF(bounds);
         r.inset(inset,inset);
@@ -2504,13 +2531,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // only visible bright rim; its gradient already follows motion.
             if(mode==3){
                 android.graphics.RectF inner=new android.graphics.RectF(bounds);
-                float offset=edge*2.1f;
+                float offset=edge*1.55f;
                 inner.inset(offset,offset);
                 float innerRadius=Math.max(0f,cornerRadius-offset);
                 Paint shadow=new Paint(Paint.ANTI_ALIAS_FLAG);
                 shadow.setStyle(Paint.Style.STROKE);
-                shadow.setStrokeWidth(Math.max(0.75f,edge*0.65f));
-                int dark=surface194Enabled()?Math.min(255,Math.round(39f*surfaceStrength194()/100f)):39;
+                shadow.setStrokeWidth(Math.max(0.55f*density,edge*0.42f));
+                int dark=surface194Enabled()?Math.min(255,Math.round(25f*surfaceStrength194()/100f)):39;
                 shadow.setColor(dark<<24);
                 canvas.drawRoundRect(inner,innerRadius,innerRadius,shadow);
             }
@@ -2575,7 +2602,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 }
                 updateMotion183(v,true);
                 // The Shader uniform is refreshed by the next draw. Redraw only while active.
-                if(specularMode184()!=0 && v.isAttachedToWindow())v.invalidate();
+                if((specularMode184()!=0 || effectiveRim192()>=2) && v.isAttachedToWindow())v.invalidate();
             }
         });
     }
@@ -3208,6 +3235,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 fallback.setColor(Color.argb(Math.round(glassTintOpacity*255f/100f),Color.red(tint),Color.green(tint),Color.blue(tint)));
                 canvas.drawRoundRect(rect,radius,radius,fallback);
             }
+            int rim198=effectiveRim192();
+            if(rim198!=0){
+                DynamicRefraction surfaceState198=dynamicState(view);
+                float dir198=updateSurfaceMotion198(view,surfaceState198,rim198);
+                drawRoundedRim190(canvas,rect,radius,dir198,rim198);
+            }
             return;
         }
         android.util.DisplayMetrics dm=view.getResources().getDisplayMetrics();
@@ -3661,8 +3694,9 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     " afterTint=true view="+System.identityHashCode(view)+
                     " direction="+state.visualDirection188);
             }
-            if(rim190!=0){ // V196: surface optics independent of wallpaper refraction and AGSL success
-                drawRoundedRim190(canvas,rect,contourRadius,state.visualDirection188,rim190);
+            if(rim190!=0){ // V198: independent motion and size-normalized rim
+                float surfaceDirection198=updateSurfaceMotion198(view,state,rim190);
+                drawRoundedRim190(canvas,rect,contourRadius,surfaceDirection198,rim190);
                 if(rimLogs190++<160)log("SURFACE_RIM_190 mode="+rim190+
                     " blurDp="+customBlurDp+" radius="+contourRadius+
                     " direction="+state.visualDirection188+
