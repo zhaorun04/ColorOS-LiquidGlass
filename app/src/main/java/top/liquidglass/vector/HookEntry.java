@@ -5432,11 +5432,40 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("DOCK_2052_CONFIG_OBSERVER_READY");
         }catch(Throwable t){log("DOCK_2052_CONFIG_OBSERVER_FAILED "+t.getClass().getSimpleName());}
     }
-    // V1.9.205.7: safe interior specular highlight without an inferred icon outline.
+    // V1.9.205.8: restore V1.9.205.6 visible optics and log geometry for OEM mapping.
     // Lightweight edge optics over an actual icon drawable only.
     // Hook only Launcher icon TextViews, never create an overlay View or touch target.
     private static final Paint ICON_EDGE_205=new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final java.util.Set<String> ICON_HOOK_CLASSES_205=new java.util.HashSet<String>();
+    // V1.9.205.8: bounded, one-shot icon geometry diagnostics; no per-frame logs.
+    private static final java.util.Set<String> ICON_DIAG_2058=java.util.Collections.synchronizedSet(new java.util.HashSet<String>());
+    private static void diagnoseIcon2058(android.widget.TextView v,Drawable d,Rect bounds){
+        if(!diagnostics)return;
+        try{
+            String label=String.valueOf(v.getContentDescription());
+            String key=v.getClass().getName()+"|"+label;
+            if(ICON_DIAG_2058.size()>=40 || !ICON_DIAG_2058.add(key))return;
+            String type=d.getClass().getName();
+            Drawable current=d;
+            for(int i=0;i<4 && current instanceof android.graphics.drawable.InsetDrawable;i++)
+                current=((android.graphics.drawable.InsetDrawable)current).getDrawable();
+            String mask="none";
+            if(current instanceof android.graphics.drawable.AdaptiveIconDrawable){
+                android.graphics.Path p=((android.graphics.drawable.AdaptiveIconDrawable)current).getIconMask();
+                android.graphics.RectF mb=new android.graphics.RectF();
+                if(p!=null){p.computeBounds(mb,true);mask=mb.toShortString();}
+            }
+            log("ICON_GEOMETRY_2058 label="+label+" view="+v.getClass().getName()+
+                " viewSize="+v.getWidth()+"x"+v.getHeight()+
+                " padding="+v.getPaddingLeft()+","+v.getPaddingTop()+","+v.getPaddingRight()+","+v.getPaddingBottom()+
+                " drawable="+type+" unwrapped="+current.getClass().getName()+
+                " bounds="+bounds.toShortString()+" mask="+mask+
+                " scroll="+v.getScrollX()+","+v.getScrollY()+
+                " scale="+v.getScaleX()+","+v.getScaleY()+
+                " translation="+v.getTranslationX()+","+v.getTranslationY()+
+                " density="+v.getResources().getDisplayMetrics().density);
+        }catch(Throwable t){log("ICON_GEOMETRY_2058_FAILED "+t.getClass().getSimpleName());}
+    }
     private static void drawIconEdge205(android.widget.TextView v,Canvas c){
         if(!iconOptics204 || !v.isShown() || v.getWidth()<=0 || v.getHeight()<=0)return;
         // Folder labels, toolbar labels and widgets must never get icon optics.
@@ -5450,36 +5479,58 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(d==null)return;
         Rect bounds=d.getBounds();
         if(bounds.width()<8 || bounds.height()<8)return;
+        diagnoseIcon2058(v,d,bounds);
         float density=v.getResources().getDisplayMetrics().density;
         float w=bounds.width(),h=bounds.height();
         // Compound drawable bounds are local to the icon, not the full cell/label.
         float left=(v.getWidth()-w)*.5f;
         float top=v.getPaddingTop();
         if(top+h>v.getHeight())return;
-        // V1.9.205.7: do not invent an outer contour for OEM-themed icons.
-        // The former full round-rect / adaptive-mask stroke generated a visible
-        // second outline when the launcher applied its own mask and scaling.
-        // Render a soft interior specular strip on the icon's top face instead.
-        // No pixels are drawn on the uncertain corner/outer-edge silhouette.
-        float inset=Math.max(density*3.5f,w*.065f);
-        float x1=left+inset;
-        float x2=left+w-inset;
-        float y=top+Math.max(density*2.8f,h*.055f);
-        if(x2<=x1 || y>=top+h*.25f)return;
-        ICON_EDGE_205.reset();
-        ICON_EDGE_205.setAntiAlias(true);
+        // V1.9.205.4: avoid tracing the square drawable allocation as though
+        // it were the visible icon silhouette. Keep a subpixel anti-alias margin.
+        float stroke=Math.max(density*.65f,1f);
+        float pad=stroke*.5f;
+        RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
+        float corner=Math.min(r.width(),r.height())*.265f;
+        ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
         ICON_EDGE_205.setStyle(Paint.Style.STROKE);
-        ICON_EDGE_205.setStrokeCap(Paint.Cap.ROUND);
-        ICON_EDGE_205.setStrokeWidth(Math.max(.8f,density*.75f));
-        // Transparent ends avoid a false border at either upper corner.
-        ICON_EDGE_205.setShader(new android.graphics.LinearGradient(x1,y,x2,y,
-            new int[]{0x00FFFFFF,0x48FFFFFF,0x48FFFFFF,0x00FFFFFF},
-            new float[]{0f,.27f,.73f,1f},android.graphics.Shader.TileMode.CLAMP));
-        c.drawLine(x1,y,x2,y,ICON_EDGE_205);
-        ICON_EDGE_205.setShader(null);
-        ICON_EDGE_205.setStyle(Paint.Style.FILL);
-        // Diagnostic only: do not log per-frame draw calls.
-
+        ICON_EDGE_205.setStrokeWidth(stroke);
+        ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
+            new int[]{0x64FFFFFF,0x1CFFFFFF,0x00FFFFFF,0x38FFFFFF},null,
+            android.graphics.Shader.TileMode.CLAMP));
+        // V1.9.205.4: only trust the adaptive icon mask when its visible bounds
+        // match the icon's allocation. OEM theme wrappers may apply extra masks,
+        // in which case the generic mask is NOT the final visible contour.
+        boolean maskDrawn=false;
+        try{
+            Drawable unwrapped=d;
+            for(int depth=0;depth<3 && unwrapped instanceof android.graphics.drawable.InsetDrawable;depth++){
+                unwrapped=((android.graphics.drawable.InsetDrawable)unwrapped).getDrawable();
+            }
+            if(unwrapped instanceof android.graphics.drawable.AdaptiveIconDrawable){
+                android.graphics.Path mask=((android.graphics.drawable.AdaptiveIconDrawable)unwrapped).getIconMask();
+                if(mask!=null && !mask.isEmpty()){
+                    android.graphics.RectF maskBounds=new android.graphics.RectF();
+                    mask.computeBounds(maskBounds,true);
+                    float aspect=maskBounds.height()>0?maskBounds.width()/maskBounds.height():0f;
+                    if(maskBounds.width()>1f && maskBounds.height()>1f && aspect>.92f && aspect<1.08f){
+                        android.graphics.Matrix matrix=new android.graphics.Matrix();
+                        // Respect the adaptive icon path aspect ratio; do not stretch it.
+                        matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.CENTER);
+                        android.graphics.Path mapped=new android.graphics.Path();
+                        mask.transform(matrix,mapped);
+                        c.drawPath(mapped,ICON_EDGE_205);
+                        maskDrawn=true;
+                    }
+                }
+            }
+        }catch(Throwable t){if(diagnostics)log("ICON_MASK_2053_FALLBACK "+t.getClass().getSimpleName());}
+        if(!maskDrawn){
+            // OEM-themed drawables can differ from Android's adaptive icon mask.
+            // Fall back to a restrained highlight rather than an oversized white rim.
+            c.drawRoundRect(r,corner,corner,ICON_EDGE_205);
+        }
+        ICON_EDGE_205.setShader(null);ICON_EDGE_205.setStyle(Paint.Style.FILL);
     }
     private static void hookIconOptics205(ClassLoader loader){
         String[] candidates={"com.android.launcher3.BubbleTextView",
