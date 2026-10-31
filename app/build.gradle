@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 192054
-        versionName '1.9.205.4-icon-contour-dock-margins'
+        versionCode 192055
+        versionName '1.9.205.5-icon-visible-contour'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
