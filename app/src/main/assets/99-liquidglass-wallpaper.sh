@@ -68,7 +68,7 @@ sync_config() {
   grep -q 'name="enabled"' "$PREF" 2>/dev/null || return
   # The first item is the schema marker; 21 fields match HookEntry.restoreBootSnapshot().
   SNAP="LG1"
-  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:0' 'custom_blur_dp:14' 'refraction_percent:35' 'glass_tint_opacity:18' 'custom_blur_mode:1' 'clear_refraction:0' 'dynamic_sheen_mode:0' 'surface_mode_195:3' 'surface_strength_195:100' 'surface_softness_195:100'; do
+  for entry in 'enabled:0' 'alpha:210' 'tint:0' 'tint_strength:30' 'highlight:0' 'diagnostics:0' 'highlight_strength:25' 'probe_mode:0' 'highlight_width:2' 'directional_light:1' 'native_blur_experiment:0' 'blur_radius_percent:100' 'native_alpha_probe:1' 'wallpaper_compare:0' 'real_refraction:0' 'custom_blur_dp:14' 'refraction_percent:35' 'glass_tint_opacity:18' 'custom_blur_mode:1' 'clear_refraction:0' 'dynamic_sheen_mode:0' 'surface_mode_195:3' 'surface_strength_195:100' 'surface_softness_195:100' 'icon_optics_204:0' 'dock_glass_204:0'; do
     key=${entry%%:*}; fallback=${entry#*:}
     SNAP="$SNAP|$(config_value "$key" "$fallback")"
   done

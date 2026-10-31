@@ -74,6 +74,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile int blurRadiusPercent = 100; // legacy config ignored
     private static volatile int customBlurDp=14, refractionPercent=35, glassTintOpacity=18, customBlurMode=1;
     private static int opticalPipelineLogs195=0;
+    private static volatile boolean iconOptics204=false, dockGlass204=false;
     private static volatile boolean clearRefraction=false; // false: frosted glass, true: clear refraction
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_FRAME;
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_SOURCE;
@@ -211,7 +212,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             String raw=android.provider.Settings.Global.getString(context.getContentResolver(),BOOT_SNAPSHOT_KEY);
             if(raw==null || !raw.startsWith("LG1|"))return false;
             String[] v=raw.split("\\|",-1);
-            if(v.length!=16 && v.length!=20 && v.length!=21 && v.length!=22 && v.length!=25){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
+            if(v.length!=16 && v.length!=20 && v.length!=21 && v.length!=22 && v.length!=25 && v.length!=27){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
             // Parse all fields first: never partially apply a corrupt snapshot.
             int[] x=new int[15];
             for(int i=0;i<x.length;i++)x[i]=Integer.parseInt(v[i+1]);
@@ -227,6 +228,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V196: launcher reads root-published snapshot, not the APK ContentProvider.
             if(v.length<25 && !raw.equals(lastBootSnapshot))log("SURFACE_SNAPSHOT_197_MISSING count="+v.length+" expected=25");
             if(v.length>=25){surfaceMode194=clampInt(Integer.parseInt(v[22]),0,3);surfaceStrength194=clampInt(Integer.parseInt(v[23]),0,200);surfaceSoftness194=clampInt(Integer.parseInt(v[24]),50,200);}
+            if(v.length>=27){iconOptics204="1".equals(v[25]);dockGlass204="1".equals(v[26]);}
             configEverLoaded=true;
             CONFIG_READY_AT_146=android.os.SystemClock.uptimeMillis();
             if(previousRefraction!=REFRACTION_ENABLED){
@@ -285,6 +287,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 ci=c.getColumnIndex("refraction_percent");if(ci>=0)refractionPercent=clampInt(c.getInt(ci),0,100);
                 ci=c.getColumnIndex("glass_tint_opacity");if(ci>=0)glassTintOpacity=clampInt(c.getInt(ci),0,100);
                 ci=c.getColumnIndex("custom_blur_mode");if(ci>=0)customBlurMode=clampInt(c.getInt(ci),0,2);
+                ci=c.getColumnIndex("icon_optics_204");iconOptics204=ci>=0&&c.getInt(ci)==1;
+                ci=c.getColumnIndex("dock_glass_204");dockGlass204=ci>=0&&c.getInt(ci)==1;
                 ci=c.getColumnIndex("surface_mode_195");if(ci>=0)surfaceMode194=clampInt(c.getInt(ci),0,3);
                 ci=c.getColumnIndex("surface_strength_195");if(ci>=0)surfaceStrength194=clampInt(c.getInt(ci),0,200);
                 ci=c.getColumnIndex("surface_softness_195");if(ci>=0)surfaceSoftness194=clampInt(c.getInt(ci),50,200);
@@ -5315,6 +5319,69 @@ public final class HookEntry implements IXposedHookLoadPackage {
         } catch(Throwable t) { log("BOOT_CONFIG_RESTORE_HOOK_FAILED reason="+t.getClass().getSimpleName()); }
     }
 
+    // V1.9.204 preview: draw only inside the actual Hotseat View; never create a touch target.
+    private static final java.util.Map<View,android.graphics.drawable.Drawable> DOCK_ORIGINAL_204=
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<View,android.graphics.drawable.Drawable>());
+    private static final class DockBackground204 extends android.graphics.drawable.Drawable {
+        private final View target;
+        private final Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        DockBackground204(View v){target=v;}
+        @Override public void draw(Canvas c){
+            if(!dockGlass204)return;
+            final float density=target.getResources().getDisplayMetrics().density;
+            final Rect b=getBounds();
+            // Use Hotseat's native bounds; clamp horizontal edge inset to keep all corners on screen.
+            final float inset=Math.min(12*density,Math.max(4*density,b.width()*0.015f));
+            final float top=Math.max(0,8*density),bottom=Math.max(top,b.height()-8*density);
+            final float r=Math.min((bottom-top)*0.48f,32*density);
+            RectF rect=new RectF(b.left+inset,b.top+top,b.right-inset,b.top+bottom);
+            paint.setShader(new android.graphics.LinearGradient(rect.left,rect.top,rect.right,rect.bottom,
+                new int[]{0x40FFFFFF,0x20B4CEE7,0x38FFFFFF},null,android.graphics.Shader.TileMode.CLAMP));
+            paint.setStyle(Paint.Style.FILL);c.drawRoundRect(rect,r,r,paint);paint.setShader(null);
+            paint.setColor(0x72FFFFFF);paint.setStyle(Paint.Style.STROKE);paint.setStrokeWidth(Math.max(1f,density*.7f));
+            c.drawRoundRect(rect,r,r,paint);paint.setStyle(Paint.Style.FILL);
+        }
+        @Override public void setAlpha(int alpha){}
+        @Override public void setColorFilter(android.graphics.ColorFilter filter){}
+        @Override public int getOpacity(){return android.graphics.PixelFormat.TRANSLUCENT;}
+    }
+    private static void refreshLauncherOptics204(android.app.Activity activity){
+        try{
+            if(activity==null)return;
+            refreshFromContext(activity);
+            int id=activity.getResources().getIdentifier("hotseat","id","com.android.launcher");
+            View hotseat=id==0?null:activity.findViewById(id);
+            if(hotseat==null)return;
+            if(dockGlass204){
+                if(!(hotseat.getBackground() instanceof DockBackground204)){
+                    DOCK_ORIGINAL_204.put(hotseat,hotseat.getBackground());
+                    hotseat.setBackground(new DockBackground204(hotseat));
+                }
+            }else if(hotseat.getBackground() instanceof DockBackground204){
+                hotseat.setBackground(DOCK_ORIGINAL_204.remove(hotseat));
+            }
+            // The icon optics path is diagnostic-only until per-icon drawable bounds
+            // are confirmed. Do not add a full-cell overlay that covers icon labels.
+            if(diagnostics)log("HOTSEAT_204 bounds="+hotseat.getWidth()+"x"+hotseat.getHeight()+
+                " dock="+dockGlass204+" iconRequested="+iconOptics204);
+        }catch(Throwable t){log("HOTSEAT_204_FAILED "+t.getClass().getSimpleName());}
+    }
+    private static void hookLauncherOptics204(ClassLoader loader){
+        try{
+            Class<?> launcher=find("com.android.launcher3.Launcher",loader);
+            if(launcher==null){log("HOTSEAT_204_LAUNCHER_NOT_FOUND");return;}
+            java.lang.reflect.Method m=launcher.getDeclaredMethod("onResume");
+            XposedBridge.hookMethod(m,new XC_MethodHook(){
+                @Override protected void afterHookedMethod(MethodHookParam p){
+                    if(p.thisObject instanceof android.app.Activity){
+                        android.app.Activity a=(android.app.Activity)p.thisObject;
+                        a.getWindow().getDecorView().post(()->refreshLauncherOptics204(a));
+                    }
+                }
+            });
+            log("HOTSEAT_204_HOOK_READY");
+        }catch(Throwable t){log("HOTSEAT_204_HOOK_FAILED "+t.getClass().getSimpleName());}
+    }
     @Override public void handleLoadPackage(XC_LoadPackage.LoadPackageParam p) {
         if (!"com.android.systemui".equals(p.packageName) && !"com.android.launcher".equals(p.packageName)) return;
         installed = 0; failed = 0;
@@ -5326,6 +5393,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             hook(find("com.android.systemui.qs.tileimpl.QSTileViewImpl", p.classLoader), "onLayout", layout, "QSTileViewImpl", false);
             hook(find("com.android.systemui.qs.QSPanel", p.classLoader), "onLayout", layout, "QSPanel", false);
         } else {
+            hookLauncherOptics204(p.classLoader);
             hookWallpaperOffsetRequests();
             hookNativeDrawableDraw();
             // V1.9.18: render from the confirmed preview drawBackground entry, not a nonexistent LayerBlurDrawable.draw override.

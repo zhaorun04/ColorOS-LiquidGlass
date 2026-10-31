@@ -71,9 +71,27 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.203  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.204  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
+        TextView presetInfo=text("推荐预设 · V1.9.204。仅在点击时应用，不会在升级时覆盖自定义参数。",12,false);current.addView(presetInfo);
+        action("应用清透玻璃预设",()->{
+            prefs.edit().putBoolean("enabled",true).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0)
+                .putInt("glass_tint_opacity",0).putInt("custom_blur_dp",4).putInt("custom_blur_mode",1).putInt("refraction_percent",45)
+                .putBoolean("highlight",false).putInt("highlight_strength",45).putInt("highlight_width",2)
+                .putBoolean("directional_light",true).putBoolean("native_alpha_probe",false).putBoolean("real_refraction",true)
+                .putInt("probe_mode",0).commit();recreate();
+        });
+        action("恢复液态玻璃推荐参数 (14 / 35 / 12 / 30)",()->{
+            prefs.edit().putInt("custom_blur_dp",14).putInt("refraction_percent",35)
+                .putInt("glass_tint_opacity",12).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0).putInt("highlight_strength",30)
+                .putInt("custom_blur_mode",1).putBoolean("real_refraction",true)
+                .putBoolean("highlight",false).putBoolean("enabled",true).commit();recreate();
+        });
+        toggle("桌面应用图标统一表面光学（预览）","icon_optics_204",false);
+        toggle("自适应液态玻璃 Dock（预览）","dock_glass_204",false);
+        TextView dockInfo=text("Dock 使用原生 hotseat 容器定位；不移动图标、不接管触摸。首次测试建议单独开启 Dock。",12,false);current.addView(dockInfo);
+
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
         slider("自定义壁纸模糊半径 (dp)","custom_blur_dp",14,0,40);
         slider("折射强度 (%)","refraction_percent",35,0,100);
@@ -121,19 +139,6 @@ public final class MainActivity extends Activity {
         });
         slider("底色色调强度 (%)","tint_strength",30,0,90);
         TextView tintInfo=text("底色色调强度为 0% 时不添加颜色；原生模式不添加色调。颜色变化需在玻璃底色不透明度和当前渲染路径允许的情况下观察。",12,false);current.addView(tintInfo);
-        action("应用清透玻璃预设",()->{
-            prefs.edit().putBoolean("enabled",true).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0)
-                .putInt("glass_tint_opacity",0).putInt("custom_blur_dp",4).putInt("custom_blur_mode",1).putInt("refraction_percent",45)
-                .putBoolean("highlight",false).putInt("highlight_strength",45).putInt("highlight_width",2)
-                .putBoolean("directional_light",true).putBoolean("native_alpha_probe",false).putBoolean("real_refraction",true)
-                .putInt("probe_mode",0).commit();recreate();
-        });
-        action("恢复液态玻璃推荐参数 (14 / 35 / 12 / 30)",()->{
-            prefs.edit().putInt("custom_blur_dp",14).putInt("refraction_percent",35)
-                .putInt("glass_tint_opacity",12).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0).putInt("highlight_strength",30)
-                .putInt("custom_blur_mode",1).putBoolean("real_refraction",true)
-                .putBoolean("highlight",false).putBoolean("enabled",true).commit();recreate();
-        });
         section("维护与状态","高级实验已从首页隐藏，保留必要的 Root 脚本更新与日志开关。");
         rootStatus=text("正在检查 Root 脚本与运行进程…",12,false);current.addView(rootStatus);
         action("检查并更新 Root 辅助脚本",()->RootHelperUpdater.runAsync(this,result->{
