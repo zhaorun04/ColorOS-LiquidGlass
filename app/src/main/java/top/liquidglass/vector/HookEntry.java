@@ -3658,7 +3658,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(pathMode169!=2 && tintMode!=0 && tintStrength>0){
                 Paint stylePaint=state.cachedTintPaint;
                 int styleColor=tintColor();
-                stylePaint.setColor(Color.argb(Math.round(0.72f*255f*tintStrength/90f), Color.red(styleColor),Color.green(styleColor),Color.blue(styleColor)));
+                stylePaint.setColor(Color.argb(Math.round(0.72f*255f*tintStrength/90f*glassTintOpacity/100f), Color.red(styleColor),Color.green(styleColor),Color.blue(styleColor)));
                 canvas.drawRoundRect(rect,contourRadius,contourRadius,stylePaint);
             }
             // V189: intentionally AFTER custom blur and tint, independent of blur radius.

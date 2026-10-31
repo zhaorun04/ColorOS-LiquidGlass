@@ -6,8 +6,8 @@ android {
         applicationId 'top.liquidglass.vector'
         minSdk 35
         targetSdk 28
-        versionCode 191980
-        versionName '1.9.198-independent-motion-rim-geometry'
+        versionCode 191990
+        versionName '1.9.199-tint-ui-consolidation'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

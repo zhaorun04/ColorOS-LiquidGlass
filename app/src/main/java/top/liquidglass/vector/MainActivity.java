@@ -49,7 +49,7 @@ public final class MainActivity extends Activity {
         ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);scroll.setBackgroundColor(0xFFF3F6FA);
         body=column();body.setPadding(dp(18),dp(28),dp(18),dp(32));scroll.addView(body);
         TextView heading=text("Liquid Glass",28,true);body.addView(heading);
-        TextView version=text("V1.9.197  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
+        TextView version=text("V1.9.199  ·  ColorOS 桌面玻璃材质",13,false);LinearLayout.LayoutParams v=new LinearLayout.LayoutParams(-1,-2);v.setMargins(0,dp(4),0,dp(20));body.addView(version,v);
         section("玻璃效果","独立壁纸模糊、折射、底色和高光。");
         toggle("启用桌面文件夹玻璃", "enabled",false);
         slider("玻璃底色不透明度 (%)","glass_tint_opacity",18,0,100);
@@ -69,12 +69,9 @@ public final class MainActivity extends Activity {
         // Legacy native_alpha_probe is deliberately disabled: blur and material opacity are separate.
         prefs.edit().putBoolean("native_alpha_probe",false).apply();
         TextView blurInfo=text("自定义模糊使用壁纸采样，不模糊应用图标。系统模糊开关不再强制开启；ColorOS 自身仍可能启用原生模糊。",12,false);current.addView(blurInfo);
-        section("柔和高光","静态圆角高光与光学轮廓；不改变已验证的描边几何。");
-        toggle("启用柔和高光描边","highlight",false);
-        slider("高光强度 (%)","highlight_strength",30,0,100);
-        slider("描边宽度（像素）","highlight_width",2,1,5);
-        toggle("方向性反射","directional_light",true);
-        section("统一表面光学 · V1.9.197","新版圆角反射独立于背景模糊；设置保存后会同步给 Launcher。");
+        // V1.9.199: legacy soft-highlight controls removed from UI. Existing
+        // preferences remain for compatibility; the unified surface owns reflection.
+        section("统一表面光学 · V1.9.199","新版圆角反射独立于背景模糊；设置保存后会同步给 Launcher。");
         TextView surfaceLabel=text("表面反射模式",13,false);current.addView(surfaceLabel);
         Spinner surfaceSpinner=new Spinner(this);
         String[] surfaceModes={"0 · 关闭表面反射","1 · 静态圆角反射","2 · 动态圆角反射","3 · 动态反射 + 柔和暗边"};
@@ -91,20 +88,21 @@ public final class MainActivity extends Activity {
         slider("高光宽度 (%)","surface_softness_195",100,50,200);
         TextView surfaceHint=text("这三项是真正的 APK 设置控件；与背景模糊半径、壁纸折射强度分别控制不同效果。",12,false);
         current.addView(surfaceHint);
-        section("视觉风格","先选择冷白、浅灰或深色，再调节色调强度；原生色调不叠加颜色。");
+        section("玻璃底色色调","选择玻璃底色的冷暖色调与叠加浓度；与模糊、折射、表面反射独立。");
         TextView tintLabel=text("色调",13,false);current.addView(tintLabel);
         Spinner tint=new Spinner(this);String[] names={"原生 · 推荐","冷白","浅灰","深色"};
         tint.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_spinner_dropdown_item,names));
         tint.setSelection(Math.max(0,Math.min(3,prefs.getInt("tint",0))));current.addView(tint);
         tint.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){
-            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){prefs.edit().putInt("tint",pos).apply();}
+            public void onItemSelected(android.widget.AdapterView<?> parent,View view,int pos,long id){prefs.edit().putInt("tint",pos).commit();getContentResolver().notifyChange(GlassConfigProvider.URI,null);}
             public void onNothingSelected(android.widget.AdapterView<?> parent){}
         });
-        slider("色调强度","tint_strength",30,0,90);
+        slider("底色色调强度 (%)","tint_strength",30,0,90);
+        TextView tintInfo=text("底色色调强度为 0% 时不添加颜色；原生模式不添加色调。颜色变化需在玻璃底色不透明度和当前渲染路径允许的情况下观察。",12,false);current.addView(tintInfo);
         action("应用清透玻璃预设",()->{
             prefs.edit().putBoolean("enabled",true).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0)
                 .putInt("glass_tint_opacity",0).putInt("custom_blur_dp",4).putInt("custom_blur_mode",1).putInt("refraction_percent",45)
-                .putBoolean("highlight",true).putInt("highlight_strength",45).putInt("highlight_width",2)
+                .putBoolean("highlight",false).putInt("highlight_strength",45).putInt("highlight_width",2)
                 .putBoolean("directional_light",true).putBoolean("native_alpha_probe",false).putBoolean("real_refraction",true)
                 .putInt("probe_mode",0).commit();recreate();
         });
@@ -112,7 +110,7 @@ public final class MainActivity extends Activity {
             prefs.edit().putInt("custom_blur_dp",14).putInt("refraction_percent",35)
                 .putInt("glass_tint_opacity",12).putInt("alpha",0).putInt("tint",0).putInt("tint_strength",0).putInt("highlight_strength",30)
                 .putInt("custom_blur_mode",1).putBoolean("real_refraction",true)
-                .putBoolean("highlight",true).putBoolean("enabled",true).commit();recreate();
+                .putBoolean("highlight",false).putBoolean("enabled",true).commit();recreate();
         });
         section("维护与状态","高级实验已从首页隐藏，保留必要的 Root 脚本更新与日志开关。");
         TextView status=text("检查 Root 辅助脚本中…",12,false);current.addView(status);
