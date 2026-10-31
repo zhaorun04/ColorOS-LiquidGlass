@@ -3432,12 +3432,18 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     // V201: clear mode restores original wallpaper detail at the SAME refracted coordinate.
                     // Blur=0 / unavailable: both inputs are identical, so no forced blur or visual shift.
                     state.continuousShader.setInputShader("wallpaperClear201",state.shader);
-                    state.continuousShader.setFloatUniform("clearDetailMix201",
-                        clearRefraction && blurredInput195 ? 0.70f : 0.0f);
+                    // V202: preserve the user's blur setting. Clear refraction adds only a
+                    // small amount of fine detail, decreasing as blur radius grows.
+                    // At 0dp the two sources are identical; never manufacture blur.
+                    final float detailMix202 = (clearRefraction && blurredInput195)
+                        ? Math.max(0.04f, 0.16f - 0.003f * Math.min(40, Math.max(0, customBlurDp)))
+                        : 0.0f;
+                    state.continuousShader.setFloatUniform("clearDetailMix201", detailMix202);
                     if(opticalPipelineLogs195++<100)log("OPTICAL_PIPELINE_195 source="+
                         (blurredInput195?"BLURRED_WALLPAPER":"CLEAR_WALLPAPER")+
                         " blurDp="+customBlurDp+" refractPercent="+refractionPercent+
-                        " composite="+compositeMode170+" view="+System.identityHashCode(view));
+                        " composite="+compositeMode170+" clear="+clearRefraction+
+                        " detailMix202="+detailMix202+" view="+System.identityHashCode(view));
                     state.continuousShader.setFloatUniform("bounds",rect.left,rect.top,rect.width(),rect.height());
                     int visibilityTest=currentRefractionVisibilityTest();
                     // V1.9.93: mode 0 uses the exact proven mode-2 optical profile.
