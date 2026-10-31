@@ -5382,7 +5382,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("HOTSEAT_204_HOOK_READY");
         }catch(Throwable t){log("HOTSEAT_204_HOOK_FAILED "+t.getClass().getSimpleName());}
     }
-    // V1.9.205: lightweight edge optics over an actual icon drawable only.
+    // V1.9.205.1: lightweight edge optics over an actual icon drawable only.
     // Hook only Launcher icon TextViews, never create an overlay View or touch target.
     private static final Paint ICON_EDGE_205=new Paint(Paint.ANTI_ALIAS_FLAG);
     private static final java.util.Set<String> ICON_HOOK_CLASSES_205=new java.util.HashSet<String>();
@@ -5427,8 +5427,16 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 Class<?> cls=find(name,loader);
                 if(cls==null || !android.widget.TextView.class.isAssignableFrom(cls))continue;
                 if(!ICON_HOOK_CLASSES_205.add(cls.getName()))continue;
-                // Hook the concrete icon view's draw. Some OEM subclasses may override onDraw.
-                XposedBridge.hookAllMethods(cls,"onDraw",new XC_MethodHook(){
+                // Use the XposedBridge.hookMethod API provided by our compile-time stubs.
+                // Only hook a method declared on this concrete class; inherited draw
+                // implementations must not be hooked globally across unrelated TextViews.
+                java.lang.reflect.Method drawMethod;
+                try { drawMethod=cls.getDeclaredMethod("onDraw",Canvas.class); }
+                catch(NoSuchMethodException missing) {
+                    log("ICON_OPTICS_205_NO_OWN_DRAW "+name);
+                    continue;
+                }
+                XposedBridge.hookMethod(drawMethod,new XC_MethodHook(){
                     @Override protected void afterHookedMethod(MethodHookParam p){
                         try{
                             if(p.thisObject instanceof android.widget.TextView && p.args.length>0 && p.args[0] instanceof Canvas)

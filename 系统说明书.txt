@@ -1,4 +1,4 @@
-V1.9.205｜应用图标统一表面光学首轮适配版
+V1.9.205.1｜应用图标统一表面光学首轮适配版
 
 基于 V1.9.204 预览版；保留已通过实机确认的 Hotseat Dock 定位和绘制。
 新增对 Launcher BubbleTextView 的 onDraw Hook，尝试在图标实际 compound drawable 范围绘制轻量圆角光学描边，不覆盖文字，不新增触摸层。
@@ -7,3 +7,5 @@ V1.9.205｜应用图标统一表面光学首轮适配版
 当前 Dock 仍为半透明预览材质，未实现真实壁纸折射。
 V1.9.202 清晰折射、V1.9.203 Root 状态检查、V1.9.204 Dock 定位保留。
 推荐参数仅点击时应用，不自动覆盖用户设置。
+
+V1.9.205.1 编译修复：将图标 onDraw 的 hookAllMethods 调用替换为反射 getDeclaredMethod + hookMethod；未更改玻璃视觉参数。
