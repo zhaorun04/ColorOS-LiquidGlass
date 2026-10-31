@@ -5345,9 +5345,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         @Override public void setColorFilter(android.graphics.ColorFilter filter){}
         @Override public int getOpacity(){return android.graphics.PixelFormat.TRANSLUCENT;}
     }
+    private static volatile java.lang.ref.WeakReference<android.app.Activity> LAUNCHER_ACTIVITY_205=
+        new java.lang.ref.WeakReference<android.app.Activity>(null);
     private static void refreshLauncherOptics204(android.app.Activity activity){
         try{
             if(activity==null)return;
+            LAUNCHER_ACTIVITY_205=new java.lang.ref.WeakReference<android.app.Activity>(activity);
             refreshFromContext(activity);
             int id=activity.getResources().getIdentifier("hotseat","id","com.android.launcher");
             View hotseat=id==0?null:activity.findViewById(id);
@@ -5360,6 +5363,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }else if(hotseat.getBackground() instanceof DockBackground204){
                 hotseat.setBackground(DOCK_ORIGINAL_204.remove(hotseat));
             }
+            hotseat.invalidate();
             // The icon optics path is diagnostic-only until per-icon drawable bounds
             // are confirmed. Do not add a full-cell overlay that covers icon labels.
             if(diagnostics)log("HOTSEAT_204 bounds="+hotseat.getWidth()+"x"+hotseat.getHeight()+
@@ -5375,12 +5379,39 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 @Override protected void afterHookedMethod(MethodHookParam p){
                     if(p.thisObject instanceof android.app.Activity){
                         android.app.Activity a=(android.app.Activity)p.thisObject;
-                        a.getWindow().getDecorView().post(()->refreshLauncherOptics204(a));
+                        a.getWindow().getDecorView().post(()->{
+                            refreshLauncherOptics204(a);
+                            attachDockConfigObserver205(a);
+                        });
                     }
                 }
             });
             log("HOTSEAT_204_HOOK_READY");
         }catch(Throwable t){log("HOTSEAT_204_HOOK_FAILED "+t.getClass().getSimpleName());}
+    }
+    private static final java.util.Map<android.app.Activity,android.database.ContentObserver> DOCK_OBSERVERS_205=
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<android.app.Activity,android.database.ContentObserver>());
+    private static void attachDockConfigObserver205(android.app.Activity a){
+        if(DOCK_OBSERVERS_205.containsKey(a))return;
+        try{
+            android.os.Handler handler=new android.os.Handler(android.os.Looper.getMainLooper());
+            android.database.ContentObserver observer=new android.database.ContentObserver(handler){
+                @Override public void onChange(boolean selfChange){
+                    lastRead=0L;
+                    handler.postDelayed(()->{
+                        if(a.isFinishing() || a.isDestroyed())return;
+                        refreshLauncherOptics204(a);
+                    },350L);
+                }
+            };
+            a.getContentResolver().registerContentObserver(CONFIG,false,observer);
+            // Snapshot is asynchronously updated by the root helper.
+            a.getContentResolver().registerContentObserver(
+                android.provider.Settings.Global.getUriFor("liquidglass_config_snapshot"),
+                false,observer);
+            DOCK_OBSERVERS_205.put(a,observer);
+            log("DOCK_2052_CONFIG_OBSERVER_READY");
+        }catch(Throwable t){log("DOCK_2052_CONFIG_OBSERVER_FAILED "+t.getClass().getSimpleName());}
     }
     // V1.9.205.1: lightweight edge optics over an actual icon drawable only.
     // Hook only Launcher icon TextViews, never create an overlay View or touch target.
@@ -5405,12 +5436,15 @@ public final class HookEntry implements IXposedHookLoadPackage {
         float left=(v.getWidth()-w)*.5f;
         float top=v.getPaddingTop();
         if(top+h>v.getHeight())return;
-        float pad=Math.max(1f,density*.65f);
+        // V1.9.205.2: the old inset made the reflection visibly smaller
+        // than the actual icon. Place the stroke on the outer drawable bounds.
+        float stroke=Math.max(density*.8f,1f);
+        float pad=stroke*.5f;
         RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
         float corner=Math.min(r.width(),r.height())*.23f;
         ICON_EDGE_205.reset();ICON_EDGE_205.setAntiAlias(true);
         ICON_EDGE_205.setStyle(Paint.Style.STROKE);
-        ICON_EDGE_205.setStrokeWidth(Math.max(density*.7f,1f));
+        ICON_EDGE_205.setStrokeWidth(stroke);
         ICON_EDGE_205.setShader(new android.graphics.LinearGradient(r.left,r.top,r.right,r.bottom,
             new int[]{0x8AFFFFFF,0x24FFFFFF,0x00FFFFFF,0x50FFFFFF},null,
             android.graphics.Shader.TileMode.CLAMP));

@@ -7,7 +7,7 @@ android {
         minSdk 35
         targetSdk 28
         versionCode 192040
-        versionName '1.9.205-icon-optics-first-pass'
+        versionName '1.9.205.2-icon-edge-dock-toggle-fix'
     }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }

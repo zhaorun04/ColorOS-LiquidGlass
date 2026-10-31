@@ -1,11 +1,1 @@
-V1.9.205.1｜应用图标统一表面光学首轮适配版
-
-基于 V1.9.204 预览版；保留已通过实机确认的 Hotseat Dock 定位和绘制。
-新增对 Launcher BubbleTextView 的 onDraw Hook，尝试在图标实际 compound drawable 范围绘制轻量圆角光学描边，不覆盖文字，不新增触摸层。
-
-注意：ColorOS 15 OEM Launcher 可能使用自定义类或非 compound drawable 绘制。若日志 ICON_OPTICS_205_HOOK_CLASSES=0 或开启后无变化，说明未命中，需要 Vector 日志确认实际类；不能视为功能已完成。
-当前 Dock 仍为半透明预览材质，未实现真实壁纸折射。
-V1.9.202 清晰折射、V1.9.203 Root 状态检查、V1.9.204 Dock 定位保留。
-推荐参数仅点击时应用，不自动覆盖用户设置。
-
-V1.9.205.1 编译修复：将图标 onDraw 的 hookAllMethods 调用替换为反射 getDeclaredMethod + hookMethod；未更改玻璃视觉参数。
+V1.9.205.2 图标边缘与 Dock 开关修复版\n\n1. 修复应用图标光学边缘向内缩小的问题：描边贴合图标 Drawable 外边界。\n2. 修复 Dock 开关仅保存配置、不通知 Launcher 刷新的问题。\n3. Launcher 监听配置 Provider 与 Settings.Global 快照变更，重新读取 Dock 状态并刷新 Hotseat。\n4. 保留 V1.9.205.1 的其他功能。\n\n验证：需要 GitHub Actions 编译及 ColorOS 15 实机测试。\n
