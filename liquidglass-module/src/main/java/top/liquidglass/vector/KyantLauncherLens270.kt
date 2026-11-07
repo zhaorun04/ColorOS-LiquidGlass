@@ -427,6 +427,16 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_native_carrier_ab_28869", 0).coerceIn(0, 2)
         } catch (_: Throwable) { 0 }
+        // V288.74: 0 = baseline, 1 = small-delta bridge pixel-space correction.
+        // Only native carrier 1 consumes this switch; native carrier 2 stays unchanged.
+        val distanceAb28874 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_distance_ab_28874", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        val distanceTrace28874 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_distance_trace_28874", 0) == 1
+        } catch (_: Throwable) { false }
         val frameSync28822 = if (pipelineMode28819 == 2) try {
             Settings.Global.getInt(anchor.context.contentResolver, FRAME_SYNC_AB_28822_KEY, 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 } else 0
@@ -1039,6 +1049,61 @@ object KyantLauncherLens270 {
         if (frameTrace28873) XposedBridge.log(
             "KYANT28873_HOST host=${System.identityHashCode(anchor)} carrier=$nativeCarrierAb28869 " +
             "mode=$nativeSettleAb28870 diagnosticOnly=true maxRecords=180")
+        // V288.74: distance is measured relative to this host's first verified
+        // stationary position, NOT inferred from gesture pressure or velocity.
+        // This provisional home can become invalid after an actual page change;
+        // logs explicitly label its provenance. No sampling behaviour is changed.
+        var distanceHomeX28874 = Float.NaN
+        var distancePrevPreX28874 = Float.NaN
+        var distanceStillFrames28874 = 0
+        var distanceMaxExcursion28874 = 0f
+        var distanceLastPreDx28874 = 0f
+        var distancePreCount28874 = 0L
+        var distanceNativeCount28874 = 0L
+        fun distancePredraw28874(pos: Offset) {
+            if (!distanceTrace28874 || nativeCarrierAb28869 == 0) return
+            val dx = if (distancePrevPreX28874.isFinite()) pos.x - distancePrevPreX28874 else 0f
+            distancePrevPreX28874 = pos.x
+            distancePreCount28874++
+            distanceStillFrames28874 = if (kotlin.math.abs(dx) < 0.035f)
+                (distanceStillFrames28874 + 1).coerceAtMost(100) else 0
+            if (!distanceHomeX28874.isFinite() && distanceStillFrames28874 >= 8) {
+                distanceHomeX28874 = pos.x
+                XposedBridge.log("KYANT28874_HOME host=${System.identityHashCode(anchor)} " +
+                    "homeX=$distanceHomeX28874 source=first_stable_predraw provisional=true")
+            }
+            if (distanceHomeX28874.isFinite()) {
+                val residual = kotlin.math.abs(pos.x - distanceHomeX28874)
+                distanceMaxExcursion28874 = maxOf(distanceMaxExcursion28874, residual)
+                val reversed = dx * distanceLastPreDx28874 < -0.08f
+                if (distancePreCount28874 % 24L == 0L || reversed) {
+                    val band = when {
+                        distanceMaxExcursion28874 < 50f -> "SHORT_LT50"
+                        distanceMaxExcursion28874 < 180f -> "MID_50_180"
+                        else -> "LONG_GE180"
+                    }
+                    XposedBridge.log("KYANT28874_DISTANCE host=${System.identityHashCode(anchor)} " +
+                        "pre=$distancePreCount28874 homeX=$distanceHomeX28874 " +
+                        "x=${pos.x} dx=$dx residualPx=$residual " +
+                        "maxExcursionPx=$distanceMaxExcursion28874 band=$band " +
+                        "directionChanged=$reversed source=provisional_home")
+                }
+            }
+            if (kotlin.math.abs(dx) > 0.01f) distanceLastPreDx28874 = dx
+        }
+        fun distanceNative28874(path: String, pos: Offset, gen: Long) {
+            if (!distanceTrace28874 || nativeCarrierAb28869 == 0) return
+            distanceNativeCount28874++
+            if (distanceNativeCount28874 % 24L != 0L || !distanceHomeX28874.isFinite()) return
+            val residual = kotlin.math.abs(pos.x - distanceHomeX28874)
+            XposedBridge.log("KYANT28874_NATIVE_DISTANCE host=${System.identityHashCode(anchor)} " +
+                "path=$path gen=$gen homeX=$distanceHomeX28874 " +
+                "sampleX=${pos.x} residualPx=$residual maxExcursionPx=$distanceMaxExcursion28874")
+        }
+        if (distanceTrace28874 || distanceAb28874 != 0) XposedBridge.log(
+            "KYANT28874_HOST host=${System.identityHashCode(anchor)} " +
+            "carrier=$nativeCarrierAb28869 ab=$distanceAb28874 trace=$distanceTrace28874 " +
+            "home=first_stable_predraw maxPixelShift=8px")
         val settleProbe28872 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_settle_probe_28872", 0) == 1
@@ -1193,6 +1258,8 @@ object KyantLauncherLens270 {
                 if (frameSync28822 != 1 || nativeCarrierAb28869 == 1) sampleBridgeAt(pos)
                 if (nativeCarrierAb28869 == 1) traceNativeFrame28873(
                     "NATIVE_BITMAP_BRIDGE", this, pos, bridgeDrawCount.get())
+                if (nativeCarrierAb28869 == 1) distanceNative28874(
+                    "NATIVE_BITMAP_BRIDGE", pos, bridgeDrawCount.get())
                 releaseTrace28820("NATIVE_SAMPLE", pos, "draw=${count + 1L} bridgeW=${bridgeBitmap?.width} bridgeH=${bridgeBitmap?.height}")
                 // Mode 3: sample into exactly the same bridge Bitmap as mode 2,
                 // but render it in the native View's own Canvas (no Compose handoff).
@@ -1373,6 +1440,8 @@ object KyantLauncherLens270 {
                     width, height)
                 if (nativeCarrierAb28869 == 2) traceNativeFrame28873(
                     "NATIVE_VIEW_DIRECT", this, position, drawCount + 1L)
+                if (nativeCarrierAb28869 == 2) distanceNative28874(
+                    "NATIVE_VIEW_DIRECT", position, drawCount + 1L)
                 if (nativeCarrierAb28869 != 2 && displayIsolationMode != 1 && nativeLayerMode == 0)
                     canvas.drawLine(width * 0.5f, 0f, width * 0.5f, height.toFloat(), dividerPaint)
                 val now = SystemClock.elapsedRealtimeNanos()
@@ -1502,7 +1571,7 @@ object KyantLauncherLens270 {
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
-                nativeCarrierAb28869,
+                nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -1641,6 +1710,7 @@ object KyantLauncherLens270 {
                     anchor.getLocationOnScreen(locationScratch)
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
+                    distancePredraw28874(actualSample)
                     nativePredrawPosition28824 = actualSample
                     nativePredrawSerial28824++
                     if (frameTrace28873) {
@@ -2229,7 +2299,7 @@ object KyantLauncherLens270 {
         sourceMatrixAb28866: Int, currentComposeViewPosition28866: () -> Offset,
         zeroLensAb28868: Int, continuousMotionProbe28868: Boolean,
         continuousRun28868: java.util.concurrent.atomic.AtomicReference<Pair<Long, Long>>,
-        nativeCarrierAb28869: Int,
+        nativeCarrierAb28869: Int, distanceAb28874: Int, distanceTrace28874: Boolean,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -2536,9 +2606,31 @@ object KyantLauncherLens270 {
                             }
                         }
                     }
+                    // V288.74 A/B: If Compose consumes a bridge bitmap painted
+                    // for an earlier native position, translate its pixels by
+                    // the small coordinate delta. This does NOT freeze the source.
+                    // Keep mode 0 byte-for-byte equivalent to previous rendering.
+                    val published74 = bridgePublishedPosition.get()
+                    val lagX74 = if (published74 != null) drawPosition.x - published74.x else 0f
+                    val lagY74 = if (published74 != null) drawPosition.y - published74.y else 0f
+                    val canShift74 = nativeCarrierAb28869 == 1 && distanceAb28874 == 1 &&
+                        published74 != null && kotlin.math.abs(lagX74) <= 8f &&
+                        kotlin.math.abs(lagY74) <= 8f &&
+                        (kotlin.math.abs(lagX74) > 0.015f || kotlin.math.abs(lagY74) > 0.015f)
+                    // A bridge pixel at local x contains wallpaper(global publishedX+x).
+                    // For current global drawX, sample the bridge at x+(drawX-publishedX).
+                    // Shift the bitmap left by that delta, without any integer rounding.
                     drawIntoCanvas { canvas ->
-                        canvas.nativeCanvas.drawBitmap(bridgeBitmap, 0f, 0f, bitmapPaint)
+                        canvas.nativeCanvas.drawBitmap(bridgeBitmap,
+                            if (canShift74) -lagX74 else 0f,
+                            if (canShift74) -lagY74 else 0f, bitmapPaint)
                     }
+                    if (nativeCarrierAb28869 == 1 && distanceTrace28874 &&
+                        sourceDrawCount.get() % 24L == 0L) XposedBridge.log(
+                        "KYANT28874_CONSUME ab=$distanceAb28874 " +
+                        "sourceX=${drawPosition.x} publishedX=${published74?.x} " +
+                        "lagPx=$lagX74 lagYPx=$lagY74 compensated=$canShift74 " +
+                        "version=$version")
                     if (drawCadenceCount.get() % 240L == 0L)
                         XposedBridge.log("KYANT2889_COMPOSE_CONSUME version=$version mode=$bridgeSyncMode")
                 } else if (renderAbMode != 1 && (samplingMode == 1 || largeContinuousSource28830)) {

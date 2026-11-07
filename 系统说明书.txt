@@ -1,3 +1,25 @@
+ColorOS-LiquidGlass V1.9.205.288.74｜回弹距离关联与原生桥接消费位移补偿 A/B 实验版
+
+基于 V288.73。保留 V288.60 壁纸参考帧发布机制、Kyant 光学和模式 1 原生桥接背景路径。
+
+新增可选设置（默认全部关闭，需重新加载 Launcher）：
+  settings put global liquidglass_kyant_native_carrier_ab_28869 1
+  settings put global liquidglass_kyant_distance_trace_28874 1
+  settings put global liquidglass_kyant_distance_ab_28874 0  # 旧版消费路径
+  settings put global liquidglass_kyant_distance_ab_28874 1  # 新版小位移补偿实验
+
+对照条件：同一桌面同一个文件夹，短、中、长距离拖动后松手，并记录归位闪动的强弱。
+  logcat -d -v threadtime | grep -E "KYANT28874_(HOST|HOME|DISTANCE|NATIVE_DISTANCE|CONSUME)" | tail -100
+
+重要说明：
+1. HOME 仅代表 Host 的首次稳定 PreDraw 位置，是临时基准，不是 OEM 官方页面原点；翻页后旧基准可能不再适用。
+2. SHORT_LT50 / MID_50_180 / LONG_GE180 是单 Host 观察到的最大偏离分档，不能直接认定为手指拖动的精确松手距离。
+3. A/B=1 仅用于原生桥接模式 1；在 Compose 消费当前桥接 Bitmap 时，如果当前位置与 Bitmap 生成位置差在 ±8px 内，则在绘制 Bitmap 时做浮点像素平移补偿；其余情况维持旧逻辑。
+4. 补偿无法保证桥接 Bitmap 边缘区域覆盖，极端场景可能产生窄边瑕疵；此实验仅用于确认是否存在消费位置差，不应直接作为最终默认。
+5. A/B=0 完全不启用补偿；模式 2 不受 A/B 开关影响。
+6. 本版尚未完成完整 Android Gradle 编译及真机效果验收。
+
+===== 历史说明 =====
 ColorOS-LiquidGlass V1.9.205.288.73｜原生背景同绘制周期时序诊断版
 
 基于 V1.9.205.288.72。仅新增可选的帧级应用层诊断，不更改已有 Kyant 光学、壁纸参考帧发布、原生背景采样和重绘调度。
