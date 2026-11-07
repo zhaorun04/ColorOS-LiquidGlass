@@ -448,6 +448,28 @@ object KyantLauncherLens270 {
                 "liquidglass_kyant_page_distance_trace_28875", 0) == 1
         } catch (_: Throwable) { false }
         val bufferExperiment28875 = nativeCarrierAb28869 == 1 && bridgeBufferAb28875 == 1
+        // V288.76: 0=original translation-only bitmap sampling;
+        // 1=use the inverse FULL affine global View transform to map wallpaper
+        // into local pixels; 2=move the direct-native control into the root
+        // overlay, outside Workspace motion (requires native carrier 2).
+        // The overlay is a diagnostic and intentionally covers the glass/icon.
+        val transformAb28876 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_transform_ab_28876", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 }
+        val transformTrace28876 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_transform_trace_28876", 0) == 1
+        } catch (_: Throwable) { false }
+        val affineSampling28876 = transformAb28876 == 1 && nativeCarrierAb28869 in 1..2
+        val overlayRequested28876 = transformAb28876 == 2 && nativeCarrierAb28869 == 2
+        val overlayParent28876 = if (overlayRequested28876) root as? ViewGroup else null
+        val overlayActive28876 = overlayRequested28876 && overlayParent28876 != null
+        if (transformTrace28876 || transformAb28876 != 0) XposedBridge.log(
+            "KYANT28876_HOST host=${System.identityHashCode(anchor)} " +
+            "carrier=$nativeCarrierAb28869 mode=$transformAb28876 " +
+            "affine=$affineSampling28876 overlay=$overlayActive28876")
+
         val frameSync28822 = if (pipelineMode28819 == 2) try {
             Settings.Global.getInt(anchor.context.contentResolver, FRAME_SYNC_AB_28822_KEY, 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 } else 0
@@ -1297,11 +1319,68 @@ object KyantLauncherLens270 {
             "carrier=$nativeCarrierAb28869 filter=true floatDst=true " +
             "reference=${referenceState28832.value.width}x${referenceState28832.value.height}")
         val bridgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        // Draw a wallpaper source in local bitmap/View pixels from the exact
+        // current source-to-screen matrix. No integer rounding of its origin.
+        // This differs from the legacy translation-only rectangle if Launcher
+        // applies a scale, skew or rotation to Workspace or its descendants.
+        val affineGlobal28876 = Matrix()
+        val affineInverse28876 = Matrix()
+        val affineSource28876 = Matrix()
+        val affineScreen28876 = IntArray(2)
+        val affineWindow28876 = IntArray(2)
+        val affineValues28876 = FloatArray(9)
+        var affineDraws28876 = 0L
+        var affineFailed28876 = 0L
+        fun drawAffineWallpaper28876(target: Canvas, carrier: View, image: Bitmap, path: String): Boolean {
+            try {
+                affineGlobal28876.reset()
+                carrier.transformMatrixToGlobal(affineGlobal28876)
+                if (!affineGlobal28876.invert(affineInverse28876)) {
+                    affineFailed28876++
+                    return false
+                }
+                root.getLocationOnScreen(affineScreen28876)
+                root.getLocationInWindow(affineWindow28876)
+                val screenW = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
+                val screenH = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
+                // source Bitmap -> physical screen -> window -> carrier local.
+                // transformMatrixToGlobal() returns window coordinates.
+                affineSource28876.reset()
+                affineSource28876.setScale(screenW.toFloat() / image.width.coerceAtLeast(1),
+                    screenH.toFloat() / image.height.coerceAtLeast(1))
+                affineSource28876.postTranslate(
+                    -(affineScreen28876[0] - affineWindow28876[0]).toFloat(),
+                    -(affineScreen28876[1] - affineWindow28876[1]).toFloat())
+                affineSource28876.postConcat(affineInverse28876)
+                val checkpoint = target.save()
+                target.drawBitmap(image, affineSource28876, bridgePaint)
+                target.restoreToCount(checkpoint)
+                affineDraws28876++
+                if (transformTrace28876 && affineDraws28876 % 48L == 1L) {
+                    affineGlobal28876.getValues(affineValues28876)
+                    XposedBridge.log("KYANT28876_AFFINE host=${System.identityHashCode(anchor)} " +
+                        "path=$path draws=$affineDraws28876 " +
+                        "scaleX=${affineValues28876[Matrix.MSCALE_X]} " +
+                        "skewX=${affineValues28876[Matrix.MSKEW_X]} " +
+                        "scaleY=${affineValues28876[Matrix.MSCALE_Y]} " +
+                        "skewY=${affineValues28876[Matrix.MSKEW_Y]} " +
+                        "tx=${affineValues28876[Matrix.MTRANS_X]} " +
+                        "failures=$affineFailed28876")
+                }
+                return true
+            } catch (t: Throwable) {
+                affineFailed28876++
+                if (affineFailed28876 < 5L) XposedBridge.log(
+                    "KYANT28876_AFFINE_ERROR path=$path error=${t.javaClass.simpleName}")
+                return false
+            }
+        }
+
         val bridgeDst = RectF()
         val bridgeCanvas = bridgeBitmap?.let { Canvas(it) }
         val bridgeExtraCanvas28875 = bridgeExtraBitmap28875?.let { Canvas(it) }
         var bridgeLastReference28875: Bitmap? = null
-        fun sampleBridgeAt(pos: Offset) {
+        fun sampleBridgeAt(pos: Offset, carrier28876: View? = null) {
             val bitmap = if (bufferExperiment28875) bridgeBack28875 else bridgeBitmap
             if (bitmap == null) return
             val target = if (bufferExperiment28875) {
@@ -1323,7 +1402,10 @@ object KyantLauncherLens270 {
                 (activeReference.width - x) * bitmap.width / cropW.coerceAtLeast(.001f),
                 (activeReference.height - y) * bitmap.height / cropH.coerceAtLeast(.001f))
             target.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
-            target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
+            if (!(affineSampling28876 && carrier28876 != null &&
+                    drawAffineWallpaper28876(target, carrier28876, activeReference, "BRIDGE"))) {
+                target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
+            }
             val gen = bridgeDrawCount.incrementAndGet()
             if (bufferExperiment28875) {
                 val oldFront = bridgeFront28875.value
@@ -1353,7 +1435,7 @@ object KyantLauncherLens270 {
                     nativeCarrierDrawPosition28870(this, oldPos, "NATIVE_BITMAP_BRIDGE") else oldPos
                 // V288.22 mode 1: Compose draw itself samples the reference frame.
                 // Do not publish an independent native Bitmap frame first.
-                if (frameSync28822 != 1 || nativeCarrierAb28869 == 1) sampleBridgeAt(pos)
+                if (frameSync28822 != 1 || nativeCarrierAb28869 == 1) sampleBridgeAt(pos, this)
                 if (nativeCarrierAb28869 == 1) traceNativeFrame28873(
                     "NATIVE_BITMAP_BRIDGE", this, pos, bridgeDrawCount.get())
                 if (nativeCarrierAb28869 == 1) distanceNative28874(
@@ -1403,6 +1485,21 @@ object KyantLauncherLens270 {
         // V288.7: native Canvas reference, intentionally ABOVE Kyant on the LEFT half
         // only. Right half stays the unmodified Compose/Kyant optical renderer.
         // This is an A/B diagnostic, NOT the final hybrid optical implementation.
+        var overlayInstalled28876 = false
+        val overlayMatrix28876 = Matrix()
+        val overlayOrigin28876 = FloatArray(2)
+        val overlayRootScreen28876 = IntArray(2)
+        val overlayRootWindow28876 = IntArray(2)
+        fun nativeCarrierDrawPosition28876(view: View, fallback: Offset): Offset = try {
+            overlayMatrix28876.reset()
+            view.transformMatrixToGlobal(overlayMatrix28876)
+            overlayOrigin28876[0] = 0f; overlayOrigin28876[1] = 0f
+            overlayMatrix28876.mapPoints(overlayOrigin28876)
+            root.getLocationOnScreen(overlayRootScreen28876)
+            root.getLocationInWindow(overlayRootWindow28876)
+            Offset(overlayOrigin28876[0] + overlayRootScreen28876[0] - overlayRootWindow28876[0],
+                overlayOrigin28876[1] + overlayRootScreen28876[1] - overlayRootWindow28876[1])
+        } catch (_: Throwable) { fallback }
         val nativeSampleView = if (nativeCarrierAb28869 == 2 ||
             (nativeCompareMode == 1 && nativeBridgeMode == 0 && displayIsolationMode == 0) ||
             displayIsolationMode == 1 || nativeLayerMode in 1..3) object : View(anchor.context) {
@@ -1444,7 +1541,9 @@ object KyantLauncherLens270 {
                         catch (_: Throwable) { nativePredrawPosition28824 }
                     else -> nativePredrawPosition28824
                 }
-                val position = if (nativeCarrierAb28869 == 2)
+                val position = if (overlayInstalled28876) {
+                    nativeCarrierDrawPosition28876(this, basePosition28870)
+                } else if (nativeCarrierAb28869 == 2)
                     nativeCarrierDrawPosition28870(this, basePosition28870, "NATIVE_VIEW_DIRECT")
                     else basePosition28870
                 if (releaseTrace28820) releaseTrace28820("COORD28826", position,
@@ -1531,7 +1630,10 @@ object KyantLauncherLens270 {
                 } else {
                     canvas.clipRect(0f, 0f, width * 0.5f, height.toFloat())
                 }
-                canvas.drawBitmap(activeReference, null, destination, bitmapPaint)
+                if (!(affineSampling28876 &&
+                        drawAffineWallpaper28876(canvas, this, activeReference, "DIRECT"))) {
+                    canvas.drawBitmap(activeReference, null, destination, bitmapPaint)
+                }
                 canvas.restoreToCount(checkpoint)
                 if (nativeCarrierAb28869 == 2) recordNativeSettle28872(
                     "NATIVE_VIEW_DIRECT", position, activeReference, drawCount + 1L,
@@ -1559,6 +1661,23 @@ object KyantLauncherLens270 {
                 lastX = position.x; lastY = position.y
             }
         }.apply { isClickable = false; isFocusable = false; setWillNotDraw(false) } else null
+        // Root overlay native-only control: no Workspace parent transform.
+        // Only mode 2 with native carrier 2 requests this, and removal is
+        // guaranteed during dispose. Wallpaper updates keep native invalidation.
+        val overlayRootLocation28876 = IntArray(2)
+        fun positionOverlay28876(pos: Offset) {
+            if (!overlayInstalled28876) return
+            val view = nativeSampleView ?: return
+            root.getLocationOnScreen(overlayRootLocation28876)
+            val nextX = pos.x - overlayRootLocation28876[0]
+            val nextY = pos.y - overlayRootLocation28876[1]
+            if (kotlin.math.abs(view.translationX - nextX) > 0.0001f ||
+                kotlin.math.abs(view.translationY - nextY) > 0.0001f) {
+                view.translationX = nextX
+                view.translationY = nextY
+                view.postInvalidateOnAnimation()
+            }
+        }
         var recomposer: Recomposer? = null
         var scope: CoroutineScope? = null
         fun restoreRebound28818(reason: String) {
@@ -1605,6 +1724,10 @@ object KyantLauncherLens270 {
             try { treeDrawListener28865?.let { if (root.viewTreeObserver.isAlive) root.viewTreeObserver.removeOnDrawListener(it) } } catch (_: Throwable) {}
             try { detachListener?.let { anchor.removeOnAttachStateChangeListener(it) } } catch (_: Throwable) {}
             try { layoutListener?.let { anchor.removeOnLayoutChangeListener(it) } } catch (_: Throwable) {}
+            if (overlayInstalled28876) try {
+                overlayParent28876?.overlay?.remove(nativeSampleView!!)
+                overlayInstalled28876 = false
+            } catch (_: Throwable) {}
             try { compose.disposeComposition() } catch (t: Throwable) {
                 XposedBridge.log("KYANT2885_DISPOSE_COMPOSE_ERROR " + t.javaClass.simpleName)
             }
@@ -1653,13 +1776,23 @@ object KyantLauncherLens270 {
             bridgeView?.let { frame.addView(it, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
             // V288.12: modes 2/3 put stable native Canvas BELOW Compose.
-            if (nativeLayerMode in 2..3) nativeSampleView?.let { frame.addView(it,
+            if (!overlayActive28876 && nativeLayerMode in 2..3) nativeSampleView?.let { frame.addView(it,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
             frame.addView(compose, FrameLayout.LayoutParams(previewWidth, previewHeight))
             // Mode 1 is a control: native fully covers Compose, same as V288.11 A.
-            if (nativeLayerMode !in 2..3) nativeSampleView?.let { frame.addView(it,
+            if (!overlayActive28876 && nativeLayerMode !in 2..3) nativeSampleView?.let { frame.addView(it,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
 
+            if (overlayActive28876 && nativeSampleView != null) try {
+                nativeSampleView.layout(0, 0, previewWidth, previewHeight)
+                overlayParent28876?.overlay?.add(nativeSampleView)
+                overlayInstalled28876 = true
+                positionOverlay28876(glassScreenPosition(lastBounds))
+                XposedBridge.log("KYANT28876_OVERLAY_ATTACHED host=$trace28815Host " +
+                    "width=$previewWidth height=$previewHeight")
+            } catch (t: Throwable) {
+                XposedBridge.log("KYANT28876_OVERLAY_ERROR ${t.javaClass.simpleName}")
+            }
             compose.setContent { LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
                 displayWidth, displayHeight, samplePosition, sampleRadiusPx.floatValue, effectiveSamplingMode28862,
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
@@ -1809,6 +1942,7 @@ object KyantLauncherLens270 {
                     anchor.getLocationOnScreen(locationScratch)
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
+                    if (overlayInstalled28876) positionOverlay28876(actualSample)
                     distancePredraw28874(actualSample)
                     traceDistance28875(actualSample)
                     nativePredrawPosition28824 = actualSample

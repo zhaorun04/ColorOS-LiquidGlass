@@ -1,3 +1,59 @@
+ColorOS-LiquidGlass V1.9.205.288.76｜父层仿射变换与根覆盖层诊断实验版
+
+【版本目标】
+保留 V288.60 壁纸即时同步，以及 V288.69 模式1的完整 Kyant 光学效果。
+V288.75 单缓冲和双缓冲在归位闪动方面真机视觉基本一样，本版不再增加缓冲。
+
+【新增 A/B】
+设置键：liquidglass_kyant_transform_ab_28876
+0：原始平移式原生背景采样（基线）。
+1：完整仿射逆矩阵壁纸采样。对原生桥接模式1和纯原生模式2生效；不改变 Kyant Shader。
+   在 Canvas 生成背景时使用当前承载 View 全局矩阵的逆矩阵，处理父层缩放／倾斜／旋转；
+   当原始矩阵不可逆或出错时自动回退为原有 RectF 采样。建议首先测试原生背景模式1。
+2：仅当原生背景模式2时，将原生背景放置于 Launcher 根覆盖层，脱离文件夹的 Workspace 父链。
+   该模式只作诊断，背景可覆盖文件夹图标、Dock 等其他桌面内容，不包含完整 Kyant 透镜；
+   不应长期作为日用模式。根覆盖层不存在时自动回退为普通原生 View。
+
+诊断：liquidglass_kyant_transform_trace_28876，设为1启用。
+日志：KYANT28876_HOST / KYANT28876_AFFINE / KYANT28876_OVERLAY_ATTACHED / KYANT28876_OVERLAY_ERROR
+
+【测试步骤】
+先关闭旧实验：
+su -c 'settings put global liquidglass_kyant_bridge_buffer_ab_28875 0; settings put global liquidglass_kyant_page_distance_trace_28875 0; settings put global liquidglass_kyant_distance_ab_28874 0'
+
+基线：
+su -c 'settings put global liquidglass_kyant_native_carrier_ab_28869 1; settings put global liquidglass_kyant_transform_ab_28876 0; settings put global liquidglass_kyant_transform_trace_28876 1'
+重新加载 Launcher，测试短／长距离、不翻页归位和翻页归位。
+
+仿射：
+su -c settings put global liquidglass_kyant_transform_ab_28876 1
+重新加载 Launcher，保持 carrier=1 对照 Kyant 透镜与闪动。
+
+隔离对照（原生背景无 Kyant，仅用于定位，覆盖层可能遮住图标）：
+su -c 'settings put global liquidglass_kyant_native_carrier_ab_28869 2; settings put global liquidglass_kyant_transform_ab_28876 2'
+重新加载 Launcher。若覆盖层有视觉副作用，立即设置 transform_ab 为0 并重新加载。
+
+日志：
+su -c 'logcat -d -v threadtime | grep -E "KYANT28876_(HOST|AFFINE|AFFINE_ERROR|OVERLAY_ATTACHED|OVERLAY_ERROR)" | tail -80'
+
+关闭实验：
+su -c 'settings put global liquidglass_kyant_native_carrier_ab_28869 1; settings put global liquidglass_kyant_transform_ab_28876 0; settings put global liquidglass_kyant_transform_trace_28876 0'
+重新加载 Launcher 生效。
+
+【工程、兼容及验证】
+本版默认 transform_ab=0，不改变既有渲染行为。所有实验开关只在创建 Host 时读取，需重新加载 Launcher。
+未修改 Root 壁纸发布链路、Kyant Shader 或 Dock 透镜参数。
+ZIP 已执行完整性检查和源码结构静态检查；尚未完成完整 Android Gradle 编译、GPU 合成帧级验证或真机视觉验收。
+本版实验不应被理解为已经修复归位闪动。
+
+【Termux Git】
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.76 版本"
+git push origin main
+
+---
+
 ColorOS-LiquidGlass V1.9.205.288.74｜回弹距离关联与原生桥接消费位移补偿 A/B 实验版
 
 基于 V288.73。保留 V288.60 壁纸参考帧发布机制、Kyant 光学和模式 1 原生桥接背景路径。
