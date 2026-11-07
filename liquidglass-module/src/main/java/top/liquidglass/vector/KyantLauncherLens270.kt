@@ -437,6 +437,17 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_distance_trace_28874", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.75: 0 = legacy mutable single bridge, 1 = two-buffer handoff.
+        // Applies ONLY to native carrier 1 and does not alter direct native mode 2.
+        val bridgeBufferAb28875 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_buffer_ab_28875", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        val distanceTrace28875 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_page_distance_trace_28875", 0) == 1
+        } catch (_: Throwable) { false }
+        val bufferExperiment28875 = nativeCarrierAb28869 == 1 && bridgeBufferAb28875 == 1
         val frameSync28822 = if (pipelineMode28819 == 2) try {
             Settings.Global.getInt(anchor.context.contentResolver, FRAME_SYNC_AB_28822_KEY, 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 } else 0
@@ -913,6 +924,17 @@ object KyantLauncherLens270 {
         // This tests input compatibility; it does NOT guarantee same-frame sync.
         val bridgeBitmap = if (nativeBridgeMode == 1) Bitmap.createBitmap(
             previewWidth.coerceAtLeast(1), previewHeight.coerceAtLeast(1), Bitmap.Config.ARGB_8888) else null
+        // In experimental carrier mode 1, the producer paints the *inactive*
+        // Bitmap. The UI thread publishes that Bitmap plus its position as one
+        // generation, then rotates the front/back references. The old front is
+        // reused at the next native draw; no GPU completion fence is promised.
+        val bridgeExtraBitmap28875 = if (bufferExperiment28875 && bridgeBitmap != null)
+            Bitmap.createBitmap(bridgeBitmap.width, bridgeBitmap.height, Bitmap.Config.ARGB_8888)
+            else null
+        val bridgeFront28875 = androidx.compose.runtime.mutableStateOf<Bitmap?>(bridgeBitmap)
+        var bridgeBack28875: Bitmap? = bridgeExtraBitmap28875
+        val bridgeFrontGen28875 = androidx.compose.runtime.mutableLongStateOf(0L)
+        val bridgeFrontPosition28875 = androidx.compose.runtime.mutableStateOf<Offset?>(null)
         val bridgeVersion = androidx.compose.runtime.mutableIntStateOf(0)
         val bridgePublishedPosition = java.util.concurrent.atomic.AtomicReference<Offset?>(null)
         val bridgeDrawCount = java.util.concurrent.atomic.AtomicLong(0L)
@@ -1104,6 +1126,62 @@ object KyantLauncherLens270 {
             "KYANT28874_HOST host=${System.identityHashCode(anchor)} " +
             "carrier=$nativeCarrierAb28869 ab=$distanceAb28874 trace=$distanceTrace28874 " +
             "home=first_stable_predraw maxPixelShift=8px")
+        // V288.75 distance probe. A one-page scroll can shift EVERY host by
+        // exactly root.width; that is not a 1217px drag-return excursion.
+        // This measures shortest page-equivalent displacement from the initial
+        // stationary anchor, with a fresh episode for each rest-to-motion run.
+        var d75Home = Float.NaN
+        var d75Last = Float.NaN
+        var d75Still = 0
+        var d75Peak = 0f
+        var d75Episode = 0L
+        var d75WasMoving = false
+        var d75Frame = 0L
+        val d75PageWidth = displayWidth.toFloat().coerceAtLeast(1f)
+        fun traceDistance28875(pos: Offset) {
+            if (!distanceTrace28875 || nativeCarrierAb28869 == 0) return
+            d75Frame++
+            val dx = if (d75Last.isFinite()) pos.x - d75Last else 0f
+            d75Last = pos.x
+            val stable = kotlin.math.abs(dx) < 0.035f
+            d75Still = if (stable) (d75Still + 1).coerceAtMost(100) else 0
+            if (!d75Home.isFinite() && d75Still >= 8) {
+                d75Home = pos.x
+                XposedBridge.log("KYANT28875_PAGE_HOME host=${System.identityHashCode(anchor)} " +
+                    "homeX=$d75Home pageWidth=$d75PageWidth method=stationary_mod_page")
+            }
+            if (!d75Home.isFinite()) return
+            val absoluteDelta = pos.x - d75Home
+            val pageShift = kotlin.math.round(absoluteDelta / d75PageWidth).toInt()
+            val localDelta = absoluteDelta - pageShift * d75PageWidth
+            val localDistance = kotlin.math.abs(localDelta)
+            val moving = kotlin.math.abs(dx) >= .035f
+            if (moving && !d75WasMoving) {
+                d75Episode++
+                d75Peak = 0f
+            }
+            if (moving) d75Peak = maxOf(d75Peak, localDistance)
+            if ((d75Frame % 24L == 0L && (moving || d75Still < 12)) ||
+                (!moving && d75WasMoving && d75Still == 1)) {
+                val band = when {
+                    d75Peak < 50f -> "SHORT_LT50"
+                    d75Peak < 180f -> "MID_50_180"
+                    else -> "LONG_GE180"
+                }
+                XposedBridge.log("KYANT28875_PAGE_DISTANCE host=${System.identityHashCode(anchor)} " +
+                    "episode=$d75Episode pageShift=$pageShift pageWidth=$d75PageWidth " +
+                    "homeX=$d75Home x=${pos.x} dx=$dx " +
+                    "localDeltaPx=$localDelta localDistancePx=$localDistance " +
+                    "peakPx=$d75Peak band=$band still=$d75Still " +
+                    "source=page_wrapped_provisional_home")
+            }
+            d75WasMoving = moving
+        }
+        if (distanceTrace28875 || bufferExperiment28875) XposedBridge.log(
+            "KYANT28875_HOST host=${System.identityHashCode(anchor)} " +
+            "carrier=$nativeCarrierAb28869 bufferAb=$bridgeBufferAb28875 " +
+            "distanceTrace=$distanceTrace28875 pageWidth=$d75PageWidth " +
+            "twoBuffers=${bridgeExtraBitmap28875 != null}")
         val settleProbe28872 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_settle_probe_28872", 0) == 1
@@ -1221,9 +1299,15 @@ object KyantLauncherLens270 {
         val bridgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val bridgeDst = RectF()
         val bridgeCanvas = bridgeBitmap?.let { Canvas(it) }
+        val bridgeExtraCanvas28875 = bridgeExtraBitmap28875?.let { Canvas(it) }
+        var bridgeLastReference28875: Bitmap? = null
         fun sampleBridgeAt(pos: Offset) {
-            val bitmap = bridgeBitmap ?: return
-            val target = bridgeCanvas ?: return
+            val bitmap = if (bufferExperiment28875) bridgeBack28875 else bridgeBitmap
+            if (bitmap == null) return
+            val target = if (bufferExperiment28875) {
+                if (bitmap === bridgeExtraBitmap28875) bridgeExtraCanvas28875 else bridgeCanvas
+            } else bridgeCanvas
+            if (target == null) return
             val activeReference = referenceState28832.value
             if (activeReference.isRecycled) return
             val sw = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
@@ -1240,8 +1324,22 @@ object KyantLauncherLens270 {
                 (activeReference.height - y) * bitmap.height / cropH.coerceAtLeast(.001f))
             target.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
             target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
-            bridgePublishedPosition.set(pos)
             val gen = bridgeDrawCount.incrementAndGet()
+            if (bufferExperiment28875) {
+                val oldFront = bridgeFront28875.value
+                // All three updates happen synchronously on Launcher UI thread.
+                // The consumer uses the snapshot state-selected front Bitmap.
+                bridgeFrontPosition28875.value = pos
+                bridgeFrontGen28875.longValue = gen
+                bridgeFront28875.value = bitmap
+                bridgeBack28875 = oldFront
+                if (gen % 48L == 0L) XposedBridge.log(
+                    "KYANT28875_BUFFER_PUBLISH gen=$gen front=${System.identityHashCode(bitmap)} " +
+                    "back=${System.identityHashCode(oldFront)} x=${pos.x} " +
+                    "referenceChanged=${bridgeLastReference28875 !== activeReference}")
+            }
+            bridgeLastReference28875 = activeReference
+            bridgePublishedPosition.set(pos)
             recordNativeSettle28872("NATIVE_BITMAP_BRIDGE", pos, activeReference, gen,
                 bitmap.width, bitmap.height)
         }
@@ -1572,6 +1670,7 @@ object KyantLauncherLens270 {
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
+                bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -1711,6 +1810,7 @@ object KyantLauncherLens270 {
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
                     distancePredraw28874(actualSample)
+                    traceDistance28875(actualSample)
                     nativePredrawPosition28824 = actualSample
                     nativePredrawSerial28824++
                     if (frameTrace28873) {
@@ -2300,6 +2400,10 @@ object KyantLauncherLens270 {
         zeroLensAb28868: Int, continuousMotionProbe28868: Boolean,
         continuousRun28868: java.util.concurrent.atomic.AtomicReference<Pair<Long, Long>>,
         nativeCarrierAb28869: Int, distanceAb28874: Int, distanceTrace28874: Boolean,
+        bufferExperiment28875: Boolean,
+        bridgeFront28875: androidx.compose.runtime.State<Bitmap?>,
+        bridgeFrontGen28875: androidx.compose.runtime.State<Long>,
+        bridgeFrontPosition28875: androidx.compose.runtime.State<Offset?>,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -2620,11 +2724,26 @@ object KyantLauncherLens270 {
                     // A bridge pixel at local x contains wallpaper(global publishedX+x).
                     // For current global drawX, sample the bridge at x+(drawX-publishedX).
                     // Shift the bitmap left by that delta, without any integer rounding.
-                    drawIntoCanvas { canvas ->
-                        canvas.nativeCanvas.drawBitmap(bridgeBitmap,
+                    // Mode 1: consume the *published front* instead of the bitmap
+                    // that native sampling may already have repainted. Inactive
+                    // bridge buffers alternate on each native onDraw callback.
+                    val visibleBridge75 = if (bufferExperiment28875)
+                        bridgeFront28875.value else bridgeBitmap
+                    val visibleGen75 = if (bufferExperiment28875)
+                        bridgeFrontGen28875.value else version.toLong()
+                    val visiblePosition75 = if (bufferExperiment28875)
+                        bridgeFrontPosition28875.value else published74
+                    if (visibleBridge75 != null) drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.drawBitmap(visibleBridge75,
                             if (canShift74) -lagX74 else 0f,
                             if (canShift74) -lagY74 else 0f, bitmapPaint)
                     }
+                    if (bufferExperiment28875 && sourceDrawCount.get() % 24L == 0L)
+                        XposedBridge.log("KYANT28875_BUFFER_CONSUME gen=$visibleGen75 " +
+                            "front=${System.identityHashCode(visibleBridge75)} " +
+                            "sampleX=${drawPosition.x} pubX=${visiblePosition75?.x} " +
+                            "positionGapPx=${visiblePosition75?.let { drawPosition.x - it.x }} " +
+                            "bridgeVersion=$version")
                     if (nativeCarrierAb28869 == 1 && distanceTrace28874 &&
                         sourceDrawCount.get() % 24L == 0L) XposedBridge.log(
                         "KYANT28874_CONSUME ab=$distanceAb28874 " +

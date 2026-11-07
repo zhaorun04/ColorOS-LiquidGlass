@@ -217,3 +217,15 @@ V1.9.205.288.72｜归位连续绘制与真实浮点目标矩形诊断
 - maxTargetDriftPx 验证浮点目标矩形的数学映射精度；pixelCrossings 是正常整数像素边界穿越，不代表实际视觉错误；referenceSwitches 统计参考位图对象替换。
 - 此诊断不能测量 SurfaceFlinger 最终显示时序、像素混合真实结果，也不能凭日志单独证明闪动根因。
 - 本版不改变绘制方式，不增添无效的浮点开关，不更改 Shader，不每帧输出日志。
+
+
+V1.9.205.288.75｜页面归位距离校正与双桥接位图 A/B
+- 继承 V288.60 壁纸即时同步，V288.69 模式1 Kyant 光学外观。
+- 模式1 开关：settings put global liquidglass_kyant_native_carrier_ab_28869 1。
+- 双缓冲 A/B：settings put global liquidglass_kyant_bridge_buffer_ab_28875 0（旧单缓冲，默认）或 1（双缓冲实验）。重载 Launcher 生效。
+- 双缓冲的原生生产者总是绘制到非前台桥接 Bitmap，绘制完成后同步更新前台 Bitmap、代际和采样位置，再由 Compose 使用前台 Bitmap。它不提供 GPU 栅栏，不能保证硬件最终合成无闪动。
+- 距离诊断：settings put global liquidglass_kyant_page_distance_trace_28875 1 开启，0 关闭（默认）。通过屏幕宽度做 page-wrap，将可能的整页偏移与局部位移区分；基准为首次静止点，只是实验性观测，翻页/特殊 OEM 非整页宽仍可能误差。
+- 日志关键词：KYANT28875_HOST / KYANT28875_PAGE_HOME / KYANT28875_PAGE_DISTANCE / KYANT28875_BUFFER_PUBLISH / KYANT28875_BUFFER_CONSUME。
+- 正确对照方式：保留 native_carrier_ab_28869=1，先 buffer_ab_28875=0 测短/中/长距离；再 buffer_ab_28875=1 重载 Launcher 测相同动作。模式2是原生 View 直接绘制的控制组，不受双缓冲开关影响。
+- 为排除干扰，建议旧 distance_ab_28874=0、distance_trace_28874=0、frame_trace_28873=0。
+- 已做源码结构与 ZIP 校验；未完成实际 Android Gradle/Kotlin 编译及真机验收。
