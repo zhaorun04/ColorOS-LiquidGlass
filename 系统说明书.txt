@@ -1,3 +1,37 @@
+ColorOS-LiquidGlass V1.9.205.288.82｜AndroidView 四源位置对照实验版
+
+继承 V288.81。所有模式均使用 Launcher 根 FrameLayout 以及同一原始壁纸 Bitmap。
+-1：退出实验，恢复 V288.81 既有路径
+0：根容器纯原生 View + Canvas（稳定对照）
+1：ComposeView 内 AndroidView 使用 onDraw 时原生实时位置（V288.81 模式2等效）
+2：同一个 AndroidView 使用 Compose State 已提交位置
+3：同一个 AndroidView 使用根 Host Frame 的实时全局矩阵位置
+4：同一个 AndroidView 使用最近 PreDraw 位置快照；快照超过50ms自动回退实时位置
+
+开关：
+  liquidglass_kyant_position_pipeline_28882=-1..4
+  liquidglass_kyant_position_trace_28882=1 打开节流日志，0 关闭
+测试前建议：
+  liquidglass_kyant_native_carrier_ab_28869=1
+  liquidglass_kyant_node_pipeline_28881=-1
+  liquidglass_kyant_bitmap_pipeline_28880=-1
+  liquidglass_kyant_root_pipeline_28879=-1
+  liquidglass_kyant_root_compare_ab_28878=0
+  liquidglass_kyant_full_overlay_ab_28877=0
+  liquidglass_kyant_transform_ab_28876=0
+  liquidglass_kyant_bridge_buffer_ab_28875=0
+  liquidglass_kyant_root_icons_28878=0
+
+日志：KYANT28882_POSITION_HOST / KYANT28882_ANDROIDVIEW_DRAW
+每条 DRAW 记录在同一 onDraw 同时采集 native/Compose State/Host/PreDraw 的位置，
+并记录实际使用的 usedX、预绘制快照年龄和位置差。
+请在稳定时及短/长距离归位期间比较，不要将位置读取差值直接解释为最终合成错位。
+模式2可能导致明显采样延迟；如异常将开关设回0或-1并重启 Launcher。
+此实验不包含 Kyant 光学折射，不能作为最终玻璃修复。
+
+工程静态检查及 ZIP 校验完成；完整 Gradle/Kotlin 编译与真机验证未执行。
+
+-----
 ColorOS-LiquidGlass V1.9.205.288.81｜ComposeView 图层与 RenderNode 承载隔离实验版
 
 新诊断设置（-1 关闭，默认沿用旧实现）：

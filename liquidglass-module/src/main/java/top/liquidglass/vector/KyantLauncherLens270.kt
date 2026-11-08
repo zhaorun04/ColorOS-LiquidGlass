@@ -525,12 +525,24 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_node_trace_28881", 0) == 1
         } catch (_: Throwable) { false }
-        val rootDirect28878 = (if (nodePipeline28881 >= 0) nodePipeline28881 == 0
+        // V288.82: same AndroidView painter, four position sources. The stable
+        // root-native control is stage 0, -1 keeps the previous production path.
+        val positionPipeline28882 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_position_pipeline_28882", -1).coerceIn(-1, 4)
+        } catch (_: Throwable) { -1 }
+        val positionTrace28882 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_position_trace_28882", 0) == 1
+        } catch (_: Throwable) { false }
+        val rootDirect28878 = (if (positionPipeline28882 >= 0) positionPipeline28882 == 0
+            else if (nodePipeline28881 >= 0) nodePipeline28881 == 0
             else if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 0..1
             else if (rootPipeline28879 >= 0) rootPipeline28879 == 0
             else rootCompareAb28878 == 1) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val rootFullKyant28878 = (if (nodePipeline28881 >= 0) nodePipeline28881 in 1..4
+        val rootFullKyant28878 = (if (positionPipeline28882 >= 0) positionPipeline28882 in 1..4
+            else if (nodePipeline28881 >= 0) nodePipeline28881 in 1..4
             else if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 2..4
             else if (rootPipeline28879 >= 0) rootPipeline28879 in 1..4
             else rootCompareAb28878 == 2) && nativeCarrierAb28869 == 1 &&
@@ -1972,6 +1984,10 @@ object KyantLauncherLens270 {
                 frame.addView(iconForward, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             }
+            if (positionPipeline28882 >= 0 && positionTrace28882) XposedBridge.log(
+                "KYANT28882_POSITION_HOST host=$trace28815Host stage=$positionPipeline28882 " +
+                "root=$fullOverlayActive28877 native=$rootDirect28878 " +
+                "compose=$rootFullKyant28878 bridge=${bridgeBitmap != null}")
             if (nodePipeline28881 >= 0 && nodeTrace28881) XposedBridge.log(
                 "KYANT28881_NODE_HOST host=$trace28815Host node=$nodePipeline28881 " +
                 "native=$rootDirect28878 compose=$rootFullKyant28878 " +
@@ -2014,6 +2030,8 @@ object KyantLauncherLens270 {
                 rootPipeline28879, rootPipelineTrace28879,
                 bitmapPipeline28880, bitmapTrace28880, immutableBridge28880, immutableGen28880,
                 nodePipeline28881, nodeTrace28881,
+                positionPipeline28882, positionTrace28882,
+                { nativeCarrierDrawPosition28876(frame, glassScreenPosition(lastBounds)) },
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
@@ -2800,6 +2818,8 @@ object KyantLauncherLens270 {
         immutableBridge28880: androidx.compose.runtime.State<Bitmap?>,
         immutableGen28880: androidx.compose.runtime.State<Long>,
         nodePipeline28881: Int, nodeTrace28881: Boolean,
+        positionPipeline28882: Int, positionTrace28882: Boolean,
+        currentHostPosition28882: () -> Offset,
         nativeCarrierAb28869: Int, distanceAb28874: Int, distanceTrace28874: Boolean,
         bufferExperiment28875: Boolean,
         bridgeFront28875: androidx.compose.runtime.State<Bitmap?>,
@@ -2853,7 +2873,7 @@ object KyantLauncherLens270 {
         // Clip the WHOLE optical pipeline, including wallpaper source and highlight,
         // not just the Kyant lens shape. Prevent pixels escaping rounded corners.
         val cornerDp = (cornerRadiusPx / density).dp
-        if (nodePipeline28881 == 2) {
+        if (nodePipeline28881 == 2 || positionPipeline28882 in 1..4) {
             // ComposeView -> AndroidView -> native View.onDraw. This keeps the
             // ComposeView host but removes Compose Canvas as the pixel painter.
             // Read live position at the native draw, not a recomposition snapshot.
@@ -2874,7 +2894,20 @@ object KyantLauncherLens270 {
                             super.onDraw(canvas)
                             val currentRef = referenceHolder81.get()
                             if (width <= 0 || height <= 0 || currentRef.isRecycled) return
-                            val pos = try { currentNativePosition() } catch (_: Throwable) { composePosition }
+                            // All sources are observed in THIS onDraw call; never
+                            // compare values logged on different Hosts/frames.
+                            val now82 = SystemClock.elapsedRealtimeNanos()
+                            val nativePos82 = try { currentNativePosition() } catch (_: Throwable) { composePosition }
+                            val hostPos82 = try { currentHostPosition28882() } catch (_: Throwable) { nativePos82 }
+                            val pre82 = predrawMatrixSnapshot.get()
+                            val preAge82 = if (pre82.second in 1L..now82)
+                                (now82 - pre82.second) / 1_000_000f else -1f
+                            val pos = when (positionPipeline28882) {
+                                2 -> composePosition
+                                3 -> hostPos82
+                                4 -> if (preAge82 in 0f..50f) pre82.first else nativePos82
+                                else -> nativePos82 // V288.81 stage2 and V288.82 stage1
+                            }
                             val screenW = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
                             val screenH = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
                             // Same full reference Bitmap and float destination as mode 0.
@@ -2884,7 +2917,25 @@ object KyantLauncherLens270 {
                             // root sampling when reference dimensions differ.
                             canvas.drawBitmap(currentRef, null, target81, paint81)
                             frames81++
-                            if (nodeTrace28881 && frames81 % 120L == 1L)
+                            if (positionTrace28882 && positionPipeline28882 in 1..4 &&
+                                frames81 % 48L == 1L) {
+                                val nativeGap = kotlin.math.max(
+                                    kotlin.math.abs(nativePos82.x - composePosition.x),
+                                    kotlin.math.abs(nativePos82.y - composePosition.y))
+                                val hostGap = kotlin.math.max(
+                                    kotlin.math.abs(nativePos82.x - hostPos82.x),
+                                    kotlin.math.abs(nativePos82.y - hostPos82.y))
+                                val preGap = kotlin.math.max(
+                                    kotlin.math.abs(nativePos82.x - pre82.first.x),
+                                    kotlin.math.abs(nativePos82.y - pre82.first.y))
+                                XposedBridge.log("KYANT28882_ANDROIDVIEW_DRAW stage=$positionPipeline28882 " +
+                                    "draw=$frames81 usedX=${pos.x} nativeX=${nativePos82.x} " +
+                                    "composeX=${composePosition.x} hostX=${hostPos82.x} " +
+                                    "preX=${pre82.first.x} preAgeMs=$preAge82 " +
+                                    "composeGapPx=$nativeGap hostGapPx=$hostGap " +
+                                    "preGapPx=$preGap width=$width hardware=${canvas.isHardwareAccelerated}")
+                            }
+                            if (nodeTrace28881 && positionPipeline28882 < 0 && frames81 % 120L == 1L)
                                 XposedBridge.log("KYANT28881_ANDROIDVIEW_DRAW draw=$frames81 " +
                                     "x=${pos.x} composeX=${composePosition.x} " +
                                     "viewW=$width viewH=$height hardware=${canvas.isHardwareAccelerated}")
