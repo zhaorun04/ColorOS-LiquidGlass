@@ -1,3 +1,33 @@
+V1.9.205.288.89｜V230 原生壁纸采样与 Kyant 光学输入对照版
+
+【使用前提】
+保持 V288.86 安全文件夹层级：liquidglass_kyant_folder_containment_28886=1。
+此版不改 Dock，保留 V230 三参数 UI/SharedPreferences/Root/Launcher 原链路。
+
+【引擎与融合开关：两个独立选择器】
+引擎选择：liquidglass_kyant_v230_native_ab_28887
+  0=Kyant Compose（需 Kyant0 总开关开启）
+  1=V230 AGSL（V230 UI 开启，Kyant0 可关闭）
+  2=原生壁纸无透镜对照
+新融合开关：liquidglass_kyant_fusion_ab_28889
+  0=不改变 V288.88 行为，作为基线。
+  1=仅在引擎0有效；将原生 BitmapShader 按 V230 本地采样矩阵
+    绘制进桥接 Bitmap，再由原 Kyant Compose/Backdrop 光学消费。
+    注意：仍经过 Compose，未保证消除闪动，也并非零拷贝 Shader 对接。
+  2=仅在引擎1有效；保持 V230 原生 Canvas/AGSL 和三参数，
+    选用已有 AB3 连续边缘真实壁纸位移曲面，作为 Kyant 风格参考实验。
+    这不是完整 Kyant Shader/光学功能移植。与模式0对照可直接看差异。
+日志开关：liquidglass_kyant_fusion_trace_28889=1（默认关，日志限频）。
+日志：KYANT28889_FUSION_HOST、KYANT28889_V230_SOURCE_TO_KYANT、
+      KYANT28889_NATIVE_EDGE_AGSL。
+切换两类实验开关后重新加载 Launcher，避免旧宿主残留。
+
+【本版范围】
+仅新增两条可选择的实验路径；不修改 V230 原生旧路径和旧光学配置映射。
+保留图标/最近任务安全层级；右滑/左滑松手首帧滞后尚未修复。
+完整 Kyant 二维透镜转换为原生 AGSL 仍待后续实施。
+本地没有完成 Android SDK/Gradle 编译，需 CI 和真机验证。
+
 V1.9.205.288.88｜V230 与 Kyant 宿主开关解耦及渲染互斥诊断版
 
 【渲染选择】

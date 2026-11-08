@@ -443,10 +443,31 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_native_settle_ab_28870", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
-        val nativeCarrierAb28869 = try {
+        // V288.89: fusion experiment is opt-in and never changes engine ownership.
+        // 1: native V230-coordinate BitmapShader produces Kyant's backdrop pixels;
+        // 2: native V230 AGSL uses the existing smooth edge-refraction profile.
+        val requestedFusion28889 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_fusion_ab_28889", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 }
+        val fusionMode28889 = when (requestedFusion28889) {
+            1 -> if (selectedEngine28888 == 0) 1 else 0
+            2 -> if (selectedEngine28888 == 1) 2 else 0
+            else -> 0
+        }
+        val fusionTrace28889 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_fusion_trace_28889", 0) == 1
+        } catch (_: Throwable) { false }
+        val nativeCarrierAb28869 = if (fusionMode28889 == 1) 1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_native_carrier_ab_28869", 0).coerceIn(0, 2)
         } catch (_: Throwable) { 0 }
+        if (requestedFusion28889 != 0) XposedBridge.log(
+            "KYANT28889_FUSION_HOST host=${System.identityHashCode(anchor)} " +
+            "requested=$requestedFusion28889 effective=$fusionMode28889 " +
+            "selectedEngine=$selectedEngine28888 carrier=$nativeCarrierAb28869 " +
+            "safeFolder=$folderContainment28886")
         // V288.87: 0=unchanged Kyant, 1=actual UnifiedGlass230 AGSL,
         // 2=same native wallpaper sampling without optical Shader.
         // Deliberately independent of historical root experiments, always
@@ -1595,6 +1616,13 @@ object KyantLauncherLens270 {
         }
 
         val bridgeDst = RectF()
+        // Shared V230 sampling convention: source bitmap -> viewport pixels,
+        // then subtract the FolderIcon's current screen origin. This is the
+        // native BitmapShader route, not a Compose image transform.
+        val fusionSourceMatrix28889 = Matrix()
+        val fusionPaint28889 = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        var fusionReference28889: Bitmap? = null
+        var fusionShader28889: android.graphics.BitmapShader? = null
         val bridgeCanvas = bridgeBitmap?.let { Canvas(it) }
         val bridgeExtraCanvas28875 = bridgeExtraBitmap28875?.let { Canvas(it) }
         var bridgeLastReference28875: Bitmap? = null
@@ -1620,11 +1648,34 @@ object KyantLauncherLens270 {
                 (activeReference.width - x) * bitmap.width / cropW.coerceAtLeast(.001f),
                 (activeReference.height - y) * bitmap.height / cropH.coerceAtLeast(.001f))
             target.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
-            if (!(affineSampling28876 && carrier28876 != null &&
+            if (fusionMode28889 == 1) {
+                if (fusionReference28889 !== activeReference || fusionShader28889 == null) {
+                    fusionReference28889 = activeReference
+                    fusionShader28889 = android.graphics.BitmapShader(activeReference,
+                        android.graphics.Shader.TileMode.DECAL,
+                        android.graphics.Shader.TileMode.DECAL)
+                }
+                // Identical bitmap->native-local transform to the V230
+                // AGSL wallpaper input used in the same FolderIcon geometry.
+                fusionSourceMatrix28889.setValues(floatArrayOf(
+                    sw.toFloat() / activeReference.width, 0f, -pos.x,
+                    0f, sh.toFloat() / activeReference.height, -pos.y,
+                    0f, 0f, 1f))
+                fusionShader28889!!.setLocalMatrix(fusionSourceMatrix28889)
+                fusionPaint28889.shader = fusionShader28889
+                target.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(),
+                    fusionPaint28889)
+                fusionPaint28889.shader = null
+            } else if (!(affineSampling28876 && carrier28876 != null &&
                     drawAffineWallpaper28876(target, carrier28876, activeReference, "BRIDGE"))) {
                 target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
             }
             val gen = bridgeDrawCount.incrementAndGet()
+            if (fusionMode28889 == 1 && fusionTrace28889 && (gen <= 2L || gen % 180L == 0L))
+                XposedBridge.log("KYANT28889_V230_SOURCE_TO_KYANT host=$trace28815Host " +
+                    "generation=$gen x=${pos.x} y=${pos.y} " +
+                    "source=${System.identityHashCode(activeReference)} " +
+                    "bridge=${System.identityHashCode(bitmap)} hardware=false")
             if (bufferExperiment28875) {
                 val oldFront = bridgeFront28875.value
                 // All three updates happen synchronously on Launcher UI thread.
@@ -1928,10 +1979,20 @@ object KyantLauncherLens270 {
                         v230Bounds287, radius287, radius287,
                         android.graphics.Path.Direction.CW)
                     canvas.clipPath(v230ClipPath287)
-                    val usedV230287 = if (v230NativeMode28887 == 1 && canvas.isHardwareAccelerated)
-                        UnifiedGlass230.drawExperimental287(this, canvas, v230Bounds287,
-                            radius287, source287, source287, v230Valid287, 0f)
-                        else false
+                    val usedV230287 = if (v230NativeMode28887 == 1 && canvas.isHardwareAccelerated) {
+                        if (fusionMode28889 == 2)
+                            UnifiedGlass230.drawFusion289(this, canvas, v230Bounds287,
+                                radius287, source287, source287, v230Valid287, 0f)
+                        else
+                            UnifiedGlass230.drawExperimental287(this, canvas, v230Bounds287,
+                                radius287, source287, source287, v230Valid287, 0f)
+                    } else false
+                    if (fusionMode28889 == 2 && fusionTrace28889 &&
+                        (drawCount < 2L || drawCount % 180L == 0L))
+                        XposedBridge.log("KYANT28889_NATIVE_EDGE_AGSL " +
+                            "host=${System.identityHashCode(anchor)} used=${usedV230287} " +
+                            "source=${System.identityHashCode(activeReference)} " +
+                            "sampleX=${position.x} radius=$radius287")
                     if (!usedV230287) {
                         // On AGSL compilation failure, fall back to the exact
                         // same native wallpaper sample (do not show blank glass).

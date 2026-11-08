@@ -266,9 +266,22 @@ final class UnifiedGlass230 {
             BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix){
         return drawInternal287(view,canvas,rect,radius,wallpaper,blurredWallpaper,valid,blurMix,true);
     }
+    // V288.89: use the existing continuous edge-refraction surface (AB3) on
+    // the proven native V230 AGSL path. This is an optical-profile experiment,
+    // NOT a claim to have ported the Kyant Compose/Backdrop shader.
+    static boolean drawFusion289(View view,Canvas canvas,RectF rect,float radius,
+            BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix){
+        return drawInternal289(view,canvas,rect,radius,wallpaper,blurredWallpaper,valid,blurMix,true,3);
+    }
     private static boolean drawInternal287(View view,Canvas canvas,RectF rect,float radius,
             BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix,
             boolean forceExperimental287){
+        return drawInternal289(view,canvas,rect,radius,wallpaper,blurredWallpaper,
+            valid,blurMix,forceExperimental287,-1);
+    }
+    private static boolean drawInternal289(View view,Canvas canvas,RectF rect,float radius,
+            BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix,
+            boolean forceExperimental287,int overrideRefraction289){
         MaterialConfig230.State s=MaterialConfig230.get();
         // Settings.Global is a transient, opt-in test switch; normal mode is 0.
         // Sampling every 60 draws avoids a binder read for every frame.
@@ -308,7 +321,8 @@ final class UnifiedGlass230 {
             shader.setFloatUniform("quality230",(float)s.quality);
             shader.setFloatUniform("blurMix",Math.max(0f,Math.min(1f,blurMix)));
             shader.setFloatUniform("diagnostic235",(float)diagnostic235);
-            shader.setFloatUniform("refractionAB244",(float)refractionAB244);
+            shader.setFloatUniform("refractionAB244",(float)(overrideRefraction289>=0
+                ? overrideRefraction289 : refractionAB244));
             Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
             paint.setShader(shader);
             canvas.drawRoundRect(rect,radius,radius,paint);
