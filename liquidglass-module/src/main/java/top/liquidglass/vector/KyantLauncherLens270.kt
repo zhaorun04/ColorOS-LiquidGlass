@@ -1775,6 +1775,7 @@ object KyantLauncherLens270 {
             private val v230SampleMatrix287 = Matrix()
             private val v230Valid287 = RectF()
             private val v230Bounds287 = RectF()
+            private val v230ClipPath287 = android.graphics.Path()
             private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = android.graphics.Color.WHITE
                 strokeWidth = resources.displayMetrics.density.coerceAtLeast(1f)
@@ -1917,7 +1918,11 @@ object KyantLauncherLens270 {
                     // Clip only to this native optical container, never the
                     // entire Launcher or its icon children.
                     val radius287 = kotlin.math.min(width, height) * 0.205f
-                    canvas.clipRoundRect(v230Bounds287, radius287, radius287)
+                    v230ClipPath287.reset()
+                    v230ClipPath287.addRoundRect(
+                        v230Bounds287, radius287, radius287,
+                        android.graphics.Path.Direction.CW)
+                    canvas.clipPath(v230ClipPath287)
                     val usedV230287 = if (v230NativeMode28887 == 1 && canvas.isHardwareAccelerated)
                         UnifiedGlass230.drawExperimental287(this, canvas, v230Bounds287,
                             radius287, source287, source287, v230Valid287, 0f)

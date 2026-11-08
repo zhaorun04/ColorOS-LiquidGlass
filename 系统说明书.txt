@@ -1,3 +1,17 @@
+ColorOS-LiquidGlass V1.9.205.288.87.1｜V230 原生 Canvas 圆角裁剪编译修复版
+
+【本次修复】
+修复 KyantLauncherLens270.kt 中 Android Canvas 不存在 clipRoundRect(RectF,Float,Float) 的 Kotlin 编译错误。
+改为复用 Path、调用 Path.addRoundRect(RectF,Float,Float,Path.Direction.CW) 后 canvas.clipPath(Path)，保持原有圆角裁剪语义；不改 V230 RuntimeShader、BitmapShader 采样矩阵、Kyant A/B 模式及安全文件夹层级。
+Path 作为 View 字段复用，避免每帧分配。实际 GitHub Actions 编译与真机验证仍待执行。
+
+【Termux Git】
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.87.1 版本"
+git push origin main
+
+===== V1.9.205.288.87 原有系统说明 =====
 ColorOS-LiquidGlass V1.9.205.288.87｜V230 原生光学采样与 Kyant 安全承载对照版
 
 【本版目的】
