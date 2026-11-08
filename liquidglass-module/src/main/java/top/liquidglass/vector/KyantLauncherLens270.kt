@@ -475,8 +475,26 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_full_overlay_trace_28877", 0) == 1
         } catch (_: Throwable) { false }
-        val fullOverlayRequested28877 = fullOverlayAb28877 == 1 &&
-            nativeCarrierAb28869 == 1 && transformAb28876 == 0
+        // V288.78: SAME root FrameLayout, only the displayed renderer changes.
+        // 0=legacy V288.77.1 behaviour; 1=root native-only; 2=root full Kyant.
+        val rootCompareAb28878 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_root_compare_ab_28878", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 }
+        val rootIconPassthrough28878 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_root_icons_28878", 1) == 1
+        } catch (_: Throwable) { true }
+        val rootCompareTrace28878 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_root_compare_trace_28878", 0) == 1
+        } catch (_: Throwable) { false }
+        val rootDirect28878 = rootCompareAb28878 == 1 && nativeCarrierAb28869 == 1 &&
+            transformAb28876 == 0
+        val rootFullKyant28878 = rootCompareAb28878 == 2 && nativeCarrierAb28869 == 1 &&
+            transformAb28876 == 0
+        val fullOverlayRequested28877 = (fullOverlayAb28877 == 1 || rootDirect28878 ||
+            rootFullKyant28878) && nativeCarrierAb28869 == 1 && transformAb28876 == 0
         val fullOverlayParent28877 = if (fullOverlayRequested28877) root as? ViewGroup else null
         val fullOverlayActive28877 = fullOverlayRequested28877 && fullOverlayParent28877 != null
         if (fullOverlayTrace28877 || fullOverlayAb28877 != 0) XposedBridge.log(
@@ -941,8 +959,10 @@ object KyantLauncherLens270 {
         val compose = ComposeView(anchor.context).apply {
             isClickable = false
             isFocusable = false
-            // Keep the composition owner alive; native A/B modes render their own pixels.
-            if (pipelineMode28819 == 0 || pipelineMode28819 == 3 || nativeCarrierAb28869 == 2) alpha = 0f
+            // Mode 1 of V288.78 uses exactly the SAME root host, but native wallpaper
+            // covers Kyant. The optical composition is kept alive for A/B parity.
+            if (pipelineMode28819 == 0 || pipelineMode28819 == 3 ||
+                nativeCarrierAb28869 == 2 || rootDirect28878) alpha = 0f
         }
         // The ComposeView is the actual native child carrying the Kyant source.
         // A/B 1 gets its current transformed origin directly from that child,
@@ -1508,8 +1528,10 @@ object KyantLauncherLens270 {
         // only. Right half stays the unmodified Compose/Kyant optical renderer.
         // This is an A/B diagnostic, NOT the final hybrid optical implementation.
         var fullOverlayInstalled28877 = false
+        var nativeSampleView28878Invalidator: (() -> Unit)? = null
         val fullOverlayRootLocation28877 = IntArray(2)
         var fullOverlayTraceCount28877 = 0L
+        var rootCompareTraceCount28878 = 0L
         var fullOverlayLastPosition28877 = Offset(Float.NaN, Float.NaN)
         fun positionFullOverlay28877(pos: Offset, host: View) {
             if (!fullOverlayInstalled28877) return
@@ -1521,6 +1543,11 @@ object KyantLauncherLens270 {
                 host.translationX = targetX
                 host.translationY = targetY
                 host.postInvalidateOnAnimation()
+            }
+            if (rootDirect28878) {
+                // A root-host translation can be a RenderNode property update with no
+                // native onDraw. This invalidate keeps the native-only control active.
+                nativeSampleView28878Invalidator?.invoke()
             }
             if (fullOverlayTrace28877) {
                 val last = fullOverlayLastPosition28877
@@ -1548,7 +1575,7 @@ object KyantLauncherLens270 {
             Offset(overlayOrigin28876[0] + overlayRootScreen28876[0] - overlayRootWindow28876[0],
                 overlayOrigin28876[1] + overlayRootScreen28876[1] - overlayRootWindow28876[1])
         } catch (_: Throwable) { fallback }
-        val nativeSampleView = if (nativeCarrierAb28869 == 2 ||
+        val nativeSampleView = if (nativeCarrierAb28869 == 2 || rootDirect28878 ||
             (nativeCompareMode == 1 && nativeBridgeMode == 0 && displayIsolationMode == 0) ||
             displayIsolationMode == 1 || nativeLayerMode in 1..3) object : View(anchor.context) {
             private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -1591,7 +1618,7 @@ object KyantLauncherLens270 {
                 }
                 val position = if (overlayInstalled28876) {
                     nativeCarrierDrawPosition28876(this, basePosition28870)
-                } else if (nativeCarrierAb28869 == 2)
+                } else if (nativeCarrierAb28869 == 2 || rootDirect28878)
                     nativeCarrierDrawPosition28870(this, basePosition28870, "NATIVE_VIEW_DIRECT")
                     else basePosition28870
                 if (releaseTrace28820) releaseTrace28820("COORD28826", position,
@@ -1673,7 +1700,8 @@ object KyantLauncherLens270 {
                     (activeReference.width - x) * width / sw,
                     (activeReference.height - y) * height / sh)
                 val checkpoint = canvas.save()
-                if (nativeCarrierAb28869 == 2 || displayIsolationMode == 1 || nativeLayerMode in 1..3) {
+                if (nativeCarrierAb28869 == 2 || rootDirect28878 ||
+                    displayIsolationMode == 1 || nativeLayerMode in 1..3) {
                     canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
                 } else {
                     canvas.clipRect(0f, 0f, width * 0.5f, height.toFloat())
@@ -1690,7 +1718,8 @@ object KyantLauncherLens270 {
                     "NATIVE_VIEW_DIRECT", this, position, drawCount + 1L)
                 if (nativeCarrierAb28869 == 2) distanceNative28874(
                     "NATIVE_VIEW_DIRECT", position, drawCount + 1L)
-                if (nativeCarrierAb28869 != 2 && displayIsolationMode != 1 && nativeLayerMode == 0)
+                if (nativeCarrierAb28869 != 2 && !rootDirect28878 &&
+                    displayIsolationMode != 1 && nativeLayerMode == 0)
                     canvas.drawLine(width * 0.5f, 0f, width * 0.5f, height.toFloat(), dividerPaint)
                 val now = SystemClock.elapsedRealtimeNanos()
                 if (lastDrawTimeNs > 0L) {
@@ -1709,6 +1738,7 @@ object KyantLauncherLens270 {
                 lastX = position.x; lastY = position.y
             }
         }.apply { isClickable = false; isFocusable = false; setWillNotDraw(false) } else null
+        nativeSampleView28878Invalidator = { nativeSampleView?.postInvalidateOnAnimation() }
         // Root overlay native-only control: no Workspace parent transform.
         // Only mode 2 with native carrier 2 requests this, and removal is
         // guaranteed during dispose. Wallpaper updates keep native invalidation.
@@ -1837,6 +1867,48 @@ object KyantLauncherLens270 {
             // Mode 1 is a control: native fully covers Compose, same as V288.11 A.
             if (!overlayActive28876 && nativeLayerMode !in 2..3) nativeSampleView?.let { frame.addView(it,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
+
+            // V288.78: root hosts would otherwise cover OEM folder icons.
+            // Draw the existing FolderIcon's *child Views* above the glass,
+            // without drawing the FolderIcon's own opaque background. This is
+            // a diagnostic forwarding layer; turn it off to isolate draw costs.
+            if (fullOverlayActive28877 && rootIconPassthrough28878) {
+                val iconForward = object : View(anchor.context) {
+                    private var count = 0L
+                    override fun onDraw(canvas: Canvas) {
+                        super.onDraw(canvas)
+                        if (disposed || !anchor.isAttachedToWindow) return
+                        try {
+                            for (i in 0 until folder.childCount) {
+                                val child = folder.getChildAt(i)
+                                if (child === frame || child.visibility != View.VISIBLE ||
+                                    child.width <= 0 || child.height <= 0) continue
+                                val save = canvas.save()
+                                canvas.translate((child.left - lastBounds.left).toFloat(),
+                                    (child.top - lastBounds.top).toFloat())
+                                canvas.concat(child.matrix)
+                                child.draw(canvas)
+                                canvas.restoreToCount(save)
+                            }
+                            count++
+                            if (rootCompareTrace28878 && count % 180L == 1L)
+                                XposedBridge.log("KYANT28878_ICON_FORWARD host=$trace28815Host " +
+                                    "draw=$count children=${folder.childCount} frameParent=${frame.parent?.javaClass?.simpleName}")
+                        } catch (error: Throwable) {
+                            if (count++ % 120L == 0L)
+                                XposedBridge.log("KYANT28878_ICON_ERROR host=$trace28815Host " +
+                                    error.javaClass.simpleName)
+                        }
+                    }
+                }.apply { isClickable = false; isFocusable = false; setWillNotDraw(false) }
+                frame.addView(iconForward, FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            }
+            if (rootCompareTrace28878 || rootCompareAb28878 != 0) XposedBridge.log(
+                "KYANT28878_RENDER_HOST host=$trace28815Host mode=$rootCompareAb28878 " +
+                "root=$fullOverlayActive28877 native=$rootDirect28878 kyant=$rootFullKyant28878 " +
+                "iconForward=${fullOverlayActive28877 && rootIconPassthrough28878} " +
+                "nativeView=${nativeSampleView != null} composeAlpha=${compose.alpha}")
 
             if (overlayActive28876 && nativeSampleView != null) try {
                 nativeSampleView.layout(0, 0, previewWidth, previewHeight)
@@ -2027,7 +2099,13 @@ object KyantLauncherLens270 {
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
                     if (overlayInstalled28876) positionOverlay28876(actualSample)
-                    if (fullOverlayInstalled28877) positionFullOverlay28877(actualSample, frame)
+                    if (fullOverlayInstalled28877) {
+                        positionFullOverlay28877(actualSample, frame)
+                        if (rootCompareTrace28878 && rootCompareTraceCount28878++ % 120L == 0L)
+                            XposedBridge.log("KYANT28878_ROOT_SAMPLE host=$trace28815Host " +
+                                "mode=$rootCompareAb28878 x=${actualSample.x} y=${actualSample.y} " +
+                                "hostTx=${frame.translationX} rootChild=${frame.parent === fullOverlayParent28877}")
+                    }
                     distancePredraw28874(actualSample)
                     traceDistance28875(actualSample)
                     nativePredrawPosition28824 = actualSample

@@ -1,3 +1,14 @@
+ColorOS-LiquidGlass V1.9.205.288.78｜同根承载原生／Kyant A/B 实验版
+
+新增设置：
+liquidglass_kyant_root_compare_ab_28878：0=关闭本版对照（沿用此前设置）；1=Launcher 根普通子 View 内直接绘制原生壁纸；2=同一根普通子 View 内绘制完整 Kyant 透镜。要求 native_carrier_ab_28869=1、transform_ab_28876=0。
+liquidglass_kyant_root_icons_28878：1=实验性转绘原生文件夹子 View 到玻璃上方，缓解图标被遮挡；0=关闭图标转绘，便于检查是否影响流畅度。
+liquidglass_kyant_root_compare_trace_28878：1=开启精简实验日志；0=关闭。
+
+此版本诊断模式不能视作正式实现。实验模式下可能存在 OEM 图标重叠、绘制开销、位置差和触摸层级问题。根承载失败时沿用原有 FolderIcon 子 View 回退。请逐一重启 Launcher 比较模式1和模式2，观察玻璃是否显示、归位闪动是否减轻。
+
+保留 V288.60 壁纸即时同步机制和 V288.69 原生桥接候选基线；不修改 Kyant Shader、Root 壁纸发布流程。
+
 ColorOS-LiquidGlass V1.9.205.288.77.1｜Launcher 根普通子 View 光学可见性修正版
 
 注意：根覆盖层模式不应作为日用默认。未在本地完成 Android Gradle 真编译或真机验证。
