@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.geometry.Offset
 import android.util.TypedValue
 import androidx.compose.foundation.Canvas as ComposeCanvas
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -513,11 +514,24 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bitmap_trace_28880", 0) == 1
         } catch (_: Throwable) { false }
-        val rootDirect28878 = (if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 0..1
+        // V288.81: isolate ComposeView hosting from Compose draw nodes and
+        // graphicsLayer composition. All modes use one root FrameLayout.
+        // -1 preserves the complete V288.80 implementation.
+        val nodePipeline28881 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_node_pipeline_28881", -1).coerceIn(-1, 4)
+        } catch (_: Throwable) { -1 }
+        val nodeTrace28881 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_node_trace_28881", 0) == 1
+        } catch (_: Throwable) { false }
+        val rootDirect28878 = (if (nodePipeline28881 >= 0) nodePipeline28881 == 0
+            else if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 0..1
             else if (rootPipeline28879 >= 0) rootPipeline28879 == 0
             else rootCompareAb28878 == 1) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val rootFullKyant28878 = (if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 2..4
+        val rootFullKyant28878 = (if (nodePipeline28881 >= 0) nodePipeline28881 in 1..4
+            else if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 2..4
             else if (rootPipeline28879 >= 0) rootPipeline28879 in 1..4
             else rootCompareAb28878 == 2) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
@@ -1958,6 +1972,10 @@ object KyantLauncherLens270 {
                 frame.addView(iconForward, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             }
+            if (nodePipeline28881 >= 0 && nodeTrace28881) XposedBridge.log(
+                "KYANT28881_NODE_HOST host=$trace28815Host node=$nodePipeline28881 " +
+                "native=$rootDirect28878 compose=$rootFullKyant28878 " +
+                "root=$fullOverlayActive28877 viewLayer=${compose.layerType}")
             if (bitmapPipeline28880 >= 0) XposedBridge.log(
                 "KYANT28880_BITMAP_HOST host=$trace28815Host stage=$bitmapPipeline28880 " +
                 "native=$rootDirect28878 compose=$rootFullKyant28878 " +
@@ -1995,6 +2013,7 @@ object KyantLauncherLens270 {
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
                 rootPipeline28879, rootPipelineTrace28879,
                 bitmapPipeline28880, bitmapTrace28880, immutableBridge28880, immutableGen28880,
+                nodePipeline28881, nodeTrace28881,
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
@@ -2780,6 +2799,7 @@ object KyantLauncherLens270 {
         bitmapPipeline28880: Int, bitmapTrace28880: Boolean,
         immutableBridge28880: androidx.compose.runtime.State<Bitmap?>,
         immutableGen28880: androidx.compose.runtime.State<Long>,
+        nodePipeline28881: Int, nodeTrace28881: Boolean,
         nativeCarrierAb28869: Int, distanceAb28874: Int, distanceTrace28874: Boolean,
         bufferExperiment28875: Boolean,
         bridgeFront28875: androidx.compose.runtime.State<Bitmap?>,
@@ -2833,6 +2853,55 @@ object KyantLauncherLens270 {
         // Clip the WHOLE optical pipeline, including wallpaper source and highlight,
         // not just the Kyant lens shape. Prevent pixels escaping rounded corners.
         val cornerDp = (cornerRadiusPx / density).dp
+        if (nodePipeline28881 == 2) {
+            // ComposeView -> AndroidView -> native View.onDraw. This keeps the
+            // ComposeView host but removes Compose Canvas as the pixel painter.
+            // Read live position at the native draw, not a recomposition snapshot.
+            val composePosition = screenPosition.value // invalidation trigger
+            val referenceHolder81 = androidx.compose.runtime.remember {
+                java.util.concurrent.atomic.AtomicReference(reference)
+            }
+            referenceHolder81.set(reference)
+            AndroidView(
+                modifier = Modifier.size((previewWidth / density).dp,
+                    (previewHeight / density).dp),
+                factory = { context ->
+                    object : View(context) {
+                        private val paint81 = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+                        private val target81 = RectF()
+                        var frames81 = 0L
+                        override fun onDraw(canvas: Canvas) {
+                            super.onDraw(canvas)
+                            val currentRef = referenceHolder81.get()
+                            if (width <= 0 || height <= 0 || currentRef.isRecycled) return
+                            val pos = try { currentNativePosition() } catch (_: Throwable) { composePosition }
+                            val screenW = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
+                            val screenH = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
+                            // Same full reference Bitmap and float destination as mode 0.
+                            target81.set(-pos.x, -pos.y,
+                                screenW.toFloat() - pos.x, screenH.toFloat() - pos.y)
+                            // Bitmap is the full-screen reference; match native
+                            // root sampling when reference dimensions differ.
+                            canvas.drawBitmap(currentRef, null, target81, paint81)
+                            frames81++
+                            if (nodeTrace28881 && frames81 % 120L == 1L)
+                                XposedBridge.log("KYANT28881_ANDROIDVIEW_DRAW draw=$frames81 " +
+                                    "x=${pos.x} composeX=${composePosition.x} " +
+                                    "viewW=$width viewH=$height hardware=${canvas.isHardwareAccelerated}")
+                        }
+                    }.apply { isClickable = false; isFocusable = false; setWillNotDraw(false) }
+                },
+                update = { nativeView ->
+                    // A new Compose position schedules the embedded native view,
+                    // while its onDraw reads the position at actual draw time.
+                    // AndroidView callback is typed View; re-create when reference
+                    // identity changes using the key at the calling composition.
+                    if (composePosition.x.isFinite()) nativeView.postInvalidateOnAnimation()
+                }
+            )
+            SideEffect { onComposed() }
+            return
+        }
         // A/B 2 isolates the optical composition in an explicit offscreen layer.
         // A/B 0/1 retain the exact baseline parent layer path.
         val opticalContainer = Modifier.size(
@@ -2840,17 +2909,23 @@ object KyantLauncherLens270 {
             (previewHeight / density).dp
         ).then(if (renderAbMode == 2) Modifier.graphicsLayer {
             compositingStrategy = CompositingStrategy.Offscreen
-        } else Modifier).clip(RoundedCornerShape(cornerDp))
+        } else Modifier).then(if (nodePipeline28881 == 4)
+            Modifier else Modifier.clip(RoundedCornerShape(cornerDp)))
         Box(opticalContainer) {
             // Diagnostic only: transparent source may also remove the backdrop input.
             // Never interpret visible highlights alone as genuine refraction.
             val sourceAlpha = when (nativeLayerMode) { 2 -> 0f; 3 -> .02f; else -> 1f }
             // The four pipeline A/B paths intentionally avoid capturing a Kyant
             // backdrop or introducing a Compose graphicsLayer on the source canvas.
-            val pipelineSourceOnly28879 = bitmapPipeline28880 in 2..4 ||
+            val pipelineSourceOnly28879 = nodePipeline28881 in 1..4 ||
+                bitmapPipeline28880 in 2..4 ||
                 (bitmapPipeline28880 < 0 && rootPipeline28879 == 1)
             val pipelineCaptureOnly28879 = bitmapPipeline28880 < 0 && rootPipeline28879 == 2
-            val sourceModifier = if (pipelineSourceOnly28879 || pipelineMode28819 >= 0) {
+            val sourceModifier = if (nodePipeline28881 == 3) {
+                Modifier.fillMaxSize().graphicsLayer {
+                    compositingStrategy = CompositingStrategy.Offscreen
+                }
+            } else if (pipelineSourceOnly28879 || pipelineMode28819 >= 0) {
                 Modifier.fillMaxSize()
             } else {
                 Modifier.fillMaxSize().layerBackdrop(backdrop).graphicsLayer { alpha = sourceAlpha }
@@ -3059,7 +3134,8 @@ object KyantLauncherLens270 {
                 // A/B: keep a stable, full-frame bitmap as the source and change only
                 // the destination transform. No per-frame source rectangle allocation.
                 // This isolates dynamic cropping from Compose/Backdrop frame scheduling.
-                if (bridgeBitmap != null && bitmapPipeline28880 != 2) {
+                if (bridgeBitmap != null && bitmapPipeline28880 != 2 &&
+                    nodePipeline28881 < 0) {
                     // State read here registers the draw invalidation dependency.
                     val version = bridgeVersion.value
                     if (pipelineMode28819 == 2 && frameSync28822 == 1) {
@@ -3170,6 +3246,11 @@ object KyantLauncherLens270 {
                     }
                 }
                 }
+                if (nodeTrace28881 && nodePipeline28881 in 1..4 &&
+                    sourceDrawCount.get() % 120L == 0L) XposedBridge.log(
+                    "KYANT28881_COMPOSE_DRAW node=$nodePipeline28881 x=${drawPosition.x} " +
+                    "rootX=$rootScreenX layer=${nodePipeline28881 == 3} " +
+                    "clip=${nodePipeline28881 != 4}")
                 if (bitmapTrace28880 && bitmapPipeline28880 in 2..4 &&
                     sourceDrawCount.get() % 120L == 0L) XposedBridge.log(
                     "KYANT28880_COMPOSE_SOURCE stage=$bitmapPipeline28880 " +
@@ -3249,7 +3330,8 @@ object KyantLauncherLens270 {
             }
             // Mode B: source Bitmap is displayed by Compose, but no Kyant backdrop
             // is captured or rendered. Mode C keeps the original optical pipeline.
-            if (pipelineMode28819 < 0 && !pipelineSourceOnly28879 && !pipelineCaptureOnly28879 &&
+            if (nodePipeline28881 < 0 && pipelineMode28819 < 0 &&
+                !pipelineSourceOnly28879 && !pipelineCaptureOnly28879 &&
                 (displayIsolationMode != 2 || nativeLayerMode in 2..3)) Box(Modifier.fillMaxSize().drawBackdrop(
                 backdrop = backdrop,
                 // The OEM radius is in physical pixels. Convert to dp and clamp to avoid a circle.

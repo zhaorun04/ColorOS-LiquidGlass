@@ -1,3 +1,31 @@
+ColorOS-LiquidGlass V1.9.205.288.81｜ComposeView 图层与 RenderNode 承载隔离实验版
+
+新诊断设置（-1 关闭，默认沿用旧实现）：
+  liquidglass_kyant_node_pipeline_28881=0：根子 View 原生 Canvas 直接绘制壁纸（稳定基线）
+  liquidglass_kyant_node_pipeline_28881=1：根子 View 普通 Compose Canvas 直接绘制原始壁纸
+  liquidglass_kyant_node_pipeline_28881=2：根子 View 内 ComposeView -> AndroidView -> 原生 View 绘制壁纸
+  liquidglass_kyant_node_pipeline_28881=3：Compose Canvas 放入独立 Offscreen graphicsLayer
+  liquidglass_kyant_node_pipeline_28881=4：Compose Canvas 不使用外层圆角 clip 图层（几何可见差异）
+  liquidglass_kyant_node_trace_28881=1：启用节流日志
+
+推荐设置：
+  liquidglass_kyant_native_carrier_ab_28869=1
+  liquidglass_kyant_bitmap_pipeline_28880=-1
+  liquidglass_kyant_root_pipeline_28879=-1
+  liquidglass_kyant_root_compare_ab_28878=0
+  liquidglass_kyant_full_overlay_ab_28877=0
+  liquidglass_kyant_transform_ab_28876=0
+  liquidglass_kyant_bridge_buffer_ab_28875=0
+  liquidglass_kyant_root_icons_28878=0
+
+注意：模式 2 由 Compose 承载原生 AndroidView，可单独检查 ComposeView 容器的合成时序；
+模式 3 明确加入 Offscreen 图层；模式 4 移除外层 clip，仅用于区分图层/裁剪，不适合正式无圆角效果。
+这些 A/B 均不使用完整 Kyant 透镜，无法直接视为光学最终修复；保留原模式随时回退。
+日志：KYANT28881_NODE_HOST、KYANT28881_ANDROIDVIEW_DRAW、KYANT28881_COMPOSE_DRAW。
+
+ZIP 已检查；Android Gradle/Kotlin 真编译、真机效果尚未验证。
+
+-----
 ColorOS-LiquidGlass V1.9.205.288.80｜原生 Canvas / Compose Bitmap 消费路径隔离版
 
 本次五档测试：
