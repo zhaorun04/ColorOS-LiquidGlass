@@ -1,3 +1,20 @@
+V1.9.205.288.88｜V230 与 Kyant 宿主开关解耦及渲染互斥诊断版
+
+【渲染选择】
+Global 设置 liquidglass_kyant_v230_native_ab_28887：
+  0：Kyant Compose，受 liquidglass_kyant_persistent_probe_2884 开关控制。
+  1：原生 V230 AGSL，由 V230 单一光学模型 UI 启用状态控制；可在 Kyant0 关闭时独立创建宿主。
+  2：原生壁纸对照；不执行光学 Shader。
+要求 liquidglass_kyant_folder_containment_28886=1，保持文件夹内部 index=0 安全层级。
+切换模式或 UI 开关后重载 Launcher；在 PreDraw 检测到引擎变化时自动销毁旧宿主。
+确认日志：KYANT28888_ENGINE_SELECTED、KYANT28888_COMPOSE_OPTICS_SKIPPED、KYANT28887_NATIVE_DRAW usedV230=true。
+注意：本版不宣称已经完全消除 Kyant Compose 归位抖动；也未移植其完整光学模型。
+
+【代码变更】
+KyantLauncherLensProbe270.java：创建与存活判断根据实际引擎选择，不再只依赖 Kyant 总开关。
+KyantLauncherLens270.kt：引擎选择一次确定；原生模式仅绘制原生背景，Compose 只保持空内容且 alpha=0；不因原生引擎错误修改 Kyant 总开关。
+保留 V288.86 文件夹子视图安全承载和 V230 三参数映射。Android Gradle 编译及真机测试仍需验证。
+
 ColorOS-LiquidGlass V1.9.205.288.87.1｜V230 原生 Canvas 圆角裁剪编译修复版
 
 【本次修复】

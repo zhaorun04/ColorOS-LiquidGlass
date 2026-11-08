@@ -313,9 +313,15 @@ object KyantLauncherLens270 {
             return
         }
         // Persistent experiment is explicitly opt-in; never disarm the switch on attach.
-        if (try { Settings.Global.getInt(anchor.context.contentResolver, KEY, 0) != 1 }
-                catch (_: Throwable) { true }) return
-        KyantOptics28827.ensure(anchor.context)
+        // V288.88: resolve the engine before installing the FolderIcon host.
+        // Native V230 mode is independent of the Kyant Compose UI switch.
+        val selectedEngine28888 = KyantLauncherLensProbe270.selectedEngine28888(anchor.context)
+        if (selectedEngine28888 < 0) return
+        if (selectedEngine28888 == 0) KyantOptics28827.ensure(anchor.context)
+        XposedBridge.log("KYANT28888_ENGINE_SELECTED host=${System.identityHashCode(anchor)} " +
+            "engine=${when (selectedEngine28888) { 1 -> "V230_NATIVE_AGSL"; 2 -> "NATIVE_REFERENCE"; else -> "KYANT_COMPOSE" }} " +
+            "kyantSwitch=${try { Settings.Global.getInt(anchor.context.contentResolver, KEY, 0) } catch (_: Throwable) { -1 }} " +
+            "v230UiEnabled=${MaterialConfig230.get().enabled} safeFolder=true")
         // V288.86 P0 containment. Default ON, including after upgrades from
         // 288.77..85 with stale Settings.Global experiments still enabled.
         // A DecorView child is above the OEM icon/Recents hierarchy and MUST NOT
@@ -445,10 +451,9 @@ object KyantLauncherLens270 {
         // 2=same native wallpaper sampling without optical Shader.
         // Deliberately independent of historical root experiments, always
         // mounted as FolderIcon's index-0 child with V288.86 containment.
-        val v230NativeMode28887 = if (folderContainment28886) try {
-            Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_v230_native_ab_28887", 0).coerceIn(0, 2)
-        } catch (_: Throwable) { 0 } else 0
+        // This value MUST match the entry gate and the live PreDraw gate.
+        // Do not re-select another engine after the host has been created.
+        val v230NativeMode28887 = if (folderContainment28886) selectedEngine28888 else 0
         val v230NativeTrace28887 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_v230_trace_28887", 0) == 1
@@ -2106,7 +2111,9 @@ object KyantLauncherLens270 {
             val exceptionHandler = CoroutineExceptionHandler { _, t ->
                 XposedBridge.log("KYANT2885_RECOMPOSER_ERROR " + t.javaClass.simpleName + " " + (t.message ?: ""))
                 frame.post {
-                    try { Settings.Global.putInt(anchor.context.contentResolver, KEY, 0) } catch (_: Throwable) {}
+                    if (selectedEngine28888 == 0) {
+                        try { Settings.Global.putInt(anchor.context.contentResolver, KEY, 0) } catch (_: Throwable) {}
+                    }
                     dispose("recomposer_error")
                 }
             }
@@ -2222,6 +2229,9 @@ object KyantLauncherLens270 {
                             XposedBridge.log("KYANT28884_COMPOSITION_EMPTY host=$trace28815Host mode=$orderPipeline28884")
                         XposedBridge.log("KYANT28883_COMPOSITION_EMPTY host=$trace28815Host " +
                             "stage=$siblingPipeline28883")
+                        if (v230NativeMode28887 != 0) XposedBridge.log(
+                            "KYANT28888_COMPOSE_OPTICS_SKIPPED host=$trace28815Host " +
+                            "nativeMode=$v230NativeMode28887 alpha=${compose.alpha}")
                     }
                 } else {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
@@ -2384,9 +2394,11 @@ object KyantLauncherLens270 {
         val listener = android.view.ViewTreeObserver.OnPreDrawListener {
                 if (!disposed && anchor.isAttachedToWindow) {
                     // The switch is intentionally checked during drawing, not on a fixed timer.
-                    val enabled = KyantLauncherLensProbe270.isExperimentEnabled(anchor.context)
-                    if (!enabled) {
-                        frame.post { dispose("switch_off") }
+                    val nextEngine28888 = KyantLauncherLensProbe270.selectedEngine28888(anchor.context)
+                    if (nextEngine28888 != selectedEngine28888) {
+                        XposedBridge.log("KYANT28888_ENGINE_STOP host=$trace28815Host " +
+                            "previous=$selectedEngine28888 next=$nextEngine28888")
+                        frame.post { dispose("engine_changed") }
                         return@OnPreDrawListener true
                     }
                     // Fallback, like Dock, if notification is still queued.
@@ -3071,7 +3083,9 @@ object KyantLauncherLens270 {
             XposedBridge.log("KYANT2885_PERSISTENT_READY stop=switch_off_or_folder_detached")
         } catch (t: Throwable) {
             XposedBridge.log("KYANT2885_HOST_ERROR " + t.javaClass.simpleName + " " + (t.message ?: ""))
-            try { Settings.Global.putInt(anchor.context.contentResolver, KEY, 0) } catch (_: Throwable) {}
+            if (selectedEngine28888 == 0) {
+                try { Settings.Global.putInt(anchor.context.contentResolver, KEY, 0) } catch (_: Throwable) {}
+            }
             dispose("setup_error")
         }
     }

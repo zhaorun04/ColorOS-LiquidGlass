@@ -21,22 +21,46 @@ public final class KyantLauncherLensProbe270 {
     public static void clearAttempt(View v) {
         synchronized (KyantLauncherLensProbe270.class) { attempted.remove(v); }
     }
-    // A short TTL avoids synchronous Settings provider reads on every FolderIcon draw.
-    // The same cache is used by the Compose pre-draw listener for switch-off.
+    // V288.88: the folder host belongs to the selected rendering engine, NOT to
+    // the Kyant Compose switch. A native V230 mode must remain usable when the
+    // Kyant UI engine is disabled. Keep the existing 400-ms Settings TTL, but
+    // do not cache the V230 UI state: it is published by MaterialConfig230.
     private static volatile long lastSwitchCheckMs = 0L;
-    private static volatile boolean cachedSwitch = false;
-    public static boolean isExperimentEnabled(android.content.Context context) {
+    private static volatile boolean cachedKyantSwitch = false;
+    private static volatile int cachedNativeMode = 0;
+    private static volatile boolean cachedContained = true;
+    private static final String NATIVE_MODE_KEY_28887 = "liquidglass_kyant_v230_native_ab_28887";
+    private static final String CONTAINMENT_KEY_28886 = "liquidglass_kyant_folder_containment_28886";
+    public static int selectedEngine28888(android.content.Context context) {
         long now = android.os.SystemClock.uptimeMillis();
-        if (now - lastSwitchCheckMs < 400L) return cachedSwitch;
-        synchronized (KyantLauncherLensProbe270.class) {
-            now = android.os.SystemClock.uptimeMillis();
-            if (now - lastSwitchCheckMs >= 400L) {
-                try { cachedSwitch = Settings.Global.getInt(context.getContentResolver(), KEY, 0) == 1; }
-                catch (Throwable ignored) { cachedSwitch = false; }
-                lastSwitchCheckMs = now;
+        if (now - lastSwitchCheckMs >= 400L) {
+            synchronized (KyantLauncherLensProbe270.class) {
+                now = android.os.SystemClock.uptimeMillis();
+                if (now - lastSwitchCheckMs >= 400L) {
+                    try {
+                        cachedKyantSwitch = Settings.Global.getInt(context.getContentResolver(), KEY, 0) == 1;
+                        cachedNativeMode = Math.max(0, Math.min(2, Settings.Global.getInt(
+                            context.getContentResolver(), NATIVE_MODE_KEY_28887, 0)));
+                        cachedContained = Settings.Global.getInt(context.getContentResolver(),
+                            CONTAINMENT_KEY_28886, 1) != 0;
+                    } catch (Throwable ignored) {
+                        cachedKyantSwitch = false;
+                        cachedNativeMode = 0;
+                        cachedContained = true;
+                    }
+                    lastSwitchCheckMs = now;
+                }
             }
-            return cachedSwitch;
         }
+        // Native experiments are always restricted to the safe FolderIcon host.
+        // A disabled V230 UI switch must not silently paint an experimental lens.
+        if (cachedContained && cachedNativeMode == 1)
+            return MaterialConfig230.get().enabled ? 1 : -1;
+        if (cachedContained && cachedNativeMode == 2) return 2;
+        return cachedKyantSwitch ? 0 : -1;
+    }
+    public static boolean isExperimentEnabled(android.content.Context context) {
+        return selectedEngine28888(context) >= 0;
     }
     private KyantLauncherLensProbe270() {}
     public static void install(ClassLoader loader) {
