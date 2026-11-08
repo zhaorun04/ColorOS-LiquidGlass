@@ -316,6 +316,19 @@ object KyantLauncherLens270 {
         if (try { Settings.Global.getInt(anchor.context.contentResolver, KEY, 0) != 1 }
                 catch (_: Throwable) { true }) return
         KyantOptics28827.ensure(anchor.context)
+        // V288.86 P0 containment. Default ON, including after upgrades from
+        // 288.77..85 with stale Settings.Global experiments still enabled.
+        // A DecorView child is above the OEM icon/Recents hierarchy and MUST NOT
+        // be used for the normal lens. Attach the full Kyant host as index 0 of
+        // FolderIcon, which inherits the OEM page/Recents visibility and z-order.
+        // 0 is a deliberately explicit legacy-debug opt-out, not a UI control.
+        val folderContainment28886 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_folder_containment_28886", 1) != 0
+        } catch (_: Throwable) { true }
+        XposedBridge.log("KYANT28886_CONTAINMENT host=${System.identityHashCode(anchor)} " +
+            "enabled=$folderContainment28886 parent=FOLDER_CHILD_INDEX_0 " +
+            "rootOverlayAllowed=${!folderContainment28886}")
         // V288.64: opt-in native parent versus Compose source draw lifecycle probe.
         // Counters are in memory. No per-frame logs or state writes from draw.
         // V288.66: opt-in use the native matrix of the actual Compose source
@@ -454,7 +467,7 @@ object KyantLauncherLens270 {
         // into local pixels; 2=move the direct-native control into the root
         // overlay, outside Workspace motion (requires native carrier 2).
         // The overlay is a diagnostic and intentionally covers the glass/icon.
-        val transformAb28876 = try {
+        val transformAb28876 = if (folderContainment28886) 0 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_transform_ab_28876", 0).coerceIn(0, 2)
         } catch (_: Throwable) { 0 }
@@ -468,7 +481,7 @@ object KyantLauncherLens270 {
         // This retains a regular View hierarchy/window traversal while avoiding
         // Workspace's inherited page transforms. Diagnostic only: top-level child
         // can obscure icons, so disable for normal use.
-        val fullOverlayAb28877 = try {
+        val fullOverlayAb28877 = if (folderContainment28886) 0 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_full_overlay_ab_28877", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
@@ -478,7 +491,7 @@ object KyantLauncherLens270 {
         } catch (_: Throwable) { false }
         // V288.78: SAME root FrameLayout, only the displayed renderer changes.
         // 0=legacy V288.77.1 behaviour; 1=root native-only; 2=root full Kyant.
-        val rootCompareAb28878 = try {
+        val rootCompareAb28878 = if (folderContainment28886) 0 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_root_compare_ab_28878", 0).coerceIn(0, 2)
         } catch (_: Throwable) { 0 }
@@ -495,7 +508,7 @@ object KyantLauncherLens270 {
         // 2=Compose source with layerBackdrop capture modifier but no consumer,
         // 3=Backdrop consumer blur/highlight without lens(), 4=full optical lens.
         // Stages 1-4 share the exact same root FrameLayout and bridge Bitmap.
-        val rootPipeline28879 = try {
+        val rootPipeline28879 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_root_pipeline_28879", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -506,7 +519,7 @@ object KyantLauncherLens270 {
         // V288.80: isolate the FIRST unstable boundary: native Canvas versus
         // Compose Bitmap. All five modes use the same root child FrameLayout.
         // -1 leaves the complete V288.79 behavior untouched.
-        val bitmapPipeline28880 = try {
+        val bitmapPipeline28880 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bitmap_pipeline_28880", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -517,7 +530,7 @@ object KyantLauncherLens270 {
         // V288.81: isolate ComposeView hosting from Compose draw nodes and
         // graphicsLayer composition. All modes use one root FrameLayout.
         // -1 preserves the complete V288.80 implementation.
-        val nodePipeline28881 = try {
+        val nodePipeline28881 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_node_pipeline_28881", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -527,7 +540,7 @@ object KyantLauncherLens270 {
         } catch (_: Throwable) { false }
         // V288.82: same AndroidView painter, four position sources. The stable
         // root-native control is stage 0, -1 keeps the previous production path.
-        val positionPipeline28882 = try {
+        val positionPipeline28882 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_position_pipeline_28882", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -539,7 +552,7 @@ object KyantLauncherLens270 {
         // 0 root-native, 1 Compose/AndroidView, 2 native sibling with Compose
         // hidden, 3 native sibling with transparent Compose node, 4 native
         // sibling beneath the genuine Kyant optical pipeline (integration probe).
-        val siblingPipeline28883 = try {
+        val siblingPipeline28883 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_sibling_pipeline_28883", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -552,7 +565,7 @@ object KyantLauncherLens270 {
         // 0 stable native-over-Compose; 1 native-under / Compose invisible;
         // 2 native-over / Compose empty visible; 3 native-under / Compose GONE;
         // 4 native-under / complete Kyant. No new shader or bitmap paths.
-        val orderPipeline28884 = try {
+        val orderPipeline28884 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_order_pipeline_28884", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -563,7 +576,7 @@ object KyantLauncherLens270 {
         // V288.85: fixed-Z experiment. All five stages create the exact same
         // root native-under-Compose hierarchy; only Compose alpha, visibility,
         // and optical composition change. Older probes remain disabled by 85.
-        val statePipeline28885 = try {
+        val statePipeline28885 = if (folderContainment28886) -1 else try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_state_pipeline_28885", -1).coerceIn(-1, 4)
         } catch (_: Throwable) { -1 }
@@ -595,7 +608,8 @@ object KyantLauncherLens270 {
             else if (rootPipeline28879 >= 0) rootPipeline28879 in 1..4
             else rootCompareAb28878 == 2) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val fullOverlayRequested28877 = (fullOverlayAb28877 == 1 || rootDirect28878 ||
+        val fullOverlayRequested28877 = !folderContainment28886 &&
+            (fullOverlayAb28877 == 1 || rootDirect28878 ||
             rootFullKyant28878) && nativeCarrierAb28869 == 1 && transformAb28876 == 0
         val fullOverlayParent28877 = if (fullOverlayRequested28877) root as? ViewGroup else null
         val fullOverlayActive28877 = fullOverlayRequested28877 && fullOverlayParent28877 != null
@@ -604,7 +618,8 @@ object KyantLauncherLens270 {
             "enabled=$fullOverlayActive28877 carrier=$nativeCarrierAb28869 " +
             "transform76=$transformAb28876 lens=COMPOSE_NATIVE_BITMAP mount=ROOT_CHILD")
         val affineSampling28876 = transformAb28876 == 1 && nativeCarrierAb28869 in 1..2
-        val overlayRequested28876 = transformAb28876 == 2 && nativeCarrierAb28869 == 2
+        val overlayRequested28876 = !folderContainment28886 &&
+            transformAb28876 == 2 && nativeCarrierAb28869 == 2
         val overlayParent28876 = if (overlayRequested28876) root as? ViewGroup else null
         val overlayActive28876 = overlayRequested28876 && overlayParent28876 != null
         if (transformTrace28876 || transformAb28876 != 0) XposedBridge.log(
@@ -1948,6 +1963,9 @@ object KyantLauncherLens270 {
             restoreRebound28818("dispose")
             if (disposed) return
             disposed = true
+            if (folderContainment28886) XposedBridge.log(
+                "KYANT28886_FOLDER_DISPOSE host=$trace28815Host reason=$reason " +
+                "parent=${frame.parent?.javaClass?.simpleName}")
             if (releaseTrace28820) liveHostProbes28821.remove(trace28815Host)
             if (activeCountRegistered) {
                 activeHostCount.decrementAndGet()
@@ -2219,8 +2237,15 @@ object KyantLauncherLens270 {
                     XposedBridge.log("KYANT288771_FALLBACK_FOLDER host=$trace28815Host")
                 }
             } else {
-                // Normal production path remains BELOW OEM folder icons.
+                // V288.86: never cover OEM icons / Recents with a DecorView child.
+                // The host's lifetime and inherited transforms now follow FolderIcon.
                 folder.addView(frame, 0, ViewGroup.LayoutParams(previewWidth, previewHeight))
+                if (folderContainment28886) XposedBridge.log(
+                    "KYANT28886_FOLDER_ATTACHED host=$trace28815Host " +
+                    "parent=${frame.parent?.javaClass?.simpleName} " +
+                    "index=${folder.indexOfChild(frame)} " +
+                    "root=${frame.parent === root} " +
+                    "nativeIconChildren=${(folder.childCount - 1).coerceAtLeast(0)}")
             }
             val onDetach = object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(v: View) {}

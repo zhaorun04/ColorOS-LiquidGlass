@@ -1,4 +1,35 @@
-ColorOS-LiquidGlass V1.9.205.288.85｜ComposeView Alpha、Visibility 与归位绘制提交 A/B 诊断版
+ColorOS-LiquidGlass V1.9.205.288.86｜文件夹图层归属与最近任务遮挡修正版
+
+【P0 默认安全承载】
+- 不再把玻璃 FrameLayout 作为 Launcher DecorView 的顶层子 View。正常默认将完整 Kyant 宿主添加为原生 FolderIcon 的索引 0 子 View，遵循 Launcher 原生文件夹图标、Workspace 和最近任务的显示层级。
+- 历史 V288.76~85 根层实验开关即使遗留在 Settings.Global，也不会覆盖本版默认安全承载。
+- 不重写二维折射 Shader / Kyant 光学参数 / 壁纸参考发布路径。
+- 本版修复的是承载位置的结构安全；归位抖动仍需真机验证，不宣称已消除。
+
+【开关】
+- liquidglass_kyant_folder_containment_28886=1：默认、安全、文件夹本地承载。
+- =0：仅用于开发者主动复现旧实验，可能再次覆盖原生图标和最近任务，不建议日常使用。
+- 修改后需重新加载 Launcher。
+
+【验收日志】
+- KYANT28886_CONTAINMENT ... enabled=true
+- KYANT28886_FOLDER_ATTACHED ... index=0 root=false
+- KYANT28886_FOLDER_DISPOSE ... reason=...
+- 使用 Vector 模块日志或：su -c 'logcat -d | grep KYANT28886 | tail -60'
+
+【验收步骤】
+1. 桌面文件夹的原生图标、文字应处于玻璃之上。
+2. 从桌面上滑进入最近任务，玻璃不应浮在任务卡片上方；返回桌面后仍正常。
+3. 反复快速左右滑动与向右不翻页回弹，分别记录是否有原有闪动。
+4. 同时确认 Kyant 二维折射、实时强度调节与 Dock 功能未退化。
+
+【Termux Git】
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.86 版本"
+git push origin main
+
+ColorOS-LiquidGlass V1.9.205.288.86｜ComposeView Alpha、Visibility 与归位绘制提交 A/B 诊断版
 
 【本版目标】
 V288.84 实测：模式0/1稳定；模式2/3向右归位时闪动；完整Kyant模式4归位闪动。V288.85固定相同根FrameLayout、相同子View绘制顺序（原生背景在Compose下方），只隔离Compose透明度、可见性和是否执行完整光学内容。
@@ -34,7 +65,7 @@ DRAW：FrameLayout.dispatchDraw完成后的目标/提交值及PreDraw到绘制�
 【Termux Git】
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.85 版本"
+git commit -m "V1.9.205.288.86 版本"
 git push origin main
 
 ===== 旧版系统说明（保留功能历史） =====
