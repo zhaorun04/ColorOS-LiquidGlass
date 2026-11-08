@@ -547,16 +547,33 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_sibling_trace_28883", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.84: test only root-child drawing order and transient root-layer
+        // visibility. These settings override older A/B tests when enabled.
+        // 0 stable native-over-Compose; 1 native-under / Compose invisible;
+        // 2 native-over / Compose empty visible; 3 native-under / Compose GONE;
+        // 4 native-under / complete Kyant. No new shader or bitmap paths.
+        val orderPipeline28884 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_order_pipeline_28884", -1).coerceIn(-1, 4)
+        } catch (_: Throwable) { -1 }
+        val orderTrace28884 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_order_trace_28884", 0) == 1
+        } catch (_: Throwable) { false }
         val siblingNative28883 = siblingPipeline28883 in 2..4 &&
             nativeCarrierAb28869 == 1 && transformAb28876 == 0
-        val rootDirect28878 = (if (siblingPipeline28883 >= 0) siblingPipeline28883 == 0
+        val orderNative28884 = orderPipeline28884 in 1..4 &&
+            nativeCarrierAb28869 == 1 && transformAb28876 == 0
+        val rootDirect28878 = (if (orderPipeline28884 >= 0) orderPipeline28884 == 0
+            else if (siblingPipeline28883 >= 0) siblingPipeline28883 == 0
             else if (positionPipeline28882 >= 0) positionPipeline28882 == 0
             else if (nodePipeline28881 >= 0) nodePipeline28881 == 0
             else if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 0..1
             else if (rootPipeline28879 >= 0) rootPipeline28879 == 0
             else rootCompareAb28878 == 1) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val rootFullKyant28878 = (if (siblingPipeline28883 >= 0) siblingPipeline28883 in 1..4
+        val rootFullKyant28878 = (if (orderPipeline28884 >= 0) orderPipeline28884 in 1..4
+            else if (siblingPipeline28883 >= 0) siblingPipeline28883 in 1..4
             else if (positionPipeline28882 >= 0) positionPipeline28882 in 1..4
             else if (nodePipeline28881 >= 0) nodePipeline28881 in 1..4
             else if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 2..4
@@ -1033,7 +1050,9 @@ object KyantLauncherLens270 {
             // covers Kyant. The optical composition is kept alive for A/B parity.
             if (pipelineMode28819 == 0 || pipelineMode28819 == 3 ||
                 nativeCarrierAb28869 == 2 || rootDirect28878 ||
-                siblingPipeline28883 == 2) alpha = 0f
+                siblingPipeline28883 == 2 || orderPipeline28884 == 1 ||
+                orderPipeline28884 == 3) alpha = 0f
+            if (orderPipeline28884 == 3) visibility = View.GONE
         }
         // The ComposeView is the actual native child carrying the Kyant source.
         // A/B 1 gets its current transformed origin directly from that child,
@@ -1666,7 +1685,7 @@ object KyantLauncherLens270 {
             Offset(overlayOrigin28876[0] + overlayRootScreen28876[0] - overlayRootWindow28876[0],
                 overlayOrigin28876[1] + overlayRootScreen28876[1] - overlayRootWindow28876[1])
         } catch (_: Throwable) { fallback }
-        val nativeSampleView = if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 ||
+        val nativeSampleView = if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 || orderNative28884 ||
             (nativeCompareMode == 1 && nativeBridgeMode == 0 && displayIsolationMode == 0) ||
             displayIsolationMode == 1 || nativeLayerMode in 1..3) object : View(anchor.context) {
             private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -1709,7 +1728,7 @@ object KyantLauncherLens270 {
                 }
                 val position = if (overlayInstalled28876) {
                     nativeCarrierDrawPosition28876(this, basePosition28870)
-                } else if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883)
+                } else if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 || orderNative28884)
                     nativeCarrierDrawPosition28870(this, basePosition28870, "NATIVE_VIEW_DIRECT")
                     else basePosition28870
                 if (releaseTrace28820) releaseTrace28820("COORD28826", position,
@@ -1791,7 +1810,7 @@ object KyantLauncherLens270 {
                     (activeReference.width - x) * width / sw,
                     (activeReference.height - y) * height / sh)
                 val checkpoint = canvas.save()
-                if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 ||
+                if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 || orderNative28884 ||
                     displayIsolationMode == 1 || nativeLayerMode in 1..3) {
                     canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
                 } else {
@@ -1815,7 +1834,7 @@ object KyantLauncherLens270 {
                     "NATIVE_VIEW_DIRECT", this, position, drawCount + 1L)
                 if (nativeCarrierAb28869 == 2) distanceNative28874(
                     "NATIVE_VIEW_DIRECT", position, drawCount + 1L)
-                if (nativeCarrierAb28869 != 2 && !rootDirect28878 && !siblingNative28883 &&
+                if (nativeCarrierAb28869 != 2 && !rootDirect28878 && !siblingNative28883 && !orderNative28884 &&
                     displayIsolationMode != 1 && nativeLayerMode == 0)
                     canvas.drawLine(width * 0.5f, 0f, width * 0.5f, height.toFloat(), dividerPaint)
                 val now = SystemClock.elapsedRealtimeNanos()
@@ -1957,14 +1976,17 @@ object KyantLauncherLens270 {
             compose.setParentCompositionContext(newRecomposer)
             bridgeView?.let { frame.addView(it, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
-            // V288.12: modes 2/3 put stable native Canvas BELOW Compose.
-            // In V288.83 native background is a SIBLING of ComposeView, never
-            // an AndroidView child. Place it before Compose to preserve z-order.
-            if (!overlayActive28876 && (nativeLayerMode in 2..3 || siblingNative28883)) nativeSampleView?.let { frame.addView(it,
+            // V288.84 isolates child z-order, holding native canvas content fixed.
+            // 0 native on top; 1 native below hidden Compose; 2 native on top of
+            // empty Compose; 3 native below GONE Compose; 4 native below Kyant.
+            val nativeBelowCompose28884 = if (orderPipeline28884 >= 0)
+                orderPipeline28884 == 1 || orderPipeline28884 == 3 || orderPipeline28884 == 4
+                else nativeLayerMode in 2..3 || siblingNative28883
+            if (!overlayActive28876 && nativeBelowCompose28884) nativeSampleView?.let { frame.addView(it,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
             frame.addView(compose, FrameLayout.LayoutParams(previewWidth, previewHeight))
             // Mode 1 is a control: native fully covers Compose, same as V288.11 A.
-            if (!overlayActive28876 && nativeLayerMode !in 2..3 && !siblingNative28883) nativeSampleView?.let { frame.addView(it,
+            if (!overlayActive28876 && !nativeBelowCompose28884) nativeSampleView?.let { frame.addView(it,
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
 
             // V288.78: root hosts would otherwise cover OEM folder icons.
@@ -2044,12 +2066,15 @@ object KyantLauncherLens270 {
                 XposedBridge.log("KYANT28876_OVERLAY_ERROR ${t.javaClass.simpleName}")
             }
             compose.setContent {
-                if (siblingPipeline28883 == 2 || siblingPipeline28883 == 3) {
+                if ((orderPipeline28884 >= 0 && orderPipeline28884 in 1..3) ||
+                    (orderPipeline28884 < 0 && (siblingPipeline28883 == 2 || siblingPipeline28883 == 3))) {
                     // No optical composition is invoked in these modes.
                     // Mode2 keeps an invisible ComposeView, mode3 leaves an
                     // empty transparent composition on top of native pixels.
                     androidx.compose.foundation.layout.Box(Modifier.fillMaxSize())
                     if (compositionSeen.compareAndSet(false, true)) {
+                        if (orderPipeline28884 >= 0 && orderTrace28884)
+                            XposedBridge.log("KYANT28884_COMPOSITION_EMPTY host=$trace28815Host mode=$orderPipeline28884")
                         XposedBridge.log("KYANT28883_COMPOSITION_EMPTY host=$trace28815Host " +
                             "stage=$siblingPipeline28883")
                     }
@@ -2065,7 +2090,7 @@ object KyantLauncherLens270 {
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
                 rootPipeline28879, rootPipelineTrace28879,
                 bitmapPipeline28880, bitmapTrace28880, immutableBridge28880, immutableGen28880,
-                if (siblingPipeline28883 == 1) 2 else nodePipeline28881, nodeTrace28881,
+                if (orderPipeline28884 >= 0) -1 else if (siblingPipeline28883 == 1) 2 else nodePipeline28881, nodeTrace28881,
                 positionPipeline28882, positionTrace28882,
                 { nativeCarrierDrawPosition28876(frame, glassScreenPosition(lastBounds)) },
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
@@ -2117,6 +2142,12 @@ object KyantLauncherLens270 {
                     frame.layout(0, 0, previewWidth, previewHeight)
                     fullOverlayInstalled28877 = true
                     positionFullOverlay28877(glassScreenPosition(lastBounds), frame)
+                    if (orderPipeline28884 >= 0 && orderTrace28884) XposedBridge.log(
+                        "KYANT28884_ORDER_ATTACHED host=$trace28815Host mode=$orderPipeline28884 " +
+                        "nativeIndex=${nativeSampleView?.let { frame.indexOfChild(it) } ?: -1} " +
+                        "composeIndex=${frame.indexOfChild(compose)} " +
+                        "composeAlpha=${compose.alpha} composeVisibility=${compose.visibility} " +
+                        "frameChildren=${frame.childCount} rootParent=${frame.parent?.javaClass?.simpleName}")
                     if (siblingPipeline28883 >= 0 && siblingTrace28883) XposedBridge.log(
                         "KYANT28883_SIBLING_ATTACHED host=$trace28815Host " +
                         "stage=$siblingPipeline28883 " +
@@ -2186,6 +2217,12 @@ object KyantLauncherLens270 {
         var cadenceLastNs = 0L
         var cadenceStartX = Float.NaN
         var cadenceEndX = Float.NaN
+        // V288.84 bounded diagnostics. No finger-up callback is hooked;
+        // near-settle is inferred from the position delta only.
+        var orderLastX28884 = Float.NaN
+        var orderLastDx28884 = 0f
+        var orderLogNs28884 = 0L
+        var orderEventCount28884 = 0
         val listener = android.view.ViewTreeObserver.OnPreDrawListener {
                 if (!disposed && anchor.isAttachedToWindow) {
                     // The switch is intentionally checked during drawing, not on a fixed timer.
@@ -2244,6 +2281,30 @@ object KyantLauncherLens270 {
                     anchor.getLocationOnScreen(locationScratch)
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
+                    if (orderPipeline28884 >= 0 && orderTrace28884 && fullOverlayInstalled28877) {
+                        val px84 = orderLastX28884
+                        val dx84 = if (px84.isFinite()) actualSample.x - px84 else 0f
+                        val signChange84 = px84.isFinite() && kotlin.math.abs(dx84) > 0.5f &&
+                            kotlin.math.abs(orderLastDx28884) > 0.5f && dx84 * orderLastDx28884 < 0f
+                        val nearSettle84 = kotlin.math.abs(orderLastDx28884) >= 2f &&
+                            kotlin.math.abs(dx84) <= 0.5f
+                        val burst84 = px84.isFinite() && kotlin.math.abs(dx84) >= 16f
+                        val now84 = SystemClock.elapsedRealtimeNanos()
+                        // Limit to <= 10 records/second per host and <= 140 total.
+                        if ((signChange84 || nearSettle84 || burst84) &&
+                            orderEventCount28884 < 140 && now84 - orderLogNs28884 >= 100_000_000L) {
+                            orderLogNs28884 = now84
+                            orderEventCount28884++
+                            XposedBridge.log("KYANT28884_ORDER_MOTION host=$trace28815Host " +
+                                "mode=$orderPipeline28884 event=${if (signChange84) "reverse" else if (nearSettle84) "settle" else "move"} " +
+                                "x=${actualSample.x} dx=$dx84 lastDx=$orderLastDx28884 " +
+                                "frameTx=${frame.translationX} alpha=${compose.alpha} " +
+                                "visibility=${compose.visibility} nativeIndex=${nativeSampleView?.let { frame.indexOfChild(it) } ?: -1} " +
+                                "composeIndex=${frame.indexOfChild(compose)}")
+                        }
+                        orderLastX28884 = actualSample.x
+                        orderLastDx28884 = dx84
+                    }
                     if (overlayInstalled28876) positionOverlay28876(actualSample)
                     if (fullOverlayInstalled28877) {
                         positionFullOverlay28877(actualSample, frame)

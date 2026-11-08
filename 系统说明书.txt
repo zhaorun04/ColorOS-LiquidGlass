@@ -1,3 +1,33 @@
+ColorOS-LiquidGlass V1.9.205.288.84｜根子 View 绘制顺序与归位事件隔离实验版
+
+【本次实际更改】
+新增 liquidglass_kyant_order_pipeline_28884 (-1,0..4) 与 liquidglass_kyant_order_trace_28884 (0/1)，不改 Shader/采样算法。
+-1：退出实验，恢复此前绘制模式。
+ 0：根容器原生 Canvas 位于 ComposeView 上方（已验证稳定对照）。
+ 1：原生 Canvas 位于隐藏 ComposeView 下方，复现上一版模式2。
+ 2：原生 Canvas 位于透明、空内容 ComposeView 上方，隔离 z-order。
+ 3：原生 Canvas 位于 GONE ComposeView 下方，隔离 invisible 与 GONE。
+ 4：原生 Canvas 在下，完整 Compose Kyant 在上，观察持续抖动。
+每次切换必须重启 Launcher，不能直接在同一 Host 上动态切换层级。
+
+【诊断日志】
+KYANT28884_ORDER_ATTACHED：启动后只记录一次 View 层级、可见性和 alpha。
+KYANT28884_COMPOSITION_EMPTY：空 Compose 组首次构建。
+KYANT28884_ORDER_MOTION：只在位置变向、短暂稳定、明显移动时节流输出，每 Host <=10条/秒，最多140条。event=settle 是位置变化启发式，并非真实手指抬起事件。
+本版本不会自动采集点击、手指抬起和系统合成器实际帧，日志本身不能证明闪动发生的精确 GPU 帧。
+
+【测试配置】
+su -c 'settings put global liquidglass_kyant_native_carrier_ab_28869 1; settings put global liquidglass_kyant_sibling_pipeline_28883 -1; settings put global liquidglass_kyant_position_pipeline_28882 -1; settings put global liquidglass_kyant_node_pipeline_28881 -1; settings put global liquidglass_kyant_bitmap_pipeline_28880 -1; settings put global liquidglass_kyant_root_pipeline_28879 -1; settings put global liquidglass_kyant_root_compare_ab_28878 0; settings put global liquidglass_kyant_full_overlay_ab_28877 0; settings put global liquidglass_kyant_transform_ab_28876 0; settings put global liquidglass_kyant_root_icons_28878 0; settings put global liquidglass_kyant_order_trace_28884 1; settings put global liquidglass_kyant_order_pipeline_28884 0'
+切换：su -c settings put global liquidglass_kyant_order_pipeline_28884 1
+查询：su -c 'logcat -d -v threadtime | grep -E "KYANT28884_(ORDER_ATTACHED|ORDER_MOTION|COMPOSITION_EMPTY)" | tail -80'
+退出：su -c 'settings put global liquidglass_kyant_order_pipeline_28884 -1; settings put global liquidglass_kyant_order_trace_28884 0'
+
+【诊断边界】
+根子 View 在 Launcher 之上，仍可能遮挡 OEM 原生文件夹图标；此次并未宣称修复图标。
+模式 4 的完整 Kyant 可能仍有归位抖动；其他模式解决瞬时闪动也不能推断其会被自动修复。
+Gradle 编译及真机未在本地完成，只进行了静态检查与 ZIP 校验。
+
+===== 历史系统说明 =====
 ColorOS-LiquidGlass V1.9.205.288.83｜根原生层与 Compose 光学层分离实验版
 
 实验开关：liquidglass_kyant_sibling_pipeline_28883=-1..4
