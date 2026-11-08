@@ -441,6 +441,26 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_native_carrier_ab_28869", 0).coerceIn(0, 2)
         } catch (_: Throwable) { 0 }
+        // V288.87: 0=unchanged Kyant, 1=actual UnifiedGlass230 AGSL,
+        // 2=same native wallpaper sampling without optical Shader.
+        // Deliberately independent of historical root experiments, always
+        // mounted as FolderIcon's index-0 child with V288.86 containment.
+        val v230NativeMode28887 = if (folderContainment28886) try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_v230_native_ab_28887", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 } else 0
+        val v230NativeTrace28887 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_v230_trace_28887", 0) == 1
+        } catch (_: Throwable) { false }
+        if (v230NativeMode28887 != 0) {
+            val m230 = MaterialConfig230.get()
+            XposedBridge.log("KYANT28887_NATIVE_HOST host=${System.identityHashCode(anchor)} " +
+                "mode=$v230NativeMode28887 folderContained=$folderContainment28886 " +
+                "opticalStrength=${m230.strength} thickness=${m230.thickness} " +
+                "environment=${m230.environment} materialUiEnabled=${m230.enabled} " +
+                "source=FRAME_BRIDGE_266")
+        }
         // V288.74: 0 = baseline, 1 = small-delta bridge pixel-space correction.
         // Only native carrier 1 consumes this switch; native carrier 2 stays unchanged.
         val distanceAb28874 = try {
@@ -758,7 +778,8 @@ object KyantLauncherLens270 {
         if (frameTrace28815) XposedBridge.log(
             "KYANT28815_TRACE_ENABLED host=$trace28815Host native=${nativeLayerMode in 1..3} sourceId=${System.identityHashCode(reference)}")
         val onsetSourceId = System.identityHashCode(reference)
-        val nativeBridgeMode = if (nativeCarrierAb28869 != 0) {
+        val nativeBridgeMode = if (v230NativeMode28887 != 0) 0
+            else if (nativeCarrierAb28869 != 0) {
             // Both A/B paths sample via the native Canvas; mode 2 also draws
             // directly to the native View instead of waiting for Compose.
             if (nativeCarrierAb28869 == 1) 1 else 0
@@ -1096,12 +1117,12 @@ object KyantLauncherLens270 {
             isFocusable = false
             // Mode 1 of V288.78 uses exactly the SAME root host, but native wallpaper
             // covers Kyant. The optical composition is kept alive for A/B parity.
-            if (pipelineMode28819 == 0 || pipelineMode28819 == 3 ||
+            if (v230NativeMode28887 != 0 || pipelineMode28819 == 0 || pipelineMode28819 == 3 ||
                 nativeCarrierAb28869 == 2 || rootDirect28878 ||
                 siblingPipeline28883 == 2 || orderPipeline28884 == 1 ||
                 orderPipeline28884 == 3) alpha = 0f
             if (orderPipeline28884 == 3) visibility = View.GONE
-            if (stateActive28885) {
+            if (stateActive28885 && v230NativeMode28887 == 0) {
                 alpha = if (statePipeline28885 == 1 || statePipeline28885 == 4) 1f else 0f
                 visibility = when (statePipeline28885) {
                     2 -> View.INVISIBLE
@@ -1741,11 +1762,19 @@ object KyantLauncherLens270 {
             Offset(overlayOrigin28876[0] + overlayRootScreen28876[0] - overlayRootWindow28876[0],
                 overlayOrigin28876[1] + overlayRootScreen28876[1] - overlayRootWindow28876[1])
         } catch (_: Throwable) { fallback }
-        val nativeSampleView = if (nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 || orderNative28884 ||
+        val nativeSampleView = if (v230NativeMode28887 != 0 || nativeCarrierAb28869 == 2 || rootDirect28878 || siblingNative28883 || orderNative28884 ||
             (nativeCompareMode == 1 && nativeBridgeMode == 0 && displayIsolationMode == 0) ||
             displayIsolationMode == 1 || nativeLayerMode in 1..3) object : View(anchor.context) {
             private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
             private val destination = RectF()
+            // V288.87: cache the BitmapShader for the live wallpaper generation.
+            // Local matrix changes only on the View's native draw, not through
+            // asynchronous Compose State/Backdrop publishing.
+            private var v230Source287: Bitmap? = null
+            private var v230Shader287: android.graphics.BitmapShader? = null
+            private val v230SampleMatrix287 = Matrix()
+            private val v230Valid287 = RectF()
+            private val v230Bounds287 = RectF()
             private val dividerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = android.graphics.Color.WHITE
                 strokeWidth = resources.displayMetrics.density.coerceAtLeast(1f)
@@ -1862,6 +1891,54 @@ object KyantLauncherLens270 {
                 val sw = width.toFloat() * scaleX
                 val sh = height.toFloat() * scaleY
                 if (sw <= 0f || sh <= 0f) return
+                if (v230NativeMode28887 != 0) {
+                    // Same global screen->wallpaper geometry as V230 HookEntry:
+                    // shader bitmap-to-local matrix = screen/bitmap scale and
+                    // translation = -current actual FolderIcon screen origin.
+                    // Both optics and wallpaper sampling execute in THIS
+                    // native View.onDraw(), without a Compose/Bitmap handoff.
+                    if (v230Source287 !== activeReference || v230Shader287 == null) {
+                        v230Source287 = activeReference
+                        v230Shader287 = android.graphics.BitmapShader(
+                            activeReference, android.graphics.Shader.TileMode.DECAL,
+                            android.graphics.Shader.TileMode.DECAL)
+                    }
+                    v230SampleMatrix287.setValues(floatArrayOf(
+                        screenW.toFloat() / activeReference.width, 0f, -position.x,
+                        0f, screenH.toFloat() / activeReference.height, -position.y,
+                        0f, 0f, 1f))
+                    val source287 = v230Shader287!!
+                    source287.setLocalMatrix(v230SampleMatrix287)
+                    v230Bounds287.set(0f, 0f, width.toFloat(), height.toFloat())
+                    v230Valid287.set(-position.x, -position.y,
+                        screenW.toFloat() - position.x,
+                        screenH.toFloat() - position.y)
+                    val save287 = canvas.save()
+                    // Clip only to this native optical container, never the
+                    // entire Launcher or its icon children.
+                    val radius287 = kotlin.math.min(width, height) * 0.205f
+                    canvas.clipRoundRect(v230Bounds287, radius287, radius287)
+                    val usedV230287 = if (v230NativeMode28887 == 1 && canvas.isHardwareAccelerated)
+                        UnifiedGlass230.drawExperimental287(this, canvas, v230Bounds287,
+                            radius287, source287, source287, v230Valid287, 0f)
+                        else false
+                    if (!usedV230287) {
+                        // On AGSL compilation failure, fall back to the exact
+                        // same native wallpaper sample (do not show blank glass).
+                        bitmapPaint.shader = source287
+                        canvas.drawRect(v230Bounds287, bitmapPaint)
+                        bitmapPaint.shader = null
+                    }
+                    canvas.restoreToCount(save287)
+                    drawCount++
+                    if (v230NativeTrace28887 && (drawCount <= 3L || drawCount % 180L == 0L))
+                        XposedBridge.log("KYANT28887_NATIVE_DRAW mode=$v230NativeMode28887 " +
+                            "host=${System.identityHashCode(anchor)} usedV230=$usedV230287 " +
+                            "hardware=${canvas.isHardwareAccelerated} source=${System.identityHashCode(activeReference)} " +
+                            "sampleX=${position.x} sampleY=${position.y} " +
+                            "width=$width height=$height radius=$radius287")
+                    return
+                }
                 destination.set(-x * width / sw, -y * height / sh,
                     (activeReference.width - x) * width / sw,
                     (activeReference.height - y) * height / sh)
@@ -2038,7 +2115,8 @@ object KyantLauncherLens270 {
             // V288.84 isolates child z-order, holding native canvas content fixed.
             // 0 native on top; 1 native below hidden Compose; 2 native on top of
             // empty Compose; 3 native below GONE Compose; 4 native below Kyant.
-            val nativeBelowCompose28884 = if (stateActive28885) true
+            val nativeBelowCompose28884 = if (v230NativeMode28887 != 0) false
+                else if (stateActive28885) true
                 else if (orderPipeline28884 >= 0)
                 orderPipeline28884 == 1 || orderPipeline28884 == 3 || orderPipeline28884 == 4
                 else nativeLayerMode in 2..3 || siblingNative28883
@@ -2126,7 +2204,8 @@ object KyantLauncherLens270 {
                 XposedBridge.log("KYANT28876_OVERLAY_ERROR ${t.javaClass.simpleName}")
             }
             compose.setContent {
-                if ((stateActive28885 && statePipeline28885 in 0..3) ||
+                if (v230NativeMode28887 != 0 ||
+                    (stateActive28885 && statePipeline28885 in 0..3) ||
                     (orderPipeline28884 >= 0 && orderPipeline28884 in 1..3 && !stateActive28885) ||
                     (orderPipeline28884 < 0 && (siblingPipeline28883 == 2 || siblingPipeline28883 == 3))) {
                     // No optical composition is invoked in these modes.

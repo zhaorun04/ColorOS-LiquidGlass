@@ -256,6 +256,19 @@ final class UnifiedGlass230 {
 
     static boolean draw(View view,Canvas canvas,RectF rect,float radius,
             BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix){
+        return drawInternal287(view,canvas,rect,radius,wallpaper,blurredWallpaper,valid,blurMix,false);
+    }
+    // V288.87: opt-in reuse of the ORIGINAL V230 AGSL curve inside the safe
+    // FolderIcon-native Canvas. Does NOT change the UI material enable switch
+    // nor the old UnifiedGlass230.draw() contract used by legacy surfaces.
+    // The three actual V230 slider values are taken from MaterialConfig230.
+    static boolean drawExperimental287(View view,Canvas canvas,RectF rect,float radius,
+            BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix){
+        return drawInternal287(view,canvas,rect,radius,wallpaper,blurredWallpaper,valid,blurMix,true);
+    }
+    private static boolean drawInternal287(View view,Canvas canvas,RectF rect,float radius,
+            BitmapShader wallpaper,BitmapShader blurredWallpaper,RectF valid,float blurMix,
+            boolean forceExperimental287){
         MaterialConfig230.State s=MaterialConfig230.get();
         // Settings.Global is a transient, opt-in test switch; normal mode is 0.
         // Sampling every 60 draws avoids a binder read for every frame.
@@ -267,7 +280,7 @@ final class UnifiedGlass230 {
                 refractionAB244=Math.max(0,Math.min(3,ab));
             }catch(Throwable ignored){diagnostic235=0;}
         }
-        if(!s.enabled){
+        if(!s.enabled && !forceExperimental287){
             if(lastEnabled240){reset240("disabled");}
             lastEnabled240=false;
             return false;

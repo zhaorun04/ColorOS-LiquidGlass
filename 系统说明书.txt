@@ -1,3 +1,35 @@
+ColorOS-LiquidGlass V1.9.205.288.87｜V230 原生光学采样与 Kyant 安全承载对照版
+
+【本版目的】
+V288.86 修复了文件夹图标和最近任务遮挡，但向右不翻页松手归位仍可能闪动。
+本版不宣称归位已修好，也不宣称 AGSL 与 Kyant 光学完全等效。优先复用工程内现有 UnifiedGlass230 原生 RuntimeShader、BitmapShader 和统一曲面模型。
+
+【渲染开关（Settings.Global）】
+liquidglass_kyant_folder_containment_28886=1（必须；不会启用 DecorView 顶层）。
+liquidglass_kyant_v230_native_ab_28887：0=V288.86 原始 Kyant；1=文件夹原生 Canvas + V230 AGSL 单一曲面；2=文件夹原生 Canvas + 原始壁纸，无光学（采样稳定对照）。
+liquidglass_kyant_v230_trace_28887：0=关闭额外日志（默认），1=低频日志。
+需要重新加载 Launcher 以重建模式。仅 FolderIcon 启用对照，Dock 仍按此前稳定路径。
+
+【V230 三个真实参数】
+继续从原来的“统一玻璃材质”面板经 MaterialConfig230 接收：material_optical_strength_230、material_thickness_230、material_environment_230。模式1强制执行 V230 实验渲染，独立于旧版统一材质 UI 的 enabled 开关，但仍使用其三个数值；未发布过新参数时采用旧默认 70/55/60。
+原生 BitmapShader 基于 FrameBridge266 的原始壁纸，用同一个 onDraw 的屏幕坐标设置本地矩阵。模糊输入暂使用同一张源图、blurMix=0，以避免引入异步模糊缓存。玻璃圆角暂为 min(width,height)*0.205（诊断近似值；后续应对齐文件夹原生圆角）。
+如果 V230 AGSL 编译或绘制失败，自动回退同源壁纸的原生采样，并输出 LiquidGlass240 错误日志；不要将壁纸兜底误认为正常透镜。
+
+【验证】
+1. 模式0/1分别向右滑动不翻页、松手回弹，记录是否闪动；反复快速左右滑动。
+2. 检查模式1三个滑块每个是否有明显效果，不能只看日志。
+3. 检查容器图标、最近任务上层遮挡、文件夹与 Dock、切换壁纸后恢复。
+4. 日志：su -c 'logcat -d -v threadtime | grep -E "KYANT28887|LiquidGlass230|LiquidGlass240" | tail -70'
+5. 默认模式0完全保留 V288.86 光学与安全承载行为。
+
+【Termux Git】
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.87 版本"
+git push origin main
+
+-----
+
 ColorOS-LiquidGlass V1.9.205.288.86｜文件夹图层归属与最近任务遮挡修正版
 
 【P0 默认安全承载】
