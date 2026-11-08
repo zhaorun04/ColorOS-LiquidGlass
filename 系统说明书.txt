@@ -1,3 +1,9 @@
+ColorOS-LiquidGlass V1.9.205.288.77｜完整 Kyant 根覆盖层隔离 A/B 实验版
+
+新增：liquidglass_kyant_full_overlay_ab_28877=1（要求 native_carrier_ab_28869=1、transform_ab_28876=0），将原有 FrameLayout（Compose + 原生桥接位图）移入 Launcher 根 ViewGroupOverlay。保持完整 Kyant 光学；可遮挡图标，仅用于对照验证。关闭开关并重载 Launcher 恢复文件夹内部承载。
+诊断：liquidglass_kyant_full_overlay_trace_28877=1，Vector 模块日志 KYANT28877_HOST / KYANT28877_OVERLAY_ATTACHED / KYANT28877_ROOT_MOTION / KYANT28877_OVERLAY_REMOVED。
+注意：根覆盖层模式不应作为日用默认。未在本地完成 Android Gradle 真编译或真机验证。
+
 ColorOS-LiquidGlass V1.9.205.288.76｜父层仿射变换与根覆盖层诊断实验版
 
 【版本目标】

@@ -461,6 +461,26 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_transform_trace_28876", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.77: same Compose + native-bitmap carrier as V288.69 mode 1,
+        // but transplant the ENTIRE Kyant host outside Workspace into root.overlay.
+        // The overlay is a diagnostic: it may cover folder icons, unlike the normal
+        // FolderIcon child at index 0. Disable for everyday use.
+        val fullOverlayAb28877 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_full_overlay_ab_28877", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        val fullOverlayTrace28877 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_full_overlay_trace_28877", 0) == 1
+        } catch (_: Throwable) { false }
+        val fullOverlayRequested28877 = fullOverlayAb28877 == 1 &&
+            nativeCarrierAb28869 == 1 && transformAb28876 == 0
+        val fullOverlayParent28877 = if (fullOverlayRequested28877) root as? ViewGroup else null
+        val fullOverlayActive28877 = fullOverlayRequested28877 && fullOverlayParent28877 != null
+        if (fullOverlayTrace28877 || fullOverlayAb28877 != 0) XposedBridge.log(
+            "KYANT28877_HOST host=${System.identityHashCode(anchor)} " +
+            "enabled=$fullOverlayActive28877 carrier=$nativeCarrierAb28869 " +
+            "transform76=$transformAb28876 lens=COMPOSE_NATIVE_BITMAP")
         val affineSampling28876 = transformAb28876 == 1 && nativeCarrierAb28869 in 1..2
         val overlayRequested28876 = transformAb28876 == 2 && nativeCarrierAb28869 == 2
         val overlayParent28876 = if (overlayRequested28876) root as? ViewGroup else null
@@ -1485,6 +1505,32 @@ object KyantLauncherLens270 {
         // V288.7: native Canvas reference, intentionally ABOVE Kyant on the LEFT half
         // only. Right half stays the unmodified Compose/Kyant optical renderer.
         // This is an A/B diagnostic, NOT the final hybrid optical implementation.
+        var fullOverlayInstalled28877 = false
+        val fullOverlayRootLocation28877 = IntArray(2)
+        var fullOverlayTraceCount28877 = 0L
+        var fullOverlayLastPosition28877 = Offset(Float.NaN, Float.NaN)
+        fun positionFullOverlay28877(pos: Offset, host: View) {
+            if (!fullOverlayInstalled28877) return
+            root.getLocationOnScreen(fullOverlayRootLocation28877)
+            val targetX = pos.x - fullOverlayRootLocation28877[0]
+            val targetY = pos.y - fullOverlayRootLocation28877[1]
+            if (kotlin.math.abs(host.translationX - targetX) > 0.0001f ||
+                kotlin.math.abs(host.translationY - targetY) > 0.0001f) {
+                host.translationX = targetX
+                host.translationY = targetY
+                host.postInvalidateOnAnimation()
+            }
+            if (fullOverlayTrace28877) {
+                val last = fullOverlayLastPosition28877
+                val dx = if (last.x.isFinite()) pos.x - last.x else 0f
+                if (fullOverlayTraceCount28877++ % 30L == 0L) XposedBridge.log(
+                    "KYANT28877_ROOT_MOTION host=${System.identityHashCode(anchor)} " +
+                    "sampleX=${pos.x} overlayX=$targetX frameTx=${host.translationX} " +
+                    "dx=$dx frameParent=${host.parent?.javaClass?.simpleName} " +
+                    "width=${host.width} height=${host.height}")
+                fullOverlayLastPosition28877 = pos
+            }
+        }
         var overlayInstalled28876 = false
         val overlayMatrix28876 = Matrix()
         val overlayOrigin28876 = FloatArray(2)
@@ -1724,6 +1770,13 @@ object KyantLauncherLens270 {
             try { treeDrawListener28865?.let { if (root.viewTreeObserver.isAlive) root.viewTreeObserver.removeOnDrawListener(it) } } catch (_: Throwable) {}
             try { detachListener?.let { anchor.removeOnAttachStateChangeListener(it) } } catch (_: Throwable) {}
             try { layoutListener?.let { anchor.removeOnLayoutChangeListener(it) } } catch (_: Throwable) {}
+            if (fullOverlayInstalled28877) try {
+                fullOverlayParent28877?.overlay?.remove(frame)
+                fullOverlayInstalled28877 = false
+                XposedBridge.log("KYANT28877_OVERLAY_REMOVED host=$trace28815Host reason=$reason")
+            } catch (t: Throwable) {
+                XposedBridge.log("KYANT28877_REMOVE_ERROR ${t.javaClass.simpleName}")
+            }
             if (overlayInstalled28876) try {
                 overlayParent28876?.overlay?.remove(nativeSampleView!!)
                 overlayInstalled28876 = false
@@ -1838,9 +1891,23 @@ object KyantLauncherLens270 {
                 }
             } }
             newScope.launch { newRecomposer.runRecomposeAndApplyChanges() }
-            // A normal child at index 0 is drawn by FolderIcon.dispatchDraw before icons.
-            // Explicitly lay it out because OEM FolderIcon may not manage injected children.
-            folder.addView(frame, 0, ViewGroup.LayoutParams(previewWidth, previewHeight))
+            // V288.77: transplant the SAME frame (Compose + native bitmap bridge)
+            // into root.overlay, rather than swapping to a pure native control.
+            // Attach under root so it cannot inherit Workspace page transforms.
+            if (fullOverlayActive28877) {
+                frame.layoutParams = ViewGroup.LayoutParams(previewWidth, previewHeight)
+                frame.layout(0, 0, previewWidth, previewHeight)
+                fullOverlayParent28877!!.overlay.add(frame)
+                fullOverlayInstalled28877 = true
+                positionFullOverlay28877(glassScreenPosition(lastBounds), frame)
+                XposedBridge.log("KYANT28877_OVERLAY_ATTACHED host=$trace28815Host " +
+                    "width=$previewWidth height=$previewHeight " +
+                    "frameParent=${frame.parent?.javaClass?.simpleName} " +
+                    "carrier=$nativeCarrierAb28869 lens=full")
+            } else {
+                // Normal production path remains BELOW OEM folder icons.
+                folder.addView(frame, 0, ViewGroup.LayoutParams(previewWidth, previewHeight))
+            }
             val onDetach = object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(v: View) {}
                 override fun onViewDetachedFromWindow(v: View) {
@@ -1861,8 +1928,9 @@ object KyantLauncherLens270 {
             }
             layoutListener = onLayout
             anchor.addOnLayoutChangeListener(onLayout)
-            frame.layout(initialBounds.left, initialBounds.top,
+            if (!fullOverlayInstalled28877) frame.layout(initialBounds.left, initialBounds.top,
                 initialBounds.left + previewWidth, initialBounds.top + previewHeight)
+            else frame.layout(0, 0, previewWidth, previewHeight)
             // Mark old glass inactive only AFTER the Kyant child is successfully attached.
             KyantLauncherLensProbe270.setActiveFor273(anchor, true)
             activeHostCount.incrementAndGet()
@@ -1943,6 +2011,7 @@ object KyantLauncherLens270 {
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
                     if (overlayInstalled28876) positionOverlay28876(actualSample)
+                    if (fullOverlayInstalled28877) positionFullOverlay28877(actualSample, frame)
                     distancePredraw28874(actualSample)
                     traceDistance28875(actualSample)
                     nativePredrawPosition28824 = actualSample
@@ -2077,9 +2146,14 @@ object KyantLauncherLens270 {
                         workspaceTranslationX != lastWorkspaceTranslationX
                     lastWorkspaceScrollX = workspaceScrollX
                     lastWorkspaceTranslationX = workspaceTranslationX
-                    val hostMisplaced = frame.left != b.left || frame.top != b.top ||
-                        frame.width != expectedW || frame.height != expectedH ||
-                        frame.translationX != 0f || frame.translationY != 0f
+                    val hostMisplaced = if (fullOverlayInstalled28877) {
+                        frame.left != 0 || frame.top != 0 ||
+                            frame.width != expectedW || frame.height != expectedH
+                    } else {
+                        frame.left != b.left || frame.top != b.top ||
+                            frame.width != expectedW || frame.height != expectedH ||
+                            frame.translationX != 0f || frame.translationY != 0f
+                    }
                     // Full visibility test: partially visible folders must continue sampling.
                     val visible = xy[0] + b.right > 0 && xy[0] + b.left < displayWidth &&
                         xy[1] + b.bottom > 0 && xy[1] + b.top < displayHeight
@@ -2267,8 +2341,10 @@ object KyantLauncherLens270 {
                         if (updatePosition) { lastX = xy[0]; lastY = xy[1] }
                         lastBounds = android.graphics.Rect(b)
                         // Child geometry uses FolderIcon-local coordinates, not DecorView coordinates.
-                        frame.translationX = 0f
-                        frame.translationY = 0f
+                        if (!fullOverlayInstalled28877) {
+                            frame.translationX = 0f
+                            frame.translationY = 0f
+                        }
                         val w = b.width().coerceAtLeast(1)
                         val h = b.height().coerceAtLeast(1)
                         if (frame.layoutParams.width != w || frame.layoutParams.height != h) {
@@ -2285,7 +2361,10 @@ object KyantLauncherLens270 {
                                 .coerceIn(0f, minOf(w, h) * 0.49f)
                         }
                         if (boundsChanged || hostMisplaced) {
-                            frame.layout(b.left, b.top, b.left + w, b.top + h)
+                            if (fullOverlayInstalled28877) {
+                                frame.layout(0, 0, w, h)
+                                positionFullOverlay28877(glassScreenPosition(b), frame)
+                            } else frame.layout(b.left, b.top, b.left + w, b.top + h)
                             if (hostMisplaced) {
                                 frame.postInvalidateOnAnimation()
                                 compose.postInvalidateOnAnimation()
@@ -2307,7 +2386,9 @@ object KyantLauncherLens270 {
                     // An INVISIBLE Compose host may not produce the draw that would make
                     // sampleMatches true, leaving every folder permanently hidden.
                     // Keep geometry valid and composition initialized as the only gate.
-                    val layoutMatches = frame.left == b.left && frame.top == b.top &&
+                    val layoutMatches = (if (fullOverlayInstalled28877)
+                        frame.left == 0 && frame.top == 0
+                    else frame.left == b.left && frame.top == b.top) &&
                         frame.width == b.width() && frame.height == b.height()
                     val currentSample = largeFrameSample28829 ?: glassScreenPosition(b)
                     // Geometry may have changed since the initial pre-draw read.
@@ -2499,9 +2580,11 @@ object KyantLauncherLens270 {
                 treeDrawListener28865 = treeListener
                 root.viewTreeObserver.addOnDrawListener(treeListener)
             }
-            frame.translationX = 0f
-            frame.translationY = 0f
-            XposedBridge.log("KYANT2885_HOST_ATTACHED layer=folder_child_index_0 owners=isolated recomposer=explicit view=${anchor.width}x${anchor.height} glassBounds=$initialBounds lens=${previewWidth}x${previewHeight} reference=${reference.width}x${reference.height}")
+            if (!fullOverlayInstalled28877) {
+                frame.translationX = 0f
+                frame.translationY = 0f
+            }
+            XposedBridge.log("KYANT2885_HOST_ATTACHED layer=${if (fullOverlayInstalled28877) "root_overlay_28877" else "folder_child_index_0"} owners=isolated recomposer=explicit view=${anchor.width}x${anchor.height} glassBounds=$initialBounds lens=${previewWidth}x${previewHeight} reference=${reference.width}x${reference.height}")
             // V286: keep the first position live through layout, scroll and pre-draw.
             // The previous 32-ms delayed gate made glass appear seconds late on page switches.
             // OnPreDraw above is the single source of truth for reference-frame coordinates.
