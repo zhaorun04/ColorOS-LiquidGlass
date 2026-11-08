@@ -461,10 +461,12 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_transform_trace_28876", 0) == 1
         } catch (_: Throwable) { false }
-        // V288.77: same Compose + native-bitmap carrier as V288.69 mode 1,
-        // but transplant the ENTIRE Kyant host outside Workspace into root.overlay.
-        // The overlay is a diagnostic: it may cover folder icons, unlike the normal
-        // FolderIcon child at index 0. Disable for everyday use.
+        // V288.77.1: do NOT attach full Kyant to ViewGroupOverlay: the host
+        // traversed/drew, but the Compose/Backdrop glass was not visible on-device.
+        // Attach as an ordinary direct child of Launcher's root ViewGroup instead.
+        // This retains a regular View hierarchy/window traversal while avoiding
+        // Workspace's inherited page transforms. Diagnostic only: top-level child
+        // can obscure icons, so disable for normal use.
         val fullOverlayAb28877 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_full_overlay_ab_28877", 0).coerceIn(0, 1)
@@ -478,9 +480,9 @@ object KyantLauncherLens270 {
         val fullOverlayParent28877 = if (fullOverlayRequested28877) root as? ViewGroup else null
         val fullOverlayActive28877 = fullOverlayRequested28877 && fullOverlayParent28877 != null
         if (fullOverlayTrace28877 || fullOverlayAb28877 != 0) XposedBridge.log(
-            "KYANT28877_HOST host=${System.identityHashCode(anchor)} " +
+            "KYANT288771_HOST host=${System.identityHashCode(anchor)} " +
             "enabled=$fullOverlayActive28877 carrier=$nativeCarrierAb28869 " +
-            "transform76=$transformAb28876 lens=COMPOSE_NATIVE_BITMAP")
+            "transform76=$transformAb28876 lens=COMPOSE_NATIVE_BITMAP mount=ROOT_CHILD")
         val affineSampling28876 = transformAb28876 == 1 && nativeCarrierAb28869 in 1..2
         val overlayRequested28876 = transformAb28876 == 2 && nativeCarrierAb28869 == 2
         val overlayParent28876 = if (overlayRequested28876) root as? ViewGroup else null
@@ -1524,7 +1526,7 @@ object KyantLauncherLens270 {
                 val last = fullOverlayLastPosition28877
                 val dx = if (last.x.isFinite()) pos.x - last.x else 0f
                 if (fullOverlayTraceCount28877++ % 30L == 0L) XposedBridge.log(
-                    "KYANT28877_ROOT_MOTION host=${System.identityHashCode(anchor)} " +
+                    "KYANT288771_ROOT_MOTION host=${System.identityHashCode(anchor)} " +
                     "sampleX=${pos.x} overlayX=$targetX frameTx=${host.translationX} " +
                     "dx=$dx frameParent=${host.parent?.javaClass?.simpleName} " +
                     "width=${host.width} height=${host.height}")
@@ -1771,11 +1773,11 @@ object KyantLauncherLens270 {
             try { detachListener?.let { anchor.removeOnAttachStateChangeListener(it) } } catch (_: Throwable) {}
             try { layoutListener?.let { anchor.removeOnLayoutChangeListener(it) } } catch (_: Throwable) {}
             if (fullOverlayInstalled28877) try {
-                fullOverlayParent28877?.overlay?.remove(frame)
+                if (frame.parent === fullOverlayParent28877) fullOverlayParent28877?.removeView(frame)
                 fullOverlayInstalled28877 = false
-                XposedBridge.log("KYANT28877_OVERLAY_REMOVED host=$trace28815Host reason=$reason")
+                XposedBridge.log("KYANT288771_ROOT_CHILD_REMOVED host=$trace28815Host reason=$reason")
             } catch (t: Throwable) {
-                XposedBridge.log("KYANT28877_REMOVE_ERROR ${t.javaClass.simpleName}")
+                XposedBridge.log("KYANT288771_REMOVE_ERROR ${t.javaClass.simpleName}")
             }
             if (overlayInstalled28876) try {
                 overlayParent28876?.overlay?.remove(nativeSampleView!!)
@@ -1891,19 +1893,33 @@ object KyantLauncherLens270 {
                 }
             } }
             newScope.launch { newRecomposer.runRecomposeAndApplyChanges() }
-            // V288.77: transplant the SAME frame (Compose + native bitmap bridge)
-            // into root.overlay, rather than swapping to a pure native control.
-            // Attach under root so it cannot inherit Workspace page transforms.
+            // V288.77.1: full Kyant + bitmap bridge as a NORMAL root child,
+            // not ViewGroupOverlay. Root hierarchy should provide a regular
+            // Compose/Backdrop rendering context while decoupling from Workspace.
+            // On unexpected OEM ViewGroup rejection, safely fall back to the
+            // known-good FolderIcon child instead of leaving glass disabled.
             if (fullOverlayActive28877) {
-                frame.layoutParams = ViewGroup.LayoutParams(previewWidth, previewHeight)
-                frame.layout(0, 0, previewWidth, previewHeight)
-                fullOverlayParent28877!!.overlay.add(frame)
-                fullOverlayInstalled28877 = true
-                positionFullOverlay28877(glassScreenPosition(lastBounds), frame)
-                XposedBridge.log("KYANT28877_OVERLAY_ATTACHED host=$trace28815Host " +
-                    "width=$previewWidth height=$previewHeight " +
-                    "frameParent=${frame.parent?.javaClass?.simpleName} " +
-                    "carrier=$nativeCarrierAb28869 lens=full")
+                try {
+                    frame.layoutParams = ViewGroup.LayoutParams(previewWidth, previewHeight)
+                    fullOverlayParent28877!!.addView(frame, ViewGroup.LayoutParams(previewWidth, previewHeight))
+                    frame.layout(0, 0, previewWidth, previewHeight)
+                    fullOverlayInstalled28877 = true
+                    positionFullOverlay28877(glassScreenPosition(lastBounds), frame)
+                    XposedBridge.log("KYANT288771_ROOT_CHILD_ATTACHED host=$trace28815Host " +
+                        "width=$previewWidth height=$previewHeight " +
+                        "parent=${frame.parent?.javaClass?.name} " +
+                        "carrier=$nativeCarrierAb28869 lens=full " +
+                        "composeAlpha=${compose.alpha} rootChildCount=${fullOverlayParent28877!!.childCount}")
+                } catch (attachError: Throwable) {
+                    XposedBridge.log("KYANT288771_ROOT_CHILD_ERROR host=$trace28815Host " +
+                        "error=${attachError.javaClass.simpleName} ${attachError.message}")
+                    try { (frame.parent as? ViewGroup)?.removeView(frame) } catch (_: Throwable) {}
+                    fullOverlayInstalled28877 = false
+                    frame.translationX = 0f
+                    frame.translationY = 0f
+                    folder.addView(frame, 0, ViewGroup.LayoutParams(previewWidth, previewHeight))
+                    XposedBridge.log("KYANT288771_FALLBACK_FOLDER host=$trace28815Host")
+                }
             } else {
                 // Normal production path remains BELOW OEM folder icons.
                 folder.addView(frame, 0, ViewGroup.LayoutParams(previewWidth, previewHeight))
@@ -2584,7 +2600,7 @@ object KyantLauncherLens270 {
                 frame.translationX = 0f
                 frame.translationY = 0f
             }
-            XposedBridge.log("KYANT2885_HOST_ATTACHED layer=${if (fullOverlayInstalled28877) "root_overlay_28877" else "folder_child_index_0"} owners=isolated recomposer=explicit view=${anchor.width}x${anchor.height} glassBounds=$initialBounds lens=${previewWidth}x${previewHeight} reference=${reference.width}x${reference.height}")
+            XposedBridge.log("KYANT2885_HOST_ATTACHED layer=${if (fullOverlayInstalled28877) "root_child_288771" else "folder_child_index_0"} owners=isolated recomposer=explicit view=${anchor.width}x${anchor.height} glassBounds=$initialBounds lens=${previewWidth}x${previewHeight} reference=${reference.width}x${reference.height}")
             // V286: keep the first position live through layout, scroll and pre-draw.
             // The previous 32-ms delayed gate made glass appear seconds late on page switches.
             // OnPreDraw above is the single source of truth for reference-frame coordinates.

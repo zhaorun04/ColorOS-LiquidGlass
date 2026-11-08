@@ -1,7 +1,5 @@
-ColorOS-LiquidGlass V1.9.205.288.77｜完整 Kyant 根覆盖层隔离 A/B 实验版
+ColorOS-LiquidGlass V1.9.205.288.77.1｜Launcher 根普通子 View 光学可见性修正版
 
-新增：liquidglass_kyant_full_overlay_ab_28877=1（要求 native_carrier_ab_28869=1、transform_ab_28876=0），将原有 FrameLayout（Compose + 原生桥接位图）移入 Launcher 根 ViewGroupOverlay。保持完整 Kyant 光学；可遮挡图标，仅用于对照验证。关闭开关并重载 Launcher 恢复文件夹内部承载。
-诊断：liquidglass_kyant_full_overlay_trace_28877=1，Vector 模块日志 KYANT28877_HOST / KYANT28877_OVERLAY_ATTACHED / KYANT28877_ROOT_MOTION / KYANT28877_OVERLAY_REMOVED。
 注意：根覆盖层模式不应作为日用默认。未在本地完成 Android Gradle 真编译或真机验证。
 
 ColorOS-LiquidGlass V1.9.205.288.76｜父层仿射变换与根覆盖层诊断实验版
@@ -291,3 +289,10 @@ V1.9.205.288.75｜页面归位距离校正与双桥接位图 A/B
 - 正确对照方式：保留 native_carrier_ab_28869=1，先 buffer_ab_28875=0 测短/中/长距离；再 buffer_ab_28875=1 重载 Launcher 测相同动作。模式2是原生 View 直接绘制的控制组，不受双缓冲开关影响。
 - 为排除干扰，建议旧 distance_ab_28874=0、distance_trace_28874=0、frame_trace_28873=0。
 - 已做源码结构与 ZIP 校验；未完成实际 Android Gradle/Kotlin 编译及真机验收。
+
+V1.9.205.288.77.1 根容器实验与修正：
+上一版 full_overlay_ab_28877=1 使用 ViewGroupOverlay，模块日志确认 Compose 首帧绘制，但实际光学不可见。此版保留相同设置键，改为将整个 FrameLayout（原生桥接源 + Compose + Kyant 光学）添加为 Launcher 根 ViewGroup 的普通子 View，并实时更新位置，脱离 Workspace 父层运动；如果根容器拒绝添加则回退到原文件夹子 View。
+打开：su -c 'settings put global liquidglass_kyant_native_carrier_ab_28869 1; settings put global liquidglass_kyant_transform_ab_28876 0; settings put global liquidglass_kyant_full_overlay_ab_28877 1; settings put global liquidglass_kyant_full_overlay_trace_28877 1'，然后重新加载 Launcher。
+诊断（主要在 Vector/LSPosed 模块日志）：KYANT288771_HOST / KYANT288771_ROOT_CHILD_ATTACHED / KYANT288771_ROOT_CHILD_ERROR / KYANT288771_FALLBACK_FOLDER / KYANT288771_ROOT_MOTION / KYANT288771_ROOT_CHILD_REMOVED。
+如果遮挡图标、透镜不可见、触摸受影响或异常：su -c 'settings put global liquidglass_kyant_full_overlay_ab_28877 0; settings put global liquidglass_kyant_full_overlay_trace_28877 0'，重新加载 Launcher。普通根子 View 仍是诊断方案，可能覆盖图标，尚未真机确认光学可见性或归位稳定性。
+测试时禁用旧桥接缓冲实验（liquidglass_kyant_bridge_buffer_ab_28875=0）。V288.60 参考壁纸发布机制及 Kyant shader 保持不变。
