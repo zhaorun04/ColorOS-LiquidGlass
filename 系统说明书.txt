@@ -1,3 +1,34 @@
+ColorOS-LiquidGlass V1.9.205.288.79｜同根容器 Kyant 渲染管线分层隔离实验版
+
+核心实验：在 V288.78 已验证的 Launcher 根 FrameLayout 中，使用相同的原生参考壁纸、原生桥接 Bitmap、Host 尺寸和位置跟随，逐档增加 Compose 与 Kyant 渲染阶段。只用于定位归位闪动，不代表这些阶段已通过真机验证。
+
+Settings.Global:
+  liquidglass_kyant_root_pipeline_28879 = -1（默认沿用 V288.78）
+    0：相同根容器，纯原生 Canvas 壁纸
+    1：相同根容器，Compose Canvas 直接画桥接 Bitmap；不挂 layerBackdrop，不 drawBackdrop
+    2：相同根容器，Compose Canvas 挂 layerBackdrop，但不调用 drawBackdrop。注意：没有消费者时不保证 Kyant 内部真的执行背景捕获，只能定位挂载修饰符带来的影响。
+    3：相同根容器，layerBackdrop + drawBackdrop，保留模糊/高光，但禁用 lens() 折射变形
+    4：相同根容器，完整 Kyant layerBackdrop + drawBackdrop + lens()
+  liquidglass_kyant_root_pipeline_trace_28879 = 1 开启节流日志
+  liquidglass_kyant_root_icons_28878 = 0 建议隔离测试期间关闭图标透传，避免额外绘制成本；会有图标被遮挡，属实验副作用
+
+前置推荐：
+  liquidglass_kyant_native_carrier_ab_28869 = 1
+  liquidglass_kyant_root_compare_ab_28878 = 0
+  liquidglass_kyant_full_overlay_ab_28877 = 0
+  liquidglass_kyant_transform_ab_28876 = 0
+  liquidglass_kyant_bridge_buffer_ab_28875 = 0
+  liquidglass_kyant_root_pipeline_trace_28879 = 1
+
+每次修改实验模式后重新加载 Launcher。
+模块日志关键字：KYANT28879_PIPELINE_HOST、KYANT28879_PIPELINE_SOURCE。
+若实验异常：将 liquidglass_kyant_root_pipeline_28879=-1，root_compare_ab_28878=0，full_overlay_ab_28877=0，再重新加载 Launcher。
+
+验证要求：每档分别观察快速滑动、短/长距离不翻页回弹、翻页归位；必须同时记录壁纸显示是否正常，避免将不显示背景误当作“稳定”。
+
+本版不修改壁纸即时同步冻结链路、Kyant Shader 参数和 Dock 几何；完整 Gradle 编译/真机结果尚未验证。
+
+-----
 ColorOS-LiquidGlass V1.9.205.288.78｜同根承载原生／Kyant A/B 实验版
 
 新增设置：

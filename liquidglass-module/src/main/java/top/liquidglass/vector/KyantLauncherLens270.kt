@@ -489,9 +489,24 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_root_compare_trace_28878", 0) == 1
         } catch (_: Throwable) { false }
-        val rootDirect28878 = rootCompareAb28878 == 1 && nativeCarrierAb28869 == 1 &&
+        // V288.79: independent 5-stage *actual* rendering pipeline A/B.
+        // -1=V288.78 unchanged, 0=native Canvas, 1=Compose source only,
+        // 2=Compose source with layerBackdrop capture modifier but no consumer,
+        // 3=Backdrop consumer blur/highlight without lens(), 4=full optical lens.
+        // Stages 1-4 share the exact same root FrameLayout and bridge Bitmap.
+        val rootPipeline28879 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_root_pipeline_28879", -1).coerceIn(-1, 4)
+        } catch (_: Throwable) { -1 }
+        val rootPipelineTrace28879 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_root_pipeline_trace_28879", 0) == 1
+        } catch (_: Throwable) { false }
+        val rootDirect28878 = (if (rootPipeline28879 >= 0) rootPipeline28879 == 0
+            else rootCompareAb28878 == 1) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val rootFullKyant28878 = rootCompareAb28878 == 2 && nativeCarrierAb28869 == 1 &&
+        val rootFullKyant28878 = (if (rootPipeline28879 >= 0) rootPipeline28879 in 1..4
+            else rootCompareAb28878 == 2) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
         val fullOverlayRequested28877 = (fullOverlayAb28877 == 1 || rootDirect28878 ||
             rootFullKyant28878) && nativeCarrierAb28869 == 1 && transformAb28876 == 0
@@ -1904,6 +1919,12 @@ object KyantLauncherLens270 {
                 frame.addView(iconForward, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             }
+            if (rootPipeline28879 >= 0 || rootPipelineTrace28879) XposedBridge.log(
+                "KYANT28879_PIPELINE_HOST host=$trace28815Host stage=$rootPipeline28879 " +
+                "native=$rootDirect28878 compose=$rootFullKyant28878 " +
+                "root=$fullOverlayActive28877 bridge=${bridgeBitmap != null} " +
+                "iconForward=${fullOverlayActive28877 && rootIconPassthrough28878} " +
+                "rootParent=${frame.parent?.javaClass?.simpleName}")
             if (rootCompareTrace28878 || rootCompareAb28878 != 0) XposedBridge.log(
                 "KYANT28878_RENDER_HOST host=$trace28815Host mode=$rootCompareAb28878 " +
                 "root=$fullOverlayActive28877 native=$rootDirect28878 kyant=$rootFullKyant28878 " +
@@ -1929,6 +1950,7 @@ object KyantLauncherLens270 {
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
+                rootPipeline28879, rootPipelineTrace28879,
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
@@ -2710,6 +2732,7 @@ object KyantLauncherLens270 {
         sourceMatrixAb28866: Int, currentComposeViewPosition28866: () -> Offset,
         zeroLensAb28868: Int, continuousMotionProbe28868: Boolean,
         continuousRun28868: java.util.concurrent.atomic.AtomicReference<Pair<Long, Long>>,
+        rootPipeline28879: Int, rootPipelineTrace28879: Boolean,
         nativeCarrierAb28869: Int, distanceAb28874: Int, distanceTrace28874: Boolean,
         bufferExperiment28875: Boolean,
         bridgeFront28875: androidx.compose.runtime.State<Bitmap?>,
@@ -2777,7 +2800,9 @@ object KyantLauncherLens270 {
             val sourceAlpha = when (nativeLayerMode) { 2 -> 0f; 3 -> .02f; else -> 1f }
             // The four pipeline A/B paths intentionally avoid capturing a Kyant
             // backdrop or introducing a Compose graphicsLayer on the source canvas.
-            val sourceModifier = if (pipelineMode28819 >= 0) {
+            val pipelineSourceOnly28879 = rootPipeline28879 == 1
+            val pipelineCaptureOnly28879 = rootPipeline28879 == 2
+            val sourceModifier = if (pipelineSourceOnly28879 || pipelineMode28819 >= 0) {
                 Modifier.fillMaxSize()
             } else {
                 Modifier.fillMaxSize().layerBackdrop(backdrop).graphicsLayer { alpha = sourceAlpha }
@@ -3096,6 +3121,10 @@ object KyantLauncherLens270 {
                 val now = SystemClock.elapsedRealtimeNanos()
                 val previous = sourceLastDrawNs.getAndSet(now)
                 val draws = sourceDrawCount.incrementAndGet()
+                if (rootPipelineTrace28879 && rootPipeline28879 in 1..4 && draws % 120L == 1L)
+                    XposedBridge.log("KYANT28879_PIPELINE_SOURCE stage=$rootPipeline28879 " +
+                        "draw=$draws originX=$rootScreenX bridge=${bridgeBitmap != null} " +
+                        "bridgeGen=${bridgeVersion.value} capture=${!pipelineSourceOnly28879}")
                 if (nativeCarrierAb28869 == 1 && draws % 60L == 1L) XposedBridge.log(
                     "KYANT28869_OPTICAL_CONSUME draws=$draws nativeGen=${bridgeVersion.value} " +
                     "composeOriginX=$rootScreenX publishedX=${bridgePublishedPosition.get()?.x} " +
@@ -3163,14 +3192,15 @@ object KyantLauncherLens270 {
             }
             // Mode B: source Bitmap is displayed by Compose, but no Kyant backdrop
             // is captured or rendered. Mode C keeps the original optical pipeline.
-            if (pipelineMode28819 < 0 && (displayIsolationMode != 2 || nativeLayerMode in 2..3)) Box(Modifier.fillMaxSize().drawBackdrop(
+            if (pipelineMode28819 < 0 && !pipelineSourceOnly28879 && !pipelineCaptureOnly28879 &&
+                (displayIsolationMode != 2 || nativeLayerMode in 2..3)) Box(Modifier.fillMaxSize().drawBackdrop(
                 backdrop = backdrop,
                 // The OEM radius is in physical pixels. Convert to dp and clamp to avoid a circle.
                 shape = { RoundedRectangle(cornerDp) },
                 effects = {
                     val m = size.minDimension
                     blur(optics28827.blur.dp.toPx())
-                    if (motionAbMode != 2 && zeroLensAb28868 == 0 && optics28827.strength > 0) {
+                    if (rootPipeline28879 != 3 && motionAbMode != 2 && zeroLensAb28868 == 0 && optics28827.strength > 0) {
                         val amount28827 = optics28827.strength / 100f
                         lens(refractionHeight = .1f * m * amount28827,
                             refractionAmount = .2f * m * amount28827,
