@@ -502,10 +502,23 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_root_pipeline_trace_28879", 0) == 1
         } catch (_: Throwable) { false }
-        val rootDirect28878 = (if (rootPipeline28879 >= 0) rootPipeline28879 == 0
+        // V288.80: isolate the FIRST unstable boundary: native Canvas versus
+        // Compose Bitmap. All five modes use the same root child FrameLayout.
+        // -1 leaves the complete V288.79 behavior untouched.
+        val bitmapPipeline28880 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bitmap_pipeline_28880", -1).coerceIn(-1, 4)
+        } catch (_: Throwable) { -1 }
+        val bitmapTrace28880 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bitmap_trace_28880", 0) == 1
+        } catch (_: Throwable) { false }
+        val rootDirect28878 = (if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 0..1
+            else if (rootPipeline28879 >= 0) rootPipeline28879 == 0
             else rootCompareAb28878 == 1) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val rootFullKyant28878 = (if (rootPipeline28879 >= 0) rootPipeline28879 in 1..4
+        val rootFullKyant28878 = (if (bitmapPipeline28880 >= 0) bitmapPipeline28880 in 2..4
+            else if (rootPipeline28879 >= 0) rootPipeline28879 in 1..4
             else rootCompareAb28878 == 2) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
         val fullOverlayRequested28877 = (fullOverlayAb28877 == 1 || rootDirect28878 ||
@@ -1014,6 +1027,10 @@ object KyantLauncherLens270 {
         var bridgeBack28875: Bitmap? = bridgeExtraBitmap28875
         val bridgeFrontGen28875 = androidx.compose.runtime.mutableLongStateOf(0L)
         val bridgeFrontPosition28875 = androidx.compose.runtime.mutableStateOf<Offset?>(null)
+        // V288.80 stage 4: immutable-by-convention per-publication Bitmap.
+        // Copies are never mutated once published; short diagnostic ONLY.
+        val immutableBridge28880 = androidx.compose.runtime.mutableStateOf<Bitmap?>(null)
+        val immutableGen28880 = androidx.compose.runtime.mutableLongStateOf(0L)
         val bridgeVersion = androidx.compose.runtime.mutableIntStateOf(0)
         val bridgePublishedPosition = java.util.concurrent.atomic.AtomicReference<Offset?>(null)
         val bridgeDrawCount = java.util.concurrent.atomic.AtomicLong(0L)
@@ -1478,6 +1495,21 @@ object KyantLauncherLens270 {
                     "referenceChanged=${bridgeLastReference28875 !== activeReference}")
             }
             bridgeLastReference28875 = activeReference
+            if (bitmapPipeline28880 == 4) {
+                // Explicitly isolate mutable source updates from Compose reads.
+                // This is deliberately expensive and must never be the default.
+                try {
+                    val immutableCopy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    immutableGen28880.longValue = gen
+                    immutableBridge28880.value = immutableCopy
+                    if (bitmapTrace28880 && gen % 90L == 1L) XposedBridge.log(
+                        "KYANT28880_SNAPSHOT_PUBLISH host=$trace28815Host gen=$gen " +
+                        "bitmapId=${System.identityHashCode(immutableCopy)} x=${pos.x}")
+                } catch (t: Throwable) {
+                    if (bitmapTrace28880 && gen % 90L == 1L) XposedBridge.log(
+                        "KYANT28880_SNAPSHOT_ERROR ${t.javaClass.simpleName}")
+                }
+            }
             bridgePublishedPosition.set(pos)
             recordNativeSettle28872("NATIVE_BITMAP_BRIDGE", pos, activeReference, gen,
                 bitmap.width, bitmap.height)
@@ -1500,7 +1532,8 @@ object KyantLauncherLens270 {
                 releaseTrace28820("NATIVE_SAMPLE", pos, "draw=${count + 1L} bridgeW=${bridgeBitmap?.width} bridgeH=${bridgeBitmap?.height}")
                 // Mode 3: sample into exactly the same bridge Bitmap as mode 2,
                 // but render it in the native View's own Canvas (no Compose handoff).
-                if (pipelineMode28819 == 3 && nativeCarrierAb28869 == 0) {
+                if ((pipelineMode28819 == 3 && nativeCarrierAb28869 == 0) ||
+                    bitmapPipeline28880 == 1) {
                     // Native bridge mode: the Bitmap is allocated when bridgeView exists.
                     val buffer = bridgeBitmap
                     if (buffer != null) canvas.drawBitmap(buffer, 0f, 0f, bridgePaint)
@@ -1721,7 +1754,13 @@ object KyantLauncherLens270 {
                 } else {
                     canvas.clipRect(0f, 0f, width * 0.5f, height.toFloat())
                 }
-                if (!(affineSampling28876 &&
+                if (bitmapPipeline28880 == 1 && bridgeBitmap != null) {
+                    // Native Canvas consumes the same bridge pixels that Compose
+                    // consumed in V288.79 stage 1. Publish synchronously here to
+                    // prevent draw ordering from becoming a hidden variable.
+                    sampleBridgeAt(position, this)
+                    canvas.drawBitmap(bridgeBitmap, 0f, 0f, bitmapPaint)
+                } else if (!(affineSampling28876 &&
                         drawAffineWallpaper28876(canvas, this, activeReference, "DIRECT"))) {
                     canvas.drawBitmap(activeReference, null, destination, bitmapPaint)
                 }
@@ -1919,6 +1958,10 @@ object KyantLauncherLens270 {
                 frame.addView(iconForward, FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
             }
+            if (bitmapPipeline28880 >= 0) XposedBridge.log(
+                "KYANT28880_BITMAP_HOST host=$trace28815Host stage=$bitmapPipeline28880 " +
+                "native=$rootDirect28878 compose=$rootFullKyant28878 " +
+                "bridge=${bridgeBitmap != null} root=$fullOverlayActive28877")
             if (rootPipeline28879 >= 0 || rootPipelineTrace28879) XposedBridge.log(
                 "KYANT28879_PIPELINE_HOST host=$trace28815Host stage=$rootPipeline28879 " +
                 "native=$rootDirect28878 compose=$rootFullKyant28878 " +
@@ -1951,6 +1994,7 @@ object KyantLauncherLens270 {
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
                 rootPipeline28879, rootPipelineTrace28879,
+                bitmapPipeline28880, bitmapTrace28880, immutableBridge28880, immutableGen28880,
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
@@ -2733,6 +2777,9 @@ object KyantLauncherLens270 {
         zeroLensAb28868: Int, continuousMotionProbe28868: Boolean,
         continuousRun28868: java.util.concurrent.atomic.AtomicReference<Pair<Long, Long>>,
         rootPipeline28879: Int, rootPipelineTrace28879: Boolean,
+        bitmapPipeline28880: Int, bitmapTrace28880: Boolean,
+        immutableBridge28880: androidx.compose.runtime.State<Bitmap?>,
+        immutableGen28880: androidx.compose.runtime.State<Long>,
         nativeCarrierAb28869: Int, distanceAb28874: Int, distanceTrace28874: Boolean,
         bufferExperiment28875: Boolean,
         bridgeFront28875: androidx.compose.runtime.State<Bitmap?>,
@@ -2800,8 +2847,9 @@ object KyantLauncherLens270 {
             val sourceAlpha = when (nativeLayerMode) { 2 -> 0f; 3 -> .02f; else -> 1f }
             // The four pipeline A/B paths intentionally avoid capturing a Kyant
             // backdrop or introducing a Compose graphicsLayer on the source canvas.
-            val pipelineSourceOnly28879 = rootPipeline28879 == 1
-            val pipelineCaptureOnly28879 = rootPipeline28879 == 2
+            val pipelineSourceOnly28879 = bitmapPipeline28880 in 2..4 ||
+                (bitmapPipeline28880 < 0 && rootPipeline28879 == 1)
+            val pipelineCaptureOnly28879 = bitmapPipeline28880 < 0 && rootPipeline28879 == 2
             val sourceModifier = if (pipelineSourceOnly28879 || pipelineMode28819 >= 0) {
                 Modifier.fillMaxSize()
             } else {
@@ -3011,7 +3059,7 @@ object KyantLauncherLens270 {
                 // A/B: keep a stable, full-frame bitmap as the source and change only
                 // the destination transform. No per-frame source rectangle allocation.
                 // This isolates dynamic cropping from Compose/Backdrop frame scheduling.
-                if (bridgeBitmap != null) {
+                if (bridgeBitmap != null && bitmapPipeline28880 != 2) {
                     // State read here registers the draw invalidation dependency.
                     val version = bridgeVersion.value
                     if (pipelineMode28819 == 2 && frameSync28822 == 1) {
@@ -3063,9 +3111,13 @@ object KyantLauncherLens270 {
                     // Mode 1: consume the *published front* instead of the bitmap
                     // that native sampling may already have repainted. Inactive
                     // bridge buffers alternate on each native onDraw callback.
-                    val visibleBridge75 = if (bufferExperiment28875)
+                    val visibleBridge75 = if (bitmapPipeline28880 == 4)
+                        immutableBridge28880.value
+                        else if (bufferExperiment28875)
                         bridgeFront28875.value else bridgeBitmap
-                    val visibleGen75 = if (bufferExperiment28875)
+                    val visibleGen75 = if (bitmapPipeline28880 == 4)
+                        immutableGen28880.value
+                        else if (bufferExperiment28875)
                         bridgeFrontGen28875.value else version.toLong()
                     val visiblePosition75 = if (bufferExperiment28875)
                         bridgeFrontPosition28875.value else published74
@@ -3118,6 +3170,11 @@ object KyantLauncherLens270 {
                     }
                 }
                 }
+                if (bitmapTrace28880 && bitmapPipeline28880 in 2..4 &&
+                    sourceDrawCount.get() % 120L == 0L) XposedBridge.log(
+                    "KYANT28880_COMPOSE_SOURCE stage=$bitmapPipeline28880 " +
+                    "bridge=${bitmapPipeline28880 != 2} snapshotGen=${immutableGen28880.value} " +
+                    "x=${drawPosition.x} bridgeGen=${bridgeVersion.value}")
                 val now = SystemClock.elapsedRealtimeNanos()
                 val previous = sourceLastDrawNs.getAndSet(now)
                 val draws = sourceDrawCount.incrementAndGet()
