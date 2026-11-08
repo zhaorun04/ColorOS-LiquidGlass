@@ -1,3 +1,43 @@
+ColorOS-LiquidGlass V1.9.205.288.85｜ComposeView Alpha、Visibility 与归位绘制提交 A/B 诊断版
+
+【本版目标】
+V288.84 实测：模式0/1稳定；模式2/3向右归位时闪动；完整Kyant模式4归位闪动。V288.85固定相同根FrameLayout、相同子View绘制顺序（原生背景在Compose下方），只隔离Compose透明度、可见性和是否执行完整光学内容。
+
+【本版开关】
+liquidglass_kyant_state_pipeline_28885：-1退出本版；0..4启用本版五档。
+liquidglass_kyant_state_trace_28885：0关闭、1启用限频日志。
+前置条件 native_carrier_ab_28869=1、transform_ab_28876=0。建议将28884和更早实验设为-1/0，以免诊断混杂。
+
+模式0：根FrameLayout + 原生背景(下) + ComposeView(VISIBLE,alpha=0,空内容)；稳定对照。
+模式1：相同层级 + ComposeView(VISIBLE,alpha=1,空内容)；只改变alpha。
+模式2：相同层级 + ComposeView(INVISIBLE,alpha=0,空内容)；检查可见性。
+模式3：相同层级 + ComposeView(GONE,alpha=0,空内容)；检查布局参与。
+模式4：相同层级 + ComposeView(VISIBLE,alpha=1,完整Kyant)；检查光学链路。
+注意：模式1的空内容不应遮挡原生壁纸，模式3可能引发OEM布局变化。完整Kyant模式4可能遮挡原生图标，仅作实验。
+
+【Termux 首次配置】
+su -c 'settings put global liquidglass_kyant_native_carrier_ab_28869 1; settings put global liquidglass_kyant_transform_ab_28876 0; settings put global liquidglass_kyant_order_pipeline_28884 -1; settings put global liquidglass_kyant_sibling_pipeline_28883 -1; settings put global liquidglass_kyant_position_pipeline_28882 -1; settings put global liquidglass_kyant_node_pipeline_28881 -1; settings put global liquidglass_kyant_bitmap_pipeline_28880 -1; settings put global liquidglass_kyant_root_pipeline_28879 -1; settings put global liquidglass_kyant_root_compare_ab_28878 0; settings put global liquidglass_kyant_full_overlay_ab_28877 0; settings put global liquidglass_kyant_root_icons_28878 0; settings put global liquidglass_kyant_state_trace_28885 1; settings put global liquidglass_kyant_state_pipeline_28885 0'
+每次切换后重启/重新加载Launcher。
+切换例子：su -c settings put global liquidglass_kyant_state_pipeline_28885 2
+诊断：su -c 'logcat -d -v threadtime | grep -E "KYANT28885_(STATE_ATTACHED|COMMIT|DRAW)" | tail -80'
+退出：su -c 'settings put global liquidglass_kyant_state_pipeline_28885 -1; settings put global liquidglass_kyant_state_trace_28885 0'
+
+【日志解释】
+STATE_ATTACHED：真实子View索引、Compose透明度与可见性。
+COMMIT：OnPreDraw中的新目标位置targetX与调用positionFullOverlay28877后frameTx；frameTx是相对于root的局部变换，比较时需计入rootX。
+DRAW：FrameLayout.dispatchDraw完成后的目标/提交值及PreDraw到绘制的时间差；不是SurfaceFlinger最终上屏时间。
+所有采样日志限流且限制每个宿主最大90条；不是触摸抬起事件监测。
+
+【验证声明】
+源码静态检查和ZIP完整性检查完成；尚未取得完整Android SDK/Gradle实编及真机验证。本版只用于定位，不保证已解决抖动或图标遮挡。
+
+【Termux Git】
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.85 版本"
+git push origin main
+
+===== 旧版系统说明（保留功能历史） =====
 ColorOS-LiquidGlass V1.9.205.288.84｜根子 View 绘制顺序与归位事件隔离实验版
 
 【本次实际更改】

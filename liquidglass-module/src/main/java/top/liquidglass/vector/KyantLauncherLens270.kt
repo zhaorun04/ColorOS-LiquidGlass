@@ -560,11 +560,25 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_order_trace_28884", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.85: fixed-Z experiment. All five stages create the exact same
+        // root native-under-Compose hierarchy; only Compose alpha, visibility,
+        // and optical composition change. Older probes remain disabled by 85.
+        val statePipeline28885 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_state_pipeline_28885", -1).coerceIn(-1, 4)
+        } catch (_: Throwable) { -1 }
+        val stateTrace28885 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_state_trace_28885", 0) == 1
+        } catch (_: Throwable) { false }
+        val stateActive28885 = statePipeline28885 >= 0 &&
+            nativeCarrierAb28869 == 1 && transformAb28876 == 0
         val siblingNative28883 = siblingPipeline28883 in 2..4 &&
             nativeCarrierAb28869 == 1 && transformAb28876 == 0
-        val orderNative28884 = orderPipeline28884 in 1..4 &&
+        val orderNative28884 = (stateActive28885 || orderPipeline28884 in 1..4) &&
             nativeCarrierAb28869 == 1 && transformAb28876 == 0
-        val rootDirect28878 = (if (orderPipeline28884 >= 0) orderPipeline28884 == 0
+        val rootDirect28878 = (if (stateActive28885) false
+            else if (orderPipeline28884 >= 0) orderPipeline28884 == 0
             else if (siblingPipeline28883 >= 0) siblingPipeline28883 == 0
             else if (positionPipeline28882 >= 0) positionPipeline28882 == 0
             else if (nodePipeline28881 >= 0) nodePipeline28881 == 0
@@ -572,7 +586,8 @@ object KyantLauncherLens270 {
             else if (rootPipeline28879 >= 0) rootPipeline28879 == 0
             else rootCompareAb28878 == 1) && nativeCarrierAb28869 == 1 &&
             transformAb28876 == 0
-        val rootFullKyant28878 = (if (orderPipeline28884 >= 0) orderPipeline28884 in 1..4
+        val rootFullKyant28878 = (if (stateActive28885) true
+            else if (orderPipeline28884 >= 0) orderPipeline28884 in 1..4
             else if (siblingPipeline28883 >= 0) siblingPipeline28883 in 1..4
             else if (positionPipeline28882 >= 0) positionPipeline28882 in 1..4
             else if (nodePipeline28881 >= 0) nodePipeline28881 in 1..4
@@ -992,12 +1007,30 @@ object KyantLauncherLens270 {
         // Observe the enclosing FrameLayout instead of subclassing ComposeView.
         var disposed = false
         lateinit var releaseTracePulse28820: (String, Offset?, String) -> Unit
+        // Monotonic diagnostics only; no Compose state mutation inside draw.
+        var state85PendingX = Float.NaN
+        var state85PendingNs = 0L
+        var state85CommitX = Float.NaN
+        var state85LogNs = 0L
+        var state85LogCount = 0
         val frame = object : FrameLayout(anchor.context) {
             override fun dispatchDraw(canvas: Canvas) {
                 val sourceBefore28864 = if (lifecycleProbe28864) sourceDrawSerial28864.get() else 0L
                 // Never mutate Compose state during View.dispatchDraw: the
                 // V288 experiment stalled the source snapshot on real devices.
                 super.dispatchDraw(canvas)
+                if (stateActive28885 && stateTrace28885 && state85PendingX.isFinite() &&
+                    state85LogCount < 90) {
+                    val drawNs85 = SystemClock.elapsedRealtimeNanos()
+                    if (drawNs85 - state85LogNs >= 120_000_000L) {
+                        state85LogNs = drawNs85
+                        state85LogCount++
+                        XposedBridge.log("KYANT28885_DRAW host=$trace28815Host mode=$statePipeline28885 " +
+                            "targetX=$state85PendingX committedX=$state85CommitX " +
+                            "frameTx=$translationX frameX=$x ageMs=${(drawNs85-state85PendingNs)/1_000_000f} " +
+                            "childCount=$childCount hardware=${canvas.isHardwareAccelerated}")
+                    }
+                }
                 if (lifecycleProbe28864) {
                     parentDrawSerial28864.incrementAndGet()
                     if (sourceDrawSerial28864.get() == sourceBefore28864)
@@ -1053,6 +1086,14 @@ object KyantLauncherLens270 {
                 siblingPipeline28883 == 2 || orderPipeline28884 == 1 ||
                 orderPipeline28884 == 3) alpha = 0f
             if (orderPipeline28884 == 3) visibility = View.GONE
+            if (stateActive28885) {
+                alpha = if (statePipeline28885 == 1 || statePipeline28885 == 4) 1f else 0f
+                visibility = when (statePipeline28885) {
+                    2 -> View.INVISIBLE
+                    3 -> View.GONE
+                    else -> View.VISIBLE
+                }
+            }
         }
         // The ComposeView is the actual native child carrying the Kyant source.
         // A/B 1 gets its current transformed origin directly from that child,
@@ -1979,7 +2020,8 @@ object KyantLauncherLens270 {
             // V288.84 isolates child z-order, holding native canvas content fixed.
             // 0 native on top; 1 native below hidden Compose; 2 native on top of
             // empty Compose; 3 native below GONE Compose; 4 native below Kyant.
-            val nativeBelowCompose28884 = if (orderPipeline28884 >= 0)
+            val nativeBelowCompose28884 = if (stateActive28885) true
+                else if (orderPipeline28884 >= 0)
                 orderPipeline28884 == 1 || orderPipeline28884 == 3 || orderPipeline28884 == 4
                 else nativeLayerMode in 2..3 || siblingNative28883
             if (!overlayActive28876 && nativeBelowCompose28884) nativeSampleView?.let { frame.addView(it,
@@ -2066,7 +2108,8 @@ object KyantLauncherLens270 {
                 XposedBridge.log("KYANT28876_OVERLAY_ERROR ${t.javaClass.simpleName}")
             }
             compose.setContent {
-                if ((orderPipeline28884 >= 0 && orderPipeline28884 in 1..3) ||
+                if ((stateActive28885 && statePipeline28885 in 0..3) ||
+                    (orderPipeline28884 >= 0 && orderPipeline28884 in 1..3 && !stateActive28885) ||
                     (orderPipeline28884 < 0 && (siblingPipeline28883 == 2 || siblingPipeline28883 == 3))) {
                     // No optical composition is invoked in these modes.
                     // Mode2 keeps an invisible ComposeView, mode3 leaves an
@@ -2090,7 +2133,7 @@ object KyantLauncherLens270 {
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
                 rootPipeline28879, rootPipelineTrace28879,
                 bitmapPipeline28880, bitmapTrace28880, immutableBridge28880, immutableGen28880,
-                if (orderPipeline28884 >= 0) -1 else if (siblingPipeline28883 == 1) 2 else nodePipeline28881, nodeTrace28881,
+                if (stateActive28885 || orderPipeline28884 >= 0) -1 else if (siblingPipeline28883 == 1) 2 else nodePipeline28881, nodeTrace28881,
                 positionPipeline28882, positionTrace28882,
                 { nativeCarrierDrawPosition28876(frame, glassScreenPosition(lastBounds)) },
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
@@ -2142,7 +2185,13 @@ object KyantLauncherLens270 {
                     frame.layout(0, 0, previewWidth, previewHeight)
                     fullOverlayInstalled28877 = true
                     positionFullOverlay28877(glassScreenPosition(lastBounds), frame)
-                    if (orderPipeline28884 >= 0 && orderTrace28884) XposedBridge.log(
+                    if (stateActive28885 && stateTrace28885) XposedBridge.log(
+                        "KYANT28885_STATE_ATTACHED host=$trace28815Host mode=$statePipeline28885 " +
+                        "nativeIndex=${nativeSampleView?.let { frame.indexOfChild(it) } ?: -1} " +
+                        "composeIndex=${frame.indexOfChild(compose)} " +
+                        "composeAlpha=${compose.alpha} composeVisibility=${compose.visibility} " +
+                        "frameChildren=${frame.childCount} rootParent=${frame.parent?.javaClass?.simpleName}")
+                    if (orderPipeline28884 >= 0 && orderTrace28884 && !stateActive28885) XposedBridge.log(
                         "KYANT28884_ORDER_ATTACHED host=$trace28815Host mode=$orderPipeline28884 " +
                         "nativeIndex=${nativeSampleView?.let { frame.indexOfChild(it) } ?: -1} " +
                         "composeIndex=${frame.indexOfChild(compose)} " +
@@ -2307,7 +2356,26 @@ object KyantLauncherLens270 {
                     }
                     if (overlayInstalled28876) positionOverlay28876(actualSample)
                     if (fullOverlayInstalled28877) {
+                        if (stateActive28885) {
+                            state85PendingX = actualSample.x
+                            state85PendingNs = SystemClock.elapsedRealtimeNanos()
+                        }
                         positionFullOverlay28877(actualSample, frame)
+                        if (stateActive28885) {
+                            state85CommitX = frame.translationX
+                            if (stateTrace28885 && state85LogCount < 90) {
+                                val ns85 = SystemClock.elapsedRealtimeNanos()
+                                if (ns85 - state85LogNs >= 120_000_000L) {
+                                    state85LogNs = ns85
+                                    state85LogCount++
+                                    XposedBridge.log("KYANT28885_COMMIT host=$trace28815Host mode=$statePipeline28885 " +
+                                        "targetX=${actualSample.x} frameTx=${frame.translationX} " +
+                                        "rootX=${fullOverlayRootLocation28877[0]} composeAlpha=${compose.alpha} " +
+                                        "composeVisibility=${compose.visibility} nativeIndex=${nativeSampleView?.let { frame.indexOfChild(it) } ?: -1} " +
+                                        "composeIndex=${frame.indexOfChild(compose)}")
+                                }
+                            }
+                        }
                         if (rootCompareTrace28878 && rootCompareTraceCount28878++ % 120L == 0L)
                             XposedBridge.log("KYANT28878_ROOT_SAMPLE host=$trace28815Host " +
                                 "mode=$rootCompareAb28878 x=${actualSample.x} y=${actualSample.y} " +
