@@ -2479,6 +2479,7 @@ object KyantLauncherLens270 {
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
+                fusionMode28889 != 1 && !affineSampling28876,
                 coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
@@ -3396,6 +3397,7 @@ object KyantLauncherLens270 {
         reboundFrame28891: androidx.compose.runtime.State<BridgeFrame28891?>,
         gestureIsolation28894: Int,
         continuityAb28895: Int,
+        directReferenceEligible28895: Boolean,
         coordinateTrace28892: Boolean,
         bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
         timelineTrace28893: Boolean,
@@ -3911,8 +3913,8 @@ object KyantLauncherLens270 {
                         (continuityAb28895 == 2 && releaseSeq28820.get() > 0L &&
                             releaseDx28820 > 0f && releaseAge91 in 0L..120_000_000L)
                     val direct95 = continuityAb28895 > 0 && nativeCarrierAb28869 == 1 &&
-                        pipelineMode28819 == 2 && fusionMode28889 != 1 &&
-                        !affineSampling28876 && directWindow95 &&
+                        pipelineMode28819 == 2 && directReferenceEligible28895 &&
+                        directWindow95 &&
                         !reference.isRecycled && reference.width == screenW &&
                         reference.height == screenH &&
                         size.width > 0f && size.height > 0f
