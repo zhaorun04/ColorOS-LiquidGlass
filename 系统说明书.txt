@@ -1,4 +1,4 @@
-V1.9.205.288.93｜Kyant 回弹位置跳变与绘制时间线只读诊断版
+V1.9.205.288.94｜Kyant 回弹位置跳变与绘制时间线只读诊断版
 
 基于 V1.9.205.288.92，保留原版光学、Dock、像素采样、Compose 渲染及 V288.91 的原有选择逻辑。
 本次仅增加日志关联，不做 116px 补偿，也不声称能直接读取 SurfaceFlinger GPU 最终呈现时间。
@@ -20,7 +20,7 @@ su -c 'logcat -d -v threadtime | grep -E "KYANT28893_|KYANT28892_COORD|KYANT2882
 Termux：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.93 版本"
+git commit -m "V1.9.205.288.94 版本"
 git push origin main
 
 编译状态：本地 Gradle wrapper 缺少离线分发包且无法下载，未能完成 APK 编译。需要 CI 验证。
@@ -761,3 +761,9 @@ V1.9.205.288.77.1 根容器实验与修正：
 诊断（主要在 Vector/LSPosed 模块日志）：KYANT288771_HOST / KYANT288771_ROOT_CHILD_ATTACHED / KYANT288771_ROOT_CHILD_ERROR / KYANT288771_FALLBACK_FOLDER / KYANT288771_ROOT_MOTION / KYANT288771_ROOT_CHILD_REMOVED。
 如果遮挡图标、透镜不可见、触摸受影响或异常：su -c 'settings put global liquidglass_kyant_full_overlay_ab_28877 0; settings put global liquidglass_kyant_full_overlay_trace_28877 0'，重新加载 Launcher。普通根子 View 仍是诊断方案，可能覆盖图标，尚未真机确认光学可见性或归位稳定性。
 测试时禁用旧桥接缓冲实验（liquidglass_kyant_bridge_buffer_ab_28875=0）。V288.60 参考壁纸发布机制及 Kyant shader 保持不变。
+
+
+V1.9.205.288.94｜Kyant 跨手势旧帧隔离实验版
+新增独立 A/B 设置 liquidglass_kyant_gesture_isolation_ab_28894（0=保留原路径，1=启用隔离；默认0；修改后需重启 Launcher）。
+在新的 DOWN 事件之后，不再选中旧手势 release 的 V288.91 绑定帧；触摸进行期间暂停绑定帧发布；复制 Bitmap 期间若手势变化，拒绝发布。旧帧失效时回退到既有实时桥接画布，避免清空引起闪白。
+KYANT28894_HOST / KYANT28894_ISOLATE 便于验证是否进入实验路径及拒绝原因。本版不更改折射参数、光学渲染、Dock 和采样矩阵；无法保证所有视觉错位立即消失。

@@ -90,7 +90,8 @@ object KyantLauncherLens270 {
     // retained briefly by the Compose renderer without pixel/position tearing.
     private data class BridgeFrame28891(
         val bitmap: Bitmap, val position: Offset, val generation: Long,
-        val sampledAtNs: Long, val referenceIdentity: Int
+        val sampledAtNs: Long, val referenceIdentity: Int,
+        val downSerial28894: Long, val releaseSerial28894: Long
     )
     // V288.92: observational metadata only. Not a GPU presentation timestamp and
     // not the OEM wallpaper Surface transform. Coordinates are screen/source pairs.
@@ -138,6 +139,8 @@ object KyantLauncherLens270 {
     @Volatile private var lastTouchEventKey28820 = ""
     @Volatile private var lastTouchDownKey28821 = ""
     @Volatile private var gestureDownSerial28893 = 0L
+    // V288.94: fail closed when a new gesture begins. Only mode 1 reads this.
+    @Volatile private var touchActive28894 = false
     @Volatile private var releaseBeforeVia28821 = ""
     @Volatile private var releaseAfterKey28821 = ""
     @Volatile private var activeTouchRoot28820: WeakReference<View>? = null
@@ -184,6 +187,7 @@ object KyantLauncherLens270 {
             if (phase == "BEFORE" && eventKey != lastTouchDownKey28821) {
                 lastTouchDownKey28821 = eventKey
                 gestureDownSerial28893++
+                touchActive28894 = true
                 XposedBridge.log("KYANT28893_TOUCH_DOWN downSerial=$gestureDownSerial28893 " +
                     "priorRelease=${releaseSeq28820.get()} eventMs=${event.eventTime} " +
                     "rawX=${event.rawX} rawY=${event.rawY} via=$method")
@@ -192,6 +196,8 @@ object KyantLauncherLens270 {
             }
             return
         }
+        // A short/cancelled gesture also ends the active touch epoch.
+        if (phase == "BEFORE") touchActive28894 = false
         val dx = if (touchDownX28820.isFinite()) event.rawX - touchDownX28820 else Float.NaN
         val dy = if (touchDownY28820.isFinite()) event.rawY - touchDownY28820 else Float.NaN
         if (!dx.isFinite() || kotlin.math.abs(dx) < 12f) return
@@ -1262,6 +1268,10 @@ object KyantLauncherLens270 {
                 "liquidglass_kyant_rebound_frame_ab_28891", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
         // Disabled by default. Set before restarting Launcher to activate.
+        val gestureIsolation28894 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_gesture_isolation_ab_28894", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
         val coordinateTrace28892 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_coordinate_trace_28892", 0) == 1
@@ -1279,6 +1289,9 @@ object KyantLauncherLens270 {
             "pipeline=$pipelineMode28819 fusion=$fusionMode28889 " +
             "display=${displayWidth}x${displayHeight} reference=${reference.width}x${reference.height}")
         val reboundFrame28891 = androidx.compose.runtime.mutableStateOf<BridgeFrame28891?>(null)
+        if (gestureIsolation28894 == 1) XposedBridge.log(
+            "KYANT28894_HOST host=$trace28815Host isolation=1 frame=$reboundFrameAb28891 " +
+            "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819")
         var reboundCopyFailures28891 = 0
         if (reboundFrameAb28891 != 0) XposedBridge.log(
             "KYANT28891_HOST host=$trace28815Host ab=$reboundFrameAb28891 " +
@@ -1822,16 +1835,26 @@ object KyantLauncherLens270 {
                 pipelineMode28819 == 2 && !disposed) {
                 val age = SystemClock.elapsedRealtimeNanos() - releaseNs28820.get()
                 val eligible = releaseSeq28820.get() > 0L &&
-                    age in 0L..650_000_000L && releaseDx28820 > 0f
+                    age in 0L..650_000_000L && releaseDx28820 > 0f &&
+                    (gestureIsolation28894 == 0 || !touchActive28894)
                 // Never publish a partial copy or mismatched position.
                 if (eligible) try {
+                    // Capture gesture identity BEFORE copying pixels. Reject a copy
+                    // if DOWN or release changed while Bitmap.copy was running.
+                    val downAtStart94 = gestureDownSerial28893
+                    val releaseAtStart94 = releaseSeq28820.get()
                     val frozen = bitmap.copy(Bitmap.Config.ARGB_8888, false)
                     val frame91 = BridgeFrame28891(frozen, pos, gen,
-                        SystemClock.elapsedRealtimeNanos(), System.identityHashCode(activeReference))
-                    reboundFrame28891.value = frame91
-                    if (reboundTrace28890 && gen % 12L == 1L) XposedBridge.log(
-                        "KYANT28891_PUBLISH host=$trace28815Host gen=$gen x=${pos.x} " +
-                        "bitmap=${System.identityHashCode(frozen)} ageMs=${age/1_000_000f}")
+                        SystemClock.elapsedRealtimeNanos(), System.identityHashCode(activeReference),
+                        downAtStart94, releaseAtStart94)
+                    if (gestureIsolation28894 == 0 || (!touchActive28894 &&
+                        downAtStart94 == gestureDownSerial28893 &&
+                        releaseAtStart94 == releaseSeq28820.get())) {
+                        reboundFrame28891.value = frame91
+                        if (reboundTrace28890 && gen % 12L == 1L) XposedBridge.log(
+                            "KYANT28891_PUBLISH host=$trace28815Host gen=$gen x=${pos.x} " +
+                            "bitmap=${System.identityHashCode(frozen)} ageMs=${age/1_000_000f}")
+                    }
                 } catch (t: Throwable) {
                     reboundCopyFailures28891++
                     if (reboundCopyFailures28891 <= 3) XposedBridge.log(
@@ -2444,7 +2467,7 @@ object KyantLauncherLens270 {
                 { nativeCarrierDrawPosition28876(frame, glassScreenPosition(lastBounds)) },
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
-                reboundFrameAb28891, reboundFrame28891,
+                reboundFrameAb28891, reboundFrame28891, gestureIsolation28894,
                 coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
@@ -3360,6 +3383,7 @@ object KyantLauncherLens270 {
         bridgeFrontPosition28875: androidx.compose.runtime.State<Offset?>,
         reboundFrameAb28891: Int,
         reboundFrame28891: androidx.compose.runtime.State<BridgeFrame28891?>,
+        gestureIsolation28894: Int,
         coordinateTrace28892: Boolean,
         bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
         timelineTrace28893: Boolean,
@@ -3833,7 +3857,28 @@ object KyantLauncherLens270 {
                     val releaseAge91 = SystemClock.elapsedRealtimeNanos() - releaseNs28820.get()
                     val useFrame91 = frame91 != null && frameAge91 in 0L..50_000_000L &&
                         releaseAge91 in 0L..650_000_000L && releaseDx28820 > 0f &&
-                        frame91.referenceIdentity == System.identityHashCode(reference)
+                        frame91.referenceIdentity == System.identityHashCode(reference) &&
+                        (gestureIsolation28894 == 0 || (!touchActive28894 &&
+                            frame91.downSerial28894 == gestureDownSerial28893 &&
+                            frame91.releaseSerial28894 == releaseSeq28820.get()))
+                    // V288.94 invalidates *selection*, never the current canvas or bitmap.
+                    // This avoids blank frames when the producer has not sampled again.
+                    if (gestureIsolation28894 == 1 && frame91 != null &&
+                        sourceDrawCount.get() % 12L == 1L) {
+                        val reason94 = when {
+                            touchActive28894 -> "TOUCH_ACTIVE"
+                            frame91.downSerial28894 != gestureDownSerial28893 -> "OLD_DOWN"
+                            frame91.releaseSerial28894 != releaseSeq28820.get() -> "OLD_RELEASE"
+                            frameAge91 !in 0L..50_000_000L -> "STALE_AGE"
+                            releaseAge91 !in 0L..650_000_000L -> "OUTSIDE_WINDOW"
+                            else -> if (useFrame91) "SELECTED" else "OTHER"
+                        }
+                        XposedBridge.log("KYANT28894_ISOLATE host=$traceHost28890 selected=$useFrame91 " +
+                            "reason=$reason94 frameDown=${frame91.downSerial28894} " +
+                            "currentDown=$gestureDownSerial28893 frameRelease=${frame91.releaseSerial28894} " +
+                            "currentRelease=${releaseSeq28820.get()} active=$touchActive28894 " +
+                            "ageMs=${frameAge91 / 1_000_000f} rawGapX=${drawPosition.x - frame91.position.x}")
+                    }
                     val selectedBitmap91 = if (useFrame91) frame91!!.bitmap else visibleBridge75
                     val selectedPos91 = if (useFrame91) frame91!!.position else visiblePosition75
                     val dx91 = if (selectedPos91 != null) drawPosition.x - selectedPos91.x else 0f
