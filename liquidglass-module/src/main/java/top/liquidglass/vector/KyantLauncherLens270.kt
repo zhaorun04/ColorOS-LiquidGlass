@@ -1818,6 +1818,13 @@ object KyantLauncherLens270 {
         // V288.108: skip a redundant CPU bitmap resample only when both the
         // source identity and the full sampling position are unchanged.
         // Opt-out: settings put global liquidglass_kyant_bridge_dedupe_288108 0
+        // V288.109: opt-in whole-path CPU tracing. No rendering, scheduling, or
+        // wallpaper-source changes are performed by this switch.
+        // Logcat tag KyantPerf288109, available through `logcat -b all`.
+        val perfProfile288109 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_perf_profile_288109", 0) == 1
+        } catch (_: Throwable) { false }
         val bridgeDedupe288108 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
@@ -1849,8 +1856,11 @@ object KyantLauncherLens270 {
                 lastBridgeSampleTarget288108 === bitmap &&
                 lastBridgeSamplePosition288108 == pos) {
                 skippedBridgeSamples288108++
+                if (perfProfile288109) KyantPerf288109.skipBridge()
                 return
             }
+            val perfStart288109 = if (perfProfile288109)
+                SystemClock.elapsedRealtimeNanos() else 0L
             val perfStart107 = SystemClock.elapsedRealtimeNanos()
             val sw = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
             val sh = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
@@ -2013,6 +2023,11 @@ object KyantLauncherLens270 {
             }
             recordNativeSettle28872("NATIVE_BITMAP_BRIDGE", pos, activeReference, gen,
                 bitmap.width, bitmap.height)
+            // CPU-side bridge processing only, including source selection and
+            // generation bookkeeping; not GPU upload or SurfaceFlinger present.
+            if (perfProfile288109) KyantPerf288109.record(
+                KyantPerf288109.BRIDGE, SystemClock.elapsedRealtimeNanos() - perfStart288109,
+                bitmap.width.toLong() * bitmap.height.toLong())
             // One summary per 180 samples per host. Measures producer CPU time only.
             val perfNs107 = SystemClock.elapsedRealtimeNanos() - perfStart107
             perfSamples107++
@@ -2034,6 +2049,8 @@ object KyantLauncherLens270 {
             override fun onDraw(canvas: Canvas) {
                 super.onDraw(canvas)
                 if (disposed || width <= 0 || height <= 0) return
+                val nativeDrawStart288109 = if (perfProfile288109)
+                    SystemClock.elapsedRealtimeNanos() else 0L
                 val oldPos = try { glassScreenPosition(lastBounds) } catch (_: Throwable) { return }
                 val pos = if (nativeCarrierAb28869 == 1)
                     nativeCarrierDrawPosition28870(this, oldPos, "NATIVE_BITMAP_BRIDGE") else oldPos
@@ -2060,6 +2077,7 @@ object KyantLauncherLens270 {
                         bridgeNotifyPending.set(false)
                         if (!disposed) {
                             bridgeVersion.intValue++
+                            if (perfProfile288109) KyantPerf288109.notifyCompose()
                             releaseTrace28820("COMPOSE_NOTIFY", bridgePublishedPosition.get(), "pending=false")
                         }
                     }
@@ -2073,6 +2091,9 @@ object KyantLauncherLens270 {
                     "publishedX=${bridgePublishedPosition.get()?.x} canvasHardware=${canvas.isHardwareAccelerated}")
                 if (count % 120L == 0L) XposedBridge.log(
                     "KYANT2889_NATIVE_PUBLISH draws=$count x=${pos.x} y=${pos.y} version=${bridgeVersion.intValue}")
+                if (perfProfile288109) KyantPerf288109.record(
+                    KyantPerf288109.NATIVE_DRAW,
+                    SystemClock.elapsedRealtimeNanos() - nativeDrawStart288109)
             }
         }.apply { isClickable = false; isFocusable = false; setWillNotDraw(false) } else null
         if (releaseTrace28820) {
@@ -2436,6 +2457,7 @@ object KyantLauncherLens270 {
                 "parent=${frame.parent?.javaClass?.simpleName}")
             if (releaseTrace28820) liveHostProbes28821.remove(trace28815Host)
             if (activeCountRegistered) {
+                if (perfProfile288109) KyantPerf288109.unregister(trace28815Host)
                 activeHostCount.decrementAndGet()
                 activeCountRegistered = false
             }
@@ -2621,7 +2643,8 @@ object KyantLauncherLens270 {
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
-                reboundTrace28890, trace28815Host, predrawSample28890, bridgeSample28890,
+                reboundTrace28890, trace28815Host, perfProfile288109,
+                predrawSample28890, bridgeSample28890,
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
@@ -2753,6 +2776,8 @@ object KyantLauncherLens270 {
             KyantLauncherLensProbe270.setActiveFor273(anchor, true)
             activeHostCount.incrementAndGet()
             activeCountRegistered = true
+            if (perfProfile288109) KyantPerf288109.register(trace28815Host,
+                bridgeBitmap != null, previewWidth.toLong() * previewHeight.toLong())
             KyantLauncherFrameBridge266.addReferenceListener(referenceListener28832)
             // Close the attach/publication race: a newer frame may have arrived.
             KyantLauncherFrameBridge266.peekReferenceFrame270()?.let {
@@ -3477,10 +3502,14 @@ object KyantLauncherLens270 {
                             " composed=" + compositionSeen.get() + " bounds=" + b +
                             " frame=" + frame.width + "x" + frame.height)
                     }
-                    val predrawUs = (SystemClock.elapsedRealtimeNanos() - predrawStartedNs) / 1000L
+                    val predrawElapsed288109 = SystemClock.elapsedRealtimeNanos() - predrawStartedNs
+                    if (perfProfile288109) KyantPerf288109.record(
+                        KyantPerf288109.PREDRAW, predrawElapsed288109)
+                    val predrawUs = predrawElapsed288109 / 1000L
                     totalPredrawUs += predrawUs
                     if (predrawUs > maxPredrawUs) maxPredrawUs = predrawUs
                 }
+                if (perfProfile288109) KyantPerf288109.flushIfDue()
                 true
             }
             followListener = listener
@@ -3529,6 +3558,7 @@ object KyantLauncherLens270 {
         bridgeResample: (Offset) -> Unit,
         predrawMatrixSnapshot: java.util.concurrent.atomic.AtomicReference<Pair<Offset, Long>>,
         reboundTrace28890: Boolean, traceHost28890: Int,
+        perfProfile288109: Boolean,
         predrawSample28890: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
         bridgeSample28890: java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>,
         currentNativePosition: () -> Offset,
@@ -3750,6 +3780,8 @@ object KyantLauncherLens270 {
                 Modifier.fillMaxSize().layerBackdrop(backdrop).graphicsLayer { alpha = sourceAlpha }
             }
             ComposeCanvas(sourceModifier) {
+                val composeDrawStart288109 = if (perfProfile288109)
+                    SystemClock.elapsedRealtimeNanos() else 0L
                 // Reference is screen-aligned; root offset is accounted for explicitly.
                 val screenW = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
                 val screenH = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
@@ -4475,6 +4507,9 @@ object KyantLauncherLens270 {
                         "sampleX=$rootScreenX sampleY=$rootScreenY bitmapIdentity=" +
                         System.identityHashCode(reference))
                 }
+                if (perfProfile288109) KyantPerf288109.record(
+                    KyantPerf288109.COMPOSE_SOURCE,
+                    SystemClock.elapsedRealtimeNanos() - composeDrawStart288109)
             }
             // Mode B: source Bitmap is displayed by Compose, but no Kyant backdrop
             // is captured or rendered. Mode C keeps the original optical pipeline.

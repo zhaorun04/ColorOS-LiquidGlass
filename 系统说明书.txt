@@ -1,3 +1,41 @@
+ColorOS-LiquidGlass V1.9.205.288.109｜多容器全局渲染链路 CPU 性能定位版
+
+基线：V288.108（V288.107.3 为已确认的稳定回退版）。
+本版仅新增可关闭的 CPU 回调统计，没有修改参考壁纸保存/加载方案、Bridge/Compose 光学像素绘制、折射/模糊/高光和 UI 配置链。
+
+功能：
+- 全局汇总所有已启用的 Folder Host：总 Host 数、Native Bridge Host 数、总容器像素数。
+- 每两秒一次 Logcat 汇总：PreDraw、Bridge CPU 绘制、native View.onDraw、Compose 背景来源绘制的调用次数、耗时与最长耗时；另计通知 Compose 次数、Bridge 去重跳过次数和采样像素量。
+- 其中 nativeDraw 包含 Bridge 时间，ComposeSource 中的 Bridge 同帧采样也包含其时间；阶段结果可能嵌套，不能直接求和或当作 GPU 时间。报告非 SurfaceFlinger 帧时间。
+- 使用 android.util.Log.i，日志 tag=KyantPerf288109，便于直接用 logcat 获取。仅启用时做每阶段纳秒计时；日志每 2 秒全局最多 1 条汇总（额外在 Host 附着/销毁各一条）。
+
+启用（重启 Launcher 后生效）：
+su -c 'settings put global liquidglass_kyant_perf_profile_288109 1'
+关闭（重启 Launcher 后生效）：
+su -c 'settings put global liquidglass_kyant_perf_profile_288109 0'
+
+测试方法：
+1. 先保持一个小文件夹页面，开启统计并重启 Launcher；滑动 30–60 秒。
+2. 保存 Logcat：su -c 'logcat -d -b all -v threadtime | grep KYANT288109_ > /sdcard/Download/Kyant109_A_Perf.txt'
+3. 在多、大文件夹页面用相同方式测试，保存为 Kyant109_B_Perf.txt。最好每次切换页面后先清除 logcat，避免交叉混入；或记录开始/结束时间。
+4. 分别在两种布局滑动前执行：su -c 'dumpsys gfxinfo com.android.launcher reset'；滑动后执行：su -c 'dumpsys gfxinfo com.android.launcher > /sdcard/Download/Kyant109_A_FrameStats.txt'（B 组对应改名）。
+5. 关闭统计并重启 Launcher，核对 Kyant 外观、壁纸同步、Dock 与桌面文件夹。提交 A/B 性能日志用于决定是否尝试共享 GPU 背景采样。
+
+注意：
+- 不要将 sumMs 解释成某帧总耗时；这是 2 秒窗口内所有 Host 回调的累计 CPU 时间。与 gfxinfo 掉帧率一起看。
+- 这不是 GPU、RenderThread 或 Kyant GPU Lens 特效的逐段性能数据。若 CPU 指标不能解释掉帧，应继续采集 Perfetto FrameTimeline。
+- V288.108 的 Bridge 去重开关仍存在，默认开启，但先前用户 A/B 测试显示没有可感知差异。本版不改变其实现。
+- 请先在 GitHub Actions 中验证 Kotlin 编译；本地环境未完成 Android SDK / Gradle 编译。
+
+Termux Git：
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.109 版本"
+git push origin main
+
+UI→SharedPreferences→Root→Launcher→渲染参数：本版未新增 UI 参数，也未修改原有滑块、开关或对应传递键；新增 settings Global 性能分析开关仅由 Launcher 在创建 Host 时读取，默认关闭，和材质渲染参数完全隔离。
+
+--- 上一版说明摘录 ---
 ColorOS-LiquidGlass V1.9.205.288.108｜历史诊断物理清理续版
 
 基线：V1.9.205.288.107.1（已修复 Kotlin 重复声明）。
