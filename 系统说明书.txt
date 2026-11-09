@@ -1,18 +1,18 @@
-ColorOS-LiquidGlass V1.9.205.288.102｜零复制桥接与绘制时序诊断版
+ColorOS-LiquidGlass V1.9.205.288.103｜Workspace 滚动快照归属诊断版
 
-基线：V1.9.205.288.101 模式 0。针对模式 1 导致的严重抖动与明显掉帧，永久停用 V288.101 的高频 Bitmap.copy 配对实验（即使保留旧 settings 值也不会启用）。
+基线：V1.9.205.288.102，保留其零复制渲染路径。V288.101 Bitmap.copy 配对实验继续强制停用；V288.98 的坐标补偿实验应设为 0。未修改二维折射、模糊、高光、Dock 外观或壁纸采样平移。
 
-本版仅增加轻量诊断数据：桥接绘制回调耗时、PreDraw 时间戳、Compose Canvas 提交耗时、相邻 Compose 诊断回调时间间隔、桥接/PreDraw 代际与坐标差。未创建新 Bitmap，未修改 Shader、二维折射、模糊、高光和 Dock 参数，也没有增加像素补偿。
+目的：验证 Bridge 与 PreDraw 的不同坐标，能否由采集时 Workspace.scrollX 的差值解释。此处不是 GPU 呈现帧对齐的证明，也不代表视觉错位程度。
 
-开关（启动时读取，修改后重新加载 Launcher）：
-liquidglass_kyant_zero_copy_timing_trace_288102=0（默认关闭）/1（开启）
-liquidglass_kyant_bridge_pair_ab_288101=0（旧实验已从代码强制停用）
-liquidglass_kyant_sample_sync_ab_28898=0（建议）
+诊断开关（启动时读取，修改后重新加载 Launcher）：
+liquidglass_kyant_scroll_provenance_trace_288103=0（默认）/1（启用）
+诊断开关=1 时会自动启用 V288.102 所需的轻量桥接和 PreDraw 时间戳采集，不必另外开启 288102 开关。
 
-Vector 模块日志关键字：KYANT288102_HOST、KYANT288102_TIMING。
+推荐测试命令：
+su -c 'settings put global liquidglass_kyant_bridge_pair_ab_288101 0; settings put global liquidglass_kyant_sample_sync_ab_28898 0; settings put global liquidglass_kyant_scroll_provenance_trace_288103 1'
 
-测试：确认 Vector 模块启用并勾选系统 Launcher 作用域；先确认原本光学正常，设置 timing_trace=1 后重新加载 Launcher；左右不翻页松手归位、快速右滑起始分别测试，再导出 Vector 模块日志。
+Vector 日志关键字：KYANT288103_HOST、KYANT288103_SCROLL。`class=SCROLL_EXPLAINS_POSITION` 表示 Bridge/PreDraw 的位置差符合当前符号约定下的滚动位置差；CROSS_GESTURE 表示归属不匹配；OTHER_COORDINATE_CHANGE 表示还存在别的坐标变化。scrollResidual=positionDelta+wsDelta，drawResidual=bridgeGapX-wsDelta；后者只供辅助分析，不代表真正显示残差。
 
-注意：drawCadenceMs 是同一 Host 的 Compose 回调间隔，并非真实 FPS；canvasSubmitMs 是 CPU Canvas 命令提交时间，不包括 GPU 或 SurfaceFlinger 呈现耗时；bridgeWorkMs 是采样回调工作时间，不代表端到端 Bitmap 更新延迟。本版不会自动修复抖动。
+测试顺序：Vector 确保模块启用并勾选 Launcher 作用域；安装后先验证玻璃、Dock 正常，再分别测试左滑不翻页松手归位、右滑不翻页松手归位、快速右滑起始。导出 Vector 模块日志。出现异常时：settings put global liquidglass_kyant_scroll_provenance_trace_288103 0，重新加载 Launcher。
 
-构建：Android Studio / Gradle 项目源码，依赖 Android SDK/NDK 等本地环境。发布前需通过 GitHub Actions 编译及真机测试。
+本版为只读诊断，不包含同帧同步修复。只有证据明确时，后续才考虑零复制可回退的同步实验。源码静态检查不等于 Gradle 编译或真机验证。

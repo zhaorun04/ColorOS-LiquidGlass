@@ -1362,10 +1362,20 @@ object KyantLauncherLens270 {
         // Force-disabled even if old global settings still contain mode 1 or 2.
         val bridgePairAb288101 = 0
         val bridgePairTrace288101 = false
-        val timingTraceEnabled288102 = try {
+        // V288.103: read-only Workspace-scroll provenance. This flag intentionally
+        // uses the existing zero-copy producer/PreDraw probes; no sampling changes.
+        val scrollTraceEnabled288103 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_scroll_provenance_trace_288103", 0) == 1
+        } catch (_: Throwable) { false }
+        val timingTraceEnabled288102 = scrollTraceEnabled288103 || try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_zero_copy_timing_trace_288102", 0) == 1
         } catch (_: Throwable) { false }
+        if (scrollTraceEnabled288103) XposedBridge.log(
+            "KYANT288103_HOST host=$trace28815Host trace=1 zeroCopy=true " +
+            "pipeline=$pipelineMode28819 carrier=$nativeCarrierAb28869 " +
+            "bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
         val timings288102 = TimingTrace288102()
         if (timingTraceEnabled288102) XposedBridge.log(
             "KYANT288102_HOST host=$trace28815Host enabled=1 retiredPair101=true " +
@@ -2631,7 +2641,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, timings288102,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, scrollTraceEnabled288103, timings288102,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3582,6 +3592,7 @@ object KyantLauncherLens270 {
         bridgePairTrace288101: Boolean,
         bridgePairFrame288101: androidx.compose.runtime.State<VerifiedBridgeFrame288101?>,
         timingTraceEnabled288102: Boolean,
+        scrollTraceEnabled288103: Boolean,
         timings288102: TimingTrace288102,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
@@ -4223,6 +4234,45 @@ object KyantLauncherLens270 {
                                 val pAge102 = p102?.let { (now102 - it.atNs) / 1_000_000f }
                                 val gapX102 = b102?.let { drawPosition.x - it.pos.x }
                                 val preGap102 = p102?.let { drawPosition.x - it.pos.x }
+                                // V288.103: compare position and scroll observations
+                                // from the same producer/PreDraw/Compose callback cycle.
+                                // No coordinate correction: this is a provenance test.
+                                if (scrollTraceEnabled288103) {
+                                    val scrollPre103 = p102?.workspaceScrollX
+                                    val scrollBridge103 = b102?.workspaceScrollX
+                                    val scrollDelta103 = if (scrollPre103 != null && scrollBridge103 != null)
+                                        scrollBridge103 - scrollPre103 else null
+                                    val positionDelta103 = if (b102 != null && p102 != null)
+                                        b102.pos.x - p102.pos.x else null
+                                    val scrollResidual103 = if (scrollDelta103 != null && positionDelta103 != null)
+                                        positionDelta103 + scrollDelta103 else null
+                                    val drawResidual103 = if (scrollDelta103 != null && gapX102 != null)
+                                        gapX102 - scrollDelta103 else null
+                                    val gestureSame103 = p102 != null && b102 != null &&
+                                        p102.down == b102.down && p102.release == b102.release &&
+                                        b102.down == gestureDownSerial28893 &&
+                                        b102.release == releaseSeq28820.get()
+                                    val classification103 = when {
+                                        p102 == null || b102 == null -> "MISSING_SNAPSHOT"
+                                        !gestureSame103 -> "CROSS_GESTURE"
+                                        scrollDelta103 == null -> "MISSING_WORKSPACE"
+                                        b102.atNs < p102.atNs -> "BRIDGE_BEFORE_PREDRAW"
+                                        kotlin.math.abs(scrollResidual103 ?: Float.MAX_VALUE) < 1f -> "SCROLL_EXPLAINS_POSITION"
+                                        else -> "OTHER_COORDINATE_CHANGE"
+                                    }
+                                    XposedBridge.log("KYANT288103_SCROLL host=$traceHost28890 " +
+                                        "phase=$phase102 class=$classification103 " +
+                                        "down=$gestureDownSerial28893 release=${releaseSeq28820.get()} " +
+                                        "preDown=${p102?.down} bridgeDown=${b102?.down} " +
+                                        "preRelease=${p102?.release} bridgeRelease=${b102?.release} " +
+                                        "preGen=${p102?.gen} bridgeGen=${b102?.gen} " +
+                                        "preAgeMs=$pAge102 bridgeAgeMs=$bAge102 " +
+                                        "wsPre=$scrollPre103 wsBridge=$scrollBridge103 wsDelta=$scrollDelta103 " +
+                                        "drawX=${drawPosition.x} preX=${p102?.pos?.x} bridgeX=${b102?.pos?.x} " +
+                                        "bridgeGapX=$gapX102 positionDelta=$positionDelta103 " +
+                                        "scrollResidual=$scrollResidual103 drawResidual=$drawResidual103 " +
+                                        "bitmapId=${System.identityHashCode(selectedBitmap91)}")
+                                }
                                 XposedBridge.log("KYANT288102_TIMING host=$traceHost28890 " +
                                     "phase=$phase102 down=$gestureDownSerial28893 " +
                                     "release=${releaseSeq28820.get()} " +
