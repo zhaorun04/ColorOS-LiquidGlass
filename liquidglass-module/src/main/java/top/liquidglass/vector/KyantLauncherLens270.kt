@@ -101,6 +101,14 @@ object KyantLauncherLens270 {
         val screenWidth: Int, val screenHeight: Int, val scaleX: Float, val scaleY: Float,
         val sourceMatrixTx: Float, val sourceMatrixTy: Float, val path: String
     )
+    // V288.100: one immutable UI-thread PreDraw checkpoint. Not a Choreographer
+    // frame ID or a SurfaceFlinger presentation fence: generation/age comparisons
+    // expose which callback changed first without claiming GPU frame equality.
+    private data class PredrawCheckpoint288100(
+        val serial: Long, val atNs: Long, val pos: Offset,
+        val down: Long, val release: Long, val bridgeGen: Long,
+        val wsScrollX: Int?, val wsX: Float?, val wsTx: Float?
+    )
     // V288.93: aggregate only diagnostic observations from the same release and
     // 50ms time bucket. This is NOT a verified screen-space or GPU-frame offset.
     private data class HostGap28893(val host: Int, val x: Float, val atNs: Long)
@@ -1321,6 +1329,16 @@ object KyantLauncherLens270 {
         if (visibleGestureTrace28899) XposedBridge.log("KYANT28899_HOST host=$trace28815Host " +
             "trace=1 mode98=$sampleSyncAb28898 pipeline=$pipelineMode28819 " +
             "bitmap=$bitmapPipeline28880 node=$nodePipeline28881 carrier=$nativeCarrierAb28869")
+        // V288.100 diagnostics are opt-in and never update Compose snapshot state.
+        val snapshotTrace288100 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_frame_snapshot_trace_288100", 0) == 1
+        } catch (_: Throwable) { false }
+        if (snapshotTrace288100) XposedBridge.log("KYANT288100_HOST host=$trace28815Host " +
+            "trace=1 pipeline=$pipelineMode28819 bitmap=$bitmapPipeline28880 " +
+            "node=$nodePipeline28881 carrier=$nativeCarrierAb28869 mode98=$sampleSyncAb28898")
+        val checkpoint288100 = java.util.concurrent.atomic.AtomicReference<PredrawCheckpoint288100?>(null)
+        var checkpointSerial288100 = 0L
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
         if (finalSampleTrace28897) XposedBridge.log("KYANT28897_HOST host=$trace28815Host " +
             "trace=1 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
@@ -1839,7 +1857,7 @@ object KyantLauncherLens270 {
                 target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
             }
             val gen = bridgeDrawCount.incrementAndGet()
-            if (coordinateTrace28892 || timelineTrace28893) bridgeCoordinate28892.set(BridgeCoordinate28892(
+            if (coordinateTrace28892 || timelineTrace28893 || snapshotTrace288100) bridgeCoordinate28892.set(BridgeCoordinate28892(
                 gen, SystemClock.elapsedRealtimeNanos(), pos,
                 System.identityHashCode(activeReference), activeReference.width, activeReference.height,
                 sw, sh, sx, sy, -pos.x, -pos.y,
@@ -2521,7 +2539,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3281,6 +3299,20 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
+                    // V288.100: capture the host position and the bridge generation
+                    // in this PreDraw callback, not later from Compose draw. Atomic
+                    // publication keeps the fields from one callback together.
+                    if (snapshotTrace288100) {
+                        try {
+                            val ws100 = activeTouchWorkspace28820?.get()
+                            checkpointSerial288100++
+                            checkpoint288100.set(PredrawCheckpoint288100(
+                                checkpointSerial288100, SystemClock.elapsedRealtimeNanos(),
+                                currentSample, gestureDownSerial28893, releaseSeq28820.get(),
+                                bridgeDrawCount.get(), ws100?.scrollX, ws100?.x,
+                                ws100?.translationX))
+                        } catch (_: Throwable) { /* no rendering side effects */ }
+                    }
                     if (reboundTrace28890 || timelineTrace28893) {
                         val now90 = SystemClock.elapsedRealtimeNanos()
                         val releaseSeq90 = releaseSeq28820.get()
@@ -3446,6 +3478,8 @@ object KyantLauncherLens270 {
         finalSampleTrace28897: Boolean,
         sampleSyncAb28898: Int,
         visibleGestureTrace28899: Boolean,
+        snapshotTrace288100: Boolean,
+        checkpoint288100: java.util.concurrent.atomic.AtomicReference<PredrawCheckpoint288100?>,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3480,6 +3514,10 @@ object KyantLauncherLens270 {
         // Local to one host, no Compose state invalidation or Bitmap writes.
         val visibleTraceState28899 = androidx.compose.runtime.remember {
             longArrayOf(-1L, -1L, 0L, 0L, 0L)
+        }
+        // [last down, last release, last time, count], logging only.
+        val snapshotLog288100 = androidx.compose.runtime.remember {
+            longArrayOf(-1L, -1L, 0L, 0L)
         }
         val previousGap28893 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -4131,6 +4169,82 @@ object KyantLauncherLens270 {
                             if (SystemClock.elapsedRealtimeNanos()-visibleTraceState28899[4] >= 1_000_000_000L) {
                                 visibleTraceState28899[4] = SystemClock.elapsedRealtimeNanos()
                                 XposedBridge.log("KYANT28899_TRACE_ERROR host=$traceHost28890 type=${traceError99.javaClass.simpleName}")
+                            }
+                        }
+                    }
+                    // V288.100: correlate immutable PreDraw checkpoint, producer
+                    // publication and the actual bitmap draw. DO NOT change the
+                    // selected Bitmap or actualTx98/actualTy98 in this experiment.
+                    if (snapshotTrace288100) {
+                        try {
+                            val now100 = SystemClock.elapsedRealtimeNanos()
+                            val down100 = gestureDownSerial28893
+                            val rel100 = releaseSeq28820.get()
+                            val ageDown100 = now100 - touchDownNs28896
+                            val ageRel100 = now100 - releaseNs28820.get()
+                            val start100 = touchActive28894 && down100 > 0L &&
+                                ageDown100 in 0L..150_000_000L
+                            val rebound100 = !touchActive28894 && down100 > 0L &&
+                                releaseDownSerial28899 == down100 && releaseAction28820 == "UP" &&
+                                ageRel100 in 0L..850_000_000L
+                            if (snapshotLog288100[0] != down100 || snapshotLog288100[1] != rel100) {
+                                snapshotLog288100[0] = down100
+                                snapshotLog288100[1] = rel100
+                                snapshotLog288100[2] = 0L
+                                snapshotLog288100[3] = 0L
+                            }
+                            if ((start100 || rebound100) && selectedBitmap91 != null &&
+                                snapshotLog288100[3] < 20L &&
+                                now100 - snapshotLog288100[2] >= 55_000_000L &&
+                                visibleSource28867()) {
+                                val pre100 = checkpoint288100.get()
+                                val pub100 = bridgeCoordinate28892.get()
+                                val preMatches100 = pre100 != null && pre100.down == down100 &&
+                                    pre100.release == rel100 && now100 >= pre100.atNs &&
+                                    now100 - pre100.atNs <= 100_000_000L
+                                val pubMatches100 = pub100 != null && pub100.atNs <= now100 &&
+                                    now100 - pub100.atNs <= 100_000_000L &&
+                                    pub100.referenceIdentity == System.identityHashCode(reference)
+                                val selectedX100 = selectedPos91?.x
+                                val residual100 = selectedX100?.let { drawPosition.x - (it - actualTx98) }
+                                val preGap100 = pre100?.let { drawPosition.x - it.pos.x }
+                                val bridgeGap100 = pub100?.let { drawPosition.x - it.position.x }
+                                val publicationDelta100 = if (pre100 != null && pub100 != null)
+                                    pub100.generation - pre100.bridgeGen else null
+                                val classification100 = when {
+                                    !preMatches100 -> "PREDRAW_MISSING_OR_STALE"
+                                    !pubMatches100 -> "BRIDGE_MISSING_OR_STALE"
+                                    publicationDelta100 == 0L -> "BRIDGE_SAME_AS_PREDRAW"
+                                    publicationDelta100 != null && publicationDelta100 > 0L -> "BRIDGE_AFTER_PREDRAW"
+                                    else -> "BRIDGE_BEFORE_PREDRAW"
+                                }
+                                snapshotLog288100[2] = now100
+                                snapshotLog288100[3]++
+                                XposedBridge.log("KYANT288100_FRAME host=$traceHost28890 " +
+                                    "phase=${if (start100) "TOUCH_START" else "REBOUND"} " +
+                                    "down=$down100 release=$rel100 active=$touchActive28894 " +
+                                    "classification=$classification100 " +
+                                    "preSeq=${pre100?.serial} preDown=${pre100?.down} " +
+                                    "preRelease=${pre100?.release} preGen=${pre100?.bridgeGen} " +
+                                    "preAgeMs=${pre100?.let { (now100-it.atNs)/1_000_000f }} " +
+                                    "bridgeGen=${pub100?.generation} bridgeAdvance=$publicationDelta100 " +
+                                    "bridgeAgeMs=${pub100?.let { (now100-it.atNs)/1_000_000f }} " +
+                                    "drawX=${drawPosition.x} preX=${pre100?.pos?.x} " +
+                                    "bridgeX=${pub100?.position?.x} selectedX=$selectedX100 " +
+                                    "tx=$actualTx98 residualX=$residual100 preGapX=$preGap100 " +
+                                    "bridgeGapX=$bridgeGap100 " +
+                                    "wsScrollX=${pre100?.wsScrollX} wsX=${pre100?.wsX} " +
+                                    "wsTx=${pre100?.wsTx} bitmapId=${System.identityHashCode(selectedBitmap91)} " +
+                                    "source=${if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                    "applied98=$applySync98")
+                            }
+                        } catch (t100: Throwable) {
+                            // Fail closed: tracing is never allowed to affect optics.
+                            if (snapshotLog288100[2] == 0L ||
+                                SystemClock.elapsedRealtimeNanos()-snapshotLog288100[2] > 1_000_000_000L) {
+                                snapshotLog288100[2] = SystemClock.elapsedRealtimeNanos()
+                                XposedBridge.log("KYANT288100_TRACE_ERROR host=$traceHost28890 " +
+                                    "type=${t100.javaClass.simpleName}")
                             }
                         }
                     }
