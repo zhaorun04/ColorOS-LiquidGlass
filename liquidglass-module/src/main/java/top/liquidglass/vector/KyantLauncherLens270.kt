@@ -1830,10 +1830,17 @@ object KyantLauncherLens270 {
         // -> Compose Kyant backdrop path is active. Source/geometry/optics
         // remain unchanged. Switch requires Launcher restart; default OFF.
         // This is an experimental GPU draw, NOT a zero-copy guarantee.
-        val requestedGpuReference288110 = try {
+        // V288.111: always report the parsed setting and every effective gate.
+        // V288.110 only logged when requested=true; this hid setup failures.
+        val rawGpuReference288111 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_gpu_reference_ab_288110", 0) == 1
-        } catch (_: Throwable) { false }
+                "liquidglass_kyant_gpu_reference_ab_288110", -999)
+        } catch (t: Throwable) {
+            android.util.Log.w("KyantGpu288111", "KYANT288111_SETTING_ERROR " +
+                t.javaClass.simpleName + " " + (t.message ?: ""))
+            -998
+        }
+        val requestedGpuReference288110 = rawGpuReference288111 == 1
         val gpuReference288110 = requestedGpuReference288110 &&
             bridgeBitmap != null && nativeBridgeMode == 1 &&
             nativeCarrierAb28869 == 1 && fusionMode28889 == 0 &&
@@ -1842,14 +1849,29 @@ object KyantLauncherLens270 {
             bridgePairAb288101 == 0 && reboundFrameAb28891 != 1 &&
             frameSync28822 == 0 && v230NativeMode28887 == 0 &&
             nativeLayerMode !in 2..3 && displayIsolationMode != 2
-        if (requestedGpuReference288110) {
-            android.util.Log.i("KyantGpu288110", "KYANT288110_HOST host=$trace28815Host " +
-                "requested=true effective=$gpuReference288110 bridge=${bridgeBitmap != null} " +
-                "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
-                "bitmapPipeline=$bitmapPipeline28880 nodePipeline=$nodePipeline28881 " +
-                "affine=$affineSampling28876 buffer=$bufferExperiment28875 " +
-                "reference=${reference.width}x${reference.height}")
-        }
+        // Emit once for EACH Host regardless of the requested switch value.
+        // This separates stale Host initialization from experimental gate failures.
+        val gpuBlockers288111 = ArrayList<String>(14)
+        if (rawGpuReference288111 != 1) gpuBlockers288111.add("setting=$rawGpuReference288111")
+        if (bridgeBitmap == null) gpuBlockers288111.add("noBridgeBitmap")
+        if (nativeBridgeMode != 1) gpuBlockers288111.add("nativeBridgeMode=$nativeBridgeMode")
+        if (nativeCarrierAb28869 != 1) gpuBlockers288111.add("carrier=$nativeCarrierAb28869")
+        if (fusionMode28889 != 0) gpuBlockers288111.add("fusion=$fusionMode28889")
+        if (bufferExperiment28875) gpuBlockers288111.add("bufferAB")
+        if (affineSampling28876) gpuBlockers288111.add("affine")
+        if (bitmapPipeline28880 >= 0) gpuBlockers288111.add("bitmapPipeline=$bitmapPipeline28880")
+        if (nodePipeline28881 >= 0) gpuBlockers288111.add("nodePipeline=$nodePipeline28881")
+        if (bridgePairAb288101 != 0) gpuBlockers288111.add("bridgePair=$bridgePairAb288101")
+        if (reboundFrameAb28891 == 1) gpuBlockers288111.add("reboundFrame")
+        if (frameSync28822 != 0) gpuBlockers288111.add("frameSync=$frameSync28822")
+        if (v230NativeMode28887 != 0) gpuBlockers288111.add("v230=$v230NativeMode28887")
+        if (nativeLayerMode in 2..3) gpuBlockers288111.add("nativeLayer=$nativeLayerMode")
+        if (displayIsolationMode == 2) gpuBlockers288111.add("displayIsolation=2")
+        android.util.Log.i("KyantGpu288111", "KYANT288111_HOST host=$trace28815Host " +
+            "raw=$rawGpuReference288111 requested=$requestedGpuReference288110 " +
+            "effective=$gpuReference288110 blockers=${gpuBlockers288111.joinToString(",").ifEmpty { "none" }} " +
+            "reference=${reference.width}x${reference.height} " +
+            "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819")
         val bridgeDedupe288108 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
@@ -2101,6 +2123,12 @@ object KyantLauncherLens270 {
                     if (buffer != null) canvas.drawBitmap(buffer, 0f, 0f, bridgePaint)
                 }
                 count++
+                if (count == 1L || count % 240L == 0L) {
+                    android.util.Log.i("KyantGpu288111", "KYANT288111_NATIVE host=$trace28815Host " +
+                        "draws=$count effective=$gpuReference288110 " +
+                        "cpuBridgeExpected=${!gpuReference288110 && (frameSync28822 != 1 || nativeCarrierAb28869 == 1)} " +
+                        "posX=${pos.x} posY=${pos.y}")
+                }
                 if ((frameSync28822 != 1 || nativeCarrierAb28869 == 1) &&
                     pipelineMode28819 != 3 && bridgeNotifyPending.compareAndSet(false, true)) {
                     post {
