@@ -50,6 +50,16 @@ internal object KyantPerf288109 {
         if (stage == BRIDGE) bridgePixels.addAndGet(pixels)
     }
 
+    private val gpuReferenceDraws288110 = AtomicLong(0L)
+    private val gpuReferenceHw288110 = AtomicLong(0L)
+    private val gpuReferenceFallbacks288110 = AtomicLong(0L)
+    private val nativeBridgeSkips288110 = AtomicLong(0L)
+    fun recordGpuReference288110(hw: Boolean) {
+        gpuReferenceDraws288110.incrementAndGet()
+        if (hw) gpuReferenceHw288110.incrementAndGet()
+        else gpuReferenceFallbacks288110.incrementAndGet()
+    }
+    fun skipNativeBridge288110() { nativeBridgeSkips288110.incrementAndGet() }
     fun skipBridge() { skipped.incrementAndGet() }
     fun notifyCompose() { notifications.incrementAndGet() }
 
@@ -78,6 +88,10 @@ internal object KyantPerf288109 {
             "bridgePixels=${bridgePixels.getAndSet(0L)} " +
             "bridgeSkipped=${skipped.getAndSet(0L)} " +
             "composeNotifies=${notifications.getAndSet(0L)} " +
+            "gpu110Draws=${gpuReferenceDraws288110.getAndSet(0L)} " +
+            "gpu110Hw=${gpuReferenceHw288110.getAndSet(0L)} " +
+            "gpu110Fallbacks=${gpuReferenceFallbacks288110.getAndSet(0L)} " +
+            "gpu110NativeSkips=${nativeBridgeSkips288110.getAndSet(0L)} " +
             "note=callbackCpuOnly_notGpuFrame")
     }
 }

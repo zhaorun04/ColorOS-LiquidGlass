@@ -1,66 +1,28 @@
-ColorOS-LiquidGlass V1.9.205.288.109｜多容器全局渲染链路 CPU 性能定位版
+ColorOS-LiquidGlass V1.9.205.288.110｜共享参考帧 GPU 直接采样 A/B 实验版
 
-基线：V288.108（V288.107.3 为已确认的稳定回退版）。
-本版仅新增可关闭的 CPU 回调统计，没有修改参考壁纸保存/加载方案、Bridge/Compose 光学像素绘制、折射/模糊/高光和 UI 配置链。
+稳定基线：V1.9.205.288.107.3；本版是在 V288.109 性能定位版上实现的独立 A/B 优化。
 
-功能：
-- 全局汇总所有已启用的 Folder Host：总 Host 数、Native Bridge Host 数、总容器像素数。
-- 每两秒一次 Logcat 汇总：PreDraw、Bridge CPU 绘制、native View.onDraw、Compose 背景来源绘制的调用次数、耗时与最长耗时；另计通知 Compose 次数、Bridge 去重跳过次数和采样像素量。
-- 其中 nativeDraw 包含 Bridge 时间，ComposeSource 中的 Bridge 同帧采样也包含其时间；阶段结果可能嵌套，不能直接求和或当作 GPU 时间。报告非 SurfaceFlinger 帧时间。
-- 使用 android.util.Log.i，日志 tag=KyantPerf288109，便于直接用 logcat 获取。仅启用时做每阶段纳秒计时；日志每 2 秒全局最多 1 条汇总（额外在 Host 附着/销毁各一条）。
+目标：减少 Native Bridge 在多文件夹滑动时每帧执行的 CPU Canvas(Bitmap) 重采样。沿用 ColorOS 屏幕参考帧、实时浮点坐标、Kyant 原版 layerBackdrop、drawBackdrop 光学效果、模糊、折射、柔和高光和 Dock 设置。没有修改壁纸源文件/同步、设置 UI→SharedPreferences→Root→Launcher 正式配置映射。
 
-启用（重启 Launcher 后生效）：
-su -c 'settings put global liquidglass_kyant_perf_profile_288109 1'
-关闭（重启 Launcher 后生效）：
-su -c 'settings put global liquidglass_kyant_perf_profile_288109 0'
+A/B 开关（需要重启 com.android.launcher 或通过正常方式重新挂载 Host 才生效）：
+  su -c 'settings put global liquidglass_kyant_gpu_reference_ab_288110 0'  # 默认，原有 CPU Bridge
+  su -c 'settings put global liquidglass_kyant_gpu_reference_ab_288110 1'  # 实验，GPU 参考帧直接绘制
 
-测试方法：
-1. 先保持一个小文件夹页面，开启统计并重启 Launcher；滑动 30–60 秒。
-2. 保存 Logcat：su -c 'logcat -d -b all -v threadtime | grep KYANT288109_ > /sdcard/Download/Kyant109_A_Perf.txt'
-3. 在多、大文件夹页面用相同方式测试，保存为 Kyant109_B_Perf.txt。最好每次切换页面后先清除 logcat，避免交叉混入；或记录开始/结束时间。
-4. 分别在两种布局滑动前执行：su -c 'dumpsys gfxinfo com.android.launcher reset'；滑动后执行：su -c 'dumpsys gfxinfo com.android.launcher > /sdcard/Download/Kyant109_A_FrameStats.txt'（B 组对应改名）。
-5. 关闭统计并重启 Launcher，核对 Kyant 外观、壁纸同步、Dock 与桌面文件夹。提交 A/B 性能日志用于决定是否尝试共享 GPU 背景采样。
+实验路径：Native View 仍触发 Compose 绘制通知，但停止重采样专属 Bridge Bitmap。Compose 背景绘制阶段直接以硬件加速 Canvas.drawBitmap(reference, null, destination) 绘制共享全屏参考 Bitmap；Kyant 后续 layerBackdrop 光学链不变。
+注意：此路径是硬件 Canvas 纹理采样 A/B，不等于严格零拷贝/零纹理上传；GPU 时间、图层缓存、壁纸同步仍需实测。若没有硬件加速 Canvas 或来源位图已回收，临时回退旧 Bridge。
 
-注意：
-- 不要将 sumMs 解释成某帧总耗时；这是 2 秒窗口内所有 Host 回调的累计 CPU 时间。与 gfxinfo 掉帧率一起看。
-- 这不是 GPU、RenderThread 或 Kyant GPU Lens 特效的逐段性能数据。若 CPU 指标不能解释掉帧，应继续采集 Perfetto FrameTimeline。
-- V288.108 的 Bridge 去重开关仍存在，默认开启，但先前用户 A/B 测试显示没有可感知差异。本版不改变其实现。
-- 请先在 GitHub Actions 中验证 Kotlin 编译；本地环境未完成 Android SDK / Gradle 编译。
+保护条件：仅对原本的 native carrier+Kyant 桥接路径开放，不对多缓冲、仿射、帧冻结、额外 Bitmap 实验、native 独立引擎等模式改写生产数据。每个 Host 创建时会通过 Logcat 写 KYANT288110_HOST requested/effective，首次和低频绘制通过 KYANT288110_DRAW 写是否真正使用硬件 Canvas。如 effective=false，本版不会变更绘制。
 
-Termux Git：
+性能定位（可选；关闭后无每阶段原子计数）：
+  su -c 'settings put global liquidglass_kyant_perf_profile_288109 1'
+Logcat 搜索：KYANT288109_PERF 或 KYANT288110_（通过 logcat -b all）。新版汇总附 gpu110Draws/gpu110Hw/gpu110Fallbacks/gpu110NativeSkips。
+
+严谨比较：相同壁纸、文件夹数量及测试手势；先测试默认 CPU 模式并重置 gfxinfo，再测试 GPU 开关=1并重启 Launcher。两个模式都分别保存 FrameStats 和 Perf。要求 GPU 实验下仍有完整模糊、折射、高光；壁纸换新、反向滑动、右边缘、松手回弹位置必须正确。若玻璃不可见/纹理错位或掉帧反而恶化，立刻切回 0 并重启 Launcher。
+
+验证状态：仅完成源码静态改动与 ZIP 完整性检查。未在此环境完成 Android Gradle 编译及真机功能/性能测试。是否对其启用正式优化以真机 A/B 为准。
+
+Git (解压覆盖 ~/ColorOS-LiquidGlass-V1.0-Source 后)：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.109 版本"
+git commit -m "V1.9.205.288.110 版本"
 git push origin main
-
-UI→SharedPreferences→Root→Launcher→渲染参数：本版未新增 UI 参数，也未修改原有滑块、开关或对应传递键；新增 settings Global 性能分析开关仅由 Launcher 在创建 Host 时读取，默认关闭，和材质渲染参数完全隔离。
-
---- 上一版说明摘录 ---
-ColorOS-LiquidGlass V1.9.205.288.108｜历史诊断物理清理续版
-
-基线：V1.9.205.288.107.1（已修复 Kotlin 重复声明）。
-
-本次仅做无效诊断代码维护，不将清理作为掉帧性能修复。
-- 从 KyantLauncherLens270.kt 物理删除 V288.96/97/99/100 四组已强制关闭的 Compose 只读诊断；删除 V288.100 已强制关闭的 PreDraw 检查点采集和两处相关局部状态。
-- 删除项目中确认没有其他源码引用的 KyantLauncherProbe259.java 孤立诊断类。
-- 保留当前 Kyant 原版光学渲染、Bridge 正式采样、V288.94 手势隔离、Dock 和 UI/Root 配置。
-- V288.107 低频 KYANT288107_BRIDGE 统计仍保留（其可执行性需在真实渲染分支确认）。
-- 仍有较多与生产状态共用的旧实验/诊断代码，不能把本版称作全项目无残留历史诊断；剩余内容需逐个验证依赖才能移除。
-- 未修改模糊、折射、采样分辨率，也未作性能修复。
-
-本地完成：源码差异检查、无效日志标识检查、完整 ZIP 校验、版本目录/版本号检查。
-未完成：完整 Gradle Kotlin 编译、真机回归及 UI→SP→Root→Launcher 实时映射动态验证。
-
-Termux Git：
-cd ~/ColorOS-LiquidGlass-V1.0-Source
-git add .
-git commit -m "V1.9.205.288.108 版本"
-git push origin main
-
-
-V1.9.205.288.108 多容器 Bridge 重复采样优化（首轮）
-- 对同一 Host：壁纸 Bitmap 身份、目标 Bitmap 身份和采样位置均未变化时，跳过重复 CPU Bitmap 绘制。
-- 只优化冗余采样；不修改 Kyant 光学 Shader、模糊、折射、Dock、UI 参数及几何更新。
-- 默认开启。A/B 回退：su -c "settings put global liquidglass_kyant_bridge_dedupe_288108 0"；恢复：设为 1。修改后重启 Launcher 使 Host 重建。
-- 对实验缓冲、不可变复制、帧配对及相关诊断路径不启用跳过。
-- 需 GitHub Actions 编译及真机 A/B 验证；尚不能保证实际降低多文件夹掉帧率。

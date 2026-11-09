@@ -1825,6 +1825,31 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_perf_profile_288109", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.110: opt-in direct GPU-backed reference draw. This bypasses
+        // CPU Canvas(bridgeBitmap) sampling only when the normal native-carrier
+        // -> Compose Kyant backdrop path is active. Source/geometry/optics
+        // remain unchanged. Switch requires Launcher restart; default OFF.
+        // This is an experimental GPU draw, NOT a zero-copy guarantee.
+        val requestedGpuReference288110 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_gpu_reference_ab_288110", 0) == 1
+        } catch (_: Throwable) { false }
+        val gpuReference288110 = requestedGpuReference288110 &&
+            bridgeBitmap != null && nativeBridgeMode == 1 &&
+            nativeCarrierAb28869 == 1 && fusionMode28889 == 0 &&
+            !bufferExperiment28875 && !affineSampling28876 &&
+            bitmapPipeline28880 < 0 && nodePipeline28881 < 0 &&
+            bridgePairAb288101 == 0 && reboundFrameAb28891 != 1 &&
+            frameSync28822 == 0 && v230NativeMode28887 == 0 &&
+            nativeLayerMode !in 2..3 && displayIsolationMode != 2
+        if (requestedGpuReference288110) {
+            android.util.Log.i("KyantGpu288110", "KYANT288110_HOST host=$trace28815Host " +
+                "requested=true effective=$gpuReference288110 bridge=${bridgeBitmap != null} " +
+                "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+                "bitmapPipeline=$bitmapPipeline28880 nodePipeline=$nodePipeline28881 " +
+                "affine=$affineSampling28876 buffer=$bufferExperiment28875 " +
+                "reference=${reference.width}x${reference.height}")
+        }
         val bridgeDedupe288108 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
@@ -2056,7 +2081,12 @@ object KyantLauncherLens270 {
                     nativeCarrierDrawPosition28870(this, oldPos, "NATIVE_BITMAP_BRIDGE") else oldPos
                 // V288.22 mode 1: Compose draw itself samples the reference frame.
                 // Do not publish an independent native Bitmap frame first.
-                if (frameSync28822 != 1 || nativeCarrierAb28869 == 1) sampleBridgeAt(pos, this)
+                if (!gpuReference288110 &&
+                    (frameSync28822 != 1 || nativeCarrierAb28869 == 1)) {
+                    sampleBridgeAt(pos, this)
+                } else if (gpuReference288110 && perfProfile288109) {
+                    KyantPerf288109.skipNativeBridge288110()
+                }
                 if (nativeCarrierAb28869 == 1) traceNativeFrame28873(
                     "NATIVE_BITMAP_BRIDGE", this, pos, bridgeDrawCount.get())
                 if (nativeCarrierAb28869 == 1) distanceNative28874(
@@ -2640,6 +2670,7 @@ object KyantLauncherLens270 {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
                 displayWidth, displayHeight, samplePosition, sampleRadiusPx.floatValue, effectiveSamplingMode28862,
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
+                gpuReference288110,
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
@@ -3551,6 +3582,7 @@ object KyantLauncherLens270 {
         largeContinuousSource28830: Boolean, renderAbMode: Int, motionAbMode: Int,
         legacySyncAbMode: Int, motionCompare28861: Boolean, layerSampleMode28862: Int, displayIsolationMode: Int, nativeLayerMode: Int, bridgeBitmap: Bitmap?,
         bridgeVersion: androidx.compose.runtime.State<Int>,
+        gpuReference288110: Boolean,
         bridgeSyncMode: Int,
         pipelineMode28819: Int, frameSync28822: Int,
         bridgePublishedPosition: java.util.concurrent.atomic.AtomicReference<Offset?>,
@@ -4016,7 +4048,48 @@ object KyantLauncherLens270 {
                 // A/B: keep a stable, full-frame bitmap as the source and change only
                 // the destination transform. No per-frame source rectangle allocation.
                 // This isolates dynamic cropping from Compose/Backdrop frame scheduling.
-                if (bridgeBitmap != null && bitmapPipeline28880 != 2 &&
+                if (gpuReference288110 && bridgeBitmap != null) {
+                    // Read Bridge version for the SAME draw-phase invalidation
+                    // behavior as the legacy path; do not launch another Recomposer.
+                    // Each Host still has independent geometry, but no per-Host
+                    // CPU Bitmap crop/clear/overwrite is performed in normal mode.
+                    @Suppress("UNUSED_VARIABLE")
+                    val bridgeInvalidation288110 = bridgeVersion.value
+                    // Exact native bridge mapping: screen coordinates (pos) map
+                    // the shared reference onto the local preview rectangle.
+                    // Avoid rounding the origin. Scaling also handles surface
+                    // dimensions differing slightly from the folder View bounds.
+                    val localScaleX288110 = size.width / previewWidth.coerceAtLeast(1).toFloat()
+                    val localScaleY288110 = size.height / previewHeight.coerceAtLeast(1).toFloat()
+                    wholeDestination.set(-drawPosition.x * localScaleX288110,
+                        -drawPosition.y * localScaleY288110,
+                        (screenW - drawPosition.x) * localScaleX288110,
+                        (screenH - drawPosition.y) * localScaleY288110)
+                    drawIntoCanvas { canvas ->
+                        val hw = canvas.nativeCanvas.isHardwareAccelerated
+                        if (hw && !reference.isRecycled) {
+                            canvas.nativeCanvas.drawBitmap(reference, null,
+                                wholeDestination, bitmapPaint)
+                        } else {
+                            // Preserve the original source pixels if a software
+                            // canvas or disposed reference is encountered. This
+                            // fallback is deliberately limited to exceptional
+                            // frames and is not used by the GPU fast path.
+                            bridgeResample(drawPosition)
+                            bridgeBitmap.let { canvas.nativeCanvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+                        }
+                        if (perfProfile288109) KyantPerf288109.recordGpuReference288110(hw)
+                        val num288110 = sourceDrawCount.get()
+                        if (num288110 == 0L || num288110 % 240L == 0L) {
+                            android.util.Log.i("KyantGpu288110", "KYANT288110_DRAW " +
+                                "host=$traceHost28890 hw=$hw gpu=${hw && !reference.isRecycled} " +
+                                "posX=${drawPosition.x} posY=${drawPosition.y} " +
+                                "source=${reference.width}x${reference.height} " +
+                                "target=${size.width}x${size.height} " +
+                                "backdropCapture=${nodePipeline28881 < 0 && pipelineMode28819 < 0}")
+                        }
+                    }
+                } else if (bridgeBitmap != null && bitmapPipeline28880 != 2 &&
                     nodePipeline28881 < 0) {
                     // State read here registers the draw invalidation dependency.
                     val version = bridgeVersion.value
