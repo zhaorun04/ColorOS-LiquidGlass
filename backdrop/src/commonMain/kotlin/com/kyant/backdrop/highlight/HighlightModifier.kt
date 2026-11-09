@@ -24,6 +24,7 @@ import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.internal.blur
 import com.kyant.backdrop.internal.clipOutline
 import com.kyant.backdrop.internal.setRuntimeShader
+import com.kyant.backdrop.internal.StaticLayerRecordReuse288116
 import com.kyant.backdrop.isRuntimeShaderSupported
 import kotlin.math.ceil
 
@@ -73,6 +74,16 @@ internal class HighlightNode(
     override val shouldAutoInvalidate: Boolean = false
 
     private var highlightLayer: GraphicsLayer? = null
+    private data class RecordedHighlightKey(
+        val size: IntSize,
+        val drawingSize: androidx.compose.ui.geometry.Size,
+        val density: Float,
+        val fontScale: Float,
+        val direction: androidx.compose.ui.unit.LayoutDirection,
+        val outline: Outline,
+        val highlight: Highlight
+    )
+    private var lastRecordedHighlight: RecordedHighlightKey? = null
 
     private val paint =
         Paint().apply {
@@ -112,18 +123,30 @@ internal class HighlightNode(
                     null
                 }
 
-            configurePaint(highlight)
-
             highlightLayer.alpha = highlight.alpha
             highlightLayer.blendMode = highlight.style.blendMode
-            highlightLayer.record(safeSize) {
-                translate(1f, 1f) {
-                    val canvas = drawContext.canvas
-                    canvas.save()
-                    canvas.clipOutline(outline, clipPath)
-                    canvas.drawOutline(outline, paint)
-                    canvas.restore()
+            // Rectangles and rounded rectangles have value-stable geometry.
+            // Generic paths may be mutated in place, so always re-record them.
+            val cacheable = outline is Outline.Rectangle || outline is Outline.Rounded
+            val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
+                RecordedHighlightKey(safeSize, size, density.density, density.fontScale,
+                    layoutDirection, outline, highlight)
+            } else null
+            if (key == null || key != lastRecordedHighlight) {
+                configurePaint(highlight)
+                highlightLayer.record(safeSize) {
+                    translate(1f, 1f) {
+                        val canvas = drawContext.canvas
+                        canvas.save()
+                        canvas.clipOutline(outline, clipPath)
+                        canvas.drawOutline(outline, paint)
+                        canvas.restore()
+                    }
                 }
+                StaticLayerRecordReuse288116.highlightRecords++
+                lastRecordedHighlight = key
+            } else {
+                StaticLayerRecordReuse288116.highlightReuses++
             }
 
             translate(-1f, -1f) {
@@ -146,6 +169,7 @@ internal class HighlightNode(
         clipPath = null
         runtimeShaderCache.clear()
         prevStyle = null
+        lastRecordedHighlight = null
     }
 
     private fun DrawScope.configurePaint(highlight: Highlight) {

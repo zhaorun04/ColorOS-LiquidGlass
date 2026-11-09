@@ -3,6 +3,7 @@ package com.kyant.backdrop.shadow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -19,6 +20,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.internal.blur
+import com.kyant.backdrop.internal.StaticLayerRecordReuse288116
 import kotlin.math.ceil
 
 internal class ShadowElement(
@@ -67,6 +69,16 @@ internal class ShadowNode(
     override val shouldAutoInvalidate: Boolean = false
 
     private var shadowLayer: GraphicsLayer? = null
+    private data class RecordedShadowKey(
+        val size: IntSize,
+        val drawingSize: androidx.compose.ui.geometry.Size,
+        val density: Float,
+        val fontScale: Float,
+        val direction: androidx.compose.ui.unit.LayoutDirection,
+        val outline: Outline,
+        val shadow: Shadow
+    )
+    private var lastRecordedShadow: RecordedShadowKey? = null
 
     private val paint = Paint()
 
@@ -88,18 +100,30 @@ internal class ShadowNode(
             )
             val outline = shapeProvider.shape.createOutline(size, layoutDirection, density)
 
-            configurePaint(shadow)
-
             shadowLayer.alpha = shadow.alpha
             shadowLayer.blendMode = shadow.blendMode
-            shadowLayer.record(shadowSize) {
-                translate(radius * 2f + offsetX, radius * 2f + offsetY) {
-                    val canvas = drawContext.canvas
-                    canvas.drawOutline(outline, paint)
-                    canvas.translate(-offsetX, -offsetY)
-                    canvas.drawOutline(outline, ShadowMaskPaint)
-                    canvas.translate(offsetX, offsetY)
+            // Preserve live mask updates for mutable/custom paths and any
+            // changed outline, density, shadow style, or target size.
+            val cacheable = outline is Outline.Rectangle || outline is Outline.Rounded
+            val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
+                RecordedShadowKey(shadowSize, size, density.density, density.fontScale,
+                    layoutDirection, outline, shadow)
+            } else null
+            if (key == null || key != lastRecordedShadow) {
+                configurePaint(shadow)
+                shadowLayer.record(shadowSize) {
+                    translate(radius * 2f + offsetX, radius * 2f + offsetY) {
+                        val canvas = drawContext.canvas
+                        canvas.drawOutline(outline, paint)
+                        canvas.translate(-offsetX, -offsetY)
+                        canvas.drawOutline(outline, ShadowMaskPaint)
+                        canvas.translate(offsetX, offsetY)
+                    }
                 }
+                StaticLayerRecordReuse288116.shadowRecords++
+                lastRecordedShadow = key
+            } else {
+                StaticLayerRecordReuse288116.shadowReuses++
             }
 
             translate(-radius * 2f, -radius * 2f) {
@@ -124,6 +148,7 @@ internal class ShadowNode(
             graphicsContext.releaseGraphicsLayer(layer)
             shadowLayer = null
         }
+        lastRecordedShadow = null
     }
 
     private fun DrawScope.configurePaint(shadow: Shadow) {

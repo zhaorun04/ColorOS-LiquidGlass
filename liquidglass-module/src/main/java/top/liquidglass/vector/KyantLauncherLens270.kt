@@ -1889,6 +1889,17 @@ object KyantLauncherLens270 {
             "screen=${reference.width}x${reference.height}")
         // V288.114: diagnostic-only, opt-in counters. These are per Host,
         // not global GPU timings. No Compose state or extra invalidation.
+        // V288.116: opt-in static highlight/shadow layer recording reuse.
+        // The wallpaper/refraction layer remains recorded every draw.
+        // Shared object is in backdrop commonMain; reset by restarting Launcher.
+        val staticLayerReuse288116 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_static_layer_cache_288116", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.StaticLayerRecordReuse288116.enabled = staticLayerReuse288116
+        android.util.Log.i("KyantLayer288116", "KYANT288116_HOST host=$trace28815Host " +
+            "enabled=$staticLayerReuse288116 gpu=$gpuReference288110 " +
+            "scope=highlight_shadow_only")
         val multiHostProbe288114 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_multi_host_probe_288114", 0) == 1
@@ -4184,6 +4195,18 @@ object KyantLauncherLens270 {
                                     "bridgeGeneration=${bridgeBitmap.generationId} " +
                                     "bridgeSize=${bridgeBitmap.width}x${bridgeBitmap.height} " +
                                     "target=${size.width}x${size.height}")
+                            }
+                            // V288.116: one process-wide low-frequency confirmation
+                            // that static optical layers were actually reused.
+                            if (num288110 % 240L == 0L) {
+                                val cache116 = com.kyant.backdrop.internal.StaticLayerRecordReuse288116
+                                if (cache116.shouldReport(android.os.SystemClock.elapsedRealtime())) {
+                                    android.util.Log.i("KyantLayer288116", "KYANT288116_LAYER_WINDOW " +
+                                        "highlightRecorded=${cache116.highlightRecords} " +
+                                        "highlightReused=${cache116.highlightReuses} " +
+                                        "shadowRecorded=${cache116.shadowRecords} " +
+                                        "shadowReused=${cache116.shadowReuses}")
+                                }
                             }
                             if (num288110 == 0L || num288110 % 240L == 0L) {
                                 android.util.Log.i("KyantGpu288110", "KYANT288110_DRAW " +
