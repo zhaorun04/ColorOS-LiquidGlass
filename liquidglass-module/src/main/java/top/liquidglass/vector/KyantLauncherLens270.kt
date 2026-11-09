@@ -1887,6 +1887,20 @@ object KyantLauncherLens270 {
         android.util.Log.i("KyantCull288113", "KYANT288113_HOST host=$trace28815Host " +
             "cull=$offscreenCull288113 gpuEffective=$gpuReference288110 " +
             "screen=${reference.width}x${reference.height}")
+        // V288.114: diagnostic-only, opt-in counters. These are per Host,
+        // not global GPU timings. No Compose state or extra invalidation.
+        val multiHostProbe288114 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_multi_host_probe_288114", 0) == 1
+        } catch (_: Throwable) { false }
+        // 0=Native bridge View draws, 1=Compose source Canvas draws,
+        // 2=Compose commits (SideEffect), 3=offscreen source draw calls,
+        // 4=source callback CPU ns, 5=max source callback CPU ns.
+        val multiHostCounts288114 = java.util.concurrent.atomic.AtomicLongArray(6)
+        val multiHostWindow288114 = java.util.concurrent.atomic.AtomicLong(0L)
+        if (multiHostProbe288114) android.util.Log.i("KyantPerf288114",
+            "KYANT288114_HOST host=$trace28815Host gpu=$gpuReference288110 " +
+            "cull=$offscreenCull288113 probe=true")
         val bridgeDedupe288108 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
@@ -2138,6 +2152,7 @@ object KyantLauncherLens270 {
                     if (buffer != null) canvas.drawBitmap(buffer, 0f, 0f, bridgePaint)
                 }
                 count++
+                if (multiHostProbe288114) multiHostCounts288114.incrementAndGet(0)
                 if (count == 1L || count % 240L == 0L) {
                     android.util.Log.i("KyantGpu288112", "KYANT288112_NATIVE host=$trace28815Host " +
                         "draws=$count effective=$gpuReference288110 " +
@@ -2716,6 +2731,7 @@ object KyantLauncherLens270 {
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
                 gpuReference288110,
                 offscreenCull288113, offscreenDraws288113, onscreenDraws288113,
+                multiHostProbe288114, multiHostCounts288114, multiHostWindow288114,
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
@@ -3631,6 +3647,9 @@ object KyantLauncherLens270 {
         offscreenCull288113: Boolean,
         offscreenDraws288113: java.util.concurrent.atomic.AtomicLong,
         onscreenDraws288113: java.util.concurrent.atomic.AtomicLong,
+        multiHostProbe288114: Boolean,
+        multiHostCounts288114: java.util.concurrent.atomic.AtomicLongArray,
+        multiHostWindow288114: java.util.concurrent.atomic.AtomicLong,
         bridgeSyncMode: Int,
         pipelineMode28819: Int, frameSync28822: Int,
         bridgePublishedPosition: java.util.concurrent.atomic.AtomicReference<Offset?>,
@@ -3860,6 +3879,8 @@ object KyantLauncherLens270 {
                 Modifier.fillMaxSize().layerBackdrop(backdrop).graphicsLayer { alpha = sourceAlpha }
             }
             ComposeCanvas(sourceModifier) {
+                val sourceCpuStart288114 = if (multiHostProbe288114)
+                    SystemClock.elapsedRealtimeNanos() else 0L
                 val composeDrawStart288109 = if (perfProfile288109)
                     SystemClock.elapsedRealtimeNanos() else 0L
                 // Reference is screen-aligned; root offset is accounted for explicitly.
@@ -4652,6 +4673,42 @@ object KyantLauncherLens270 {
                 if (perfProfile288109) KyantPerf288109.record(
                     KyantPerf288109.COMPOSE_SOURCE,
                     SystemClock.elapsedRealtimeNanos() - composeDrawStart288109)
+                if (multiHostProbe288114) {
+                    // Callback CPU duration only; does NOT measure recorded GPU work.
+                    val end114 = SystemClock.elapsedRealtimeNanos()
+                    val cpuNs114 = (end114 - sourceCpuStart288114).coerceAtLeast(0L)
+                    multiHostCounts288114.incrementAndGet(1)
+                    multiHostCounts288114.addAndGet(4, cpuNs114)
+                    // atomic maximum without allocating a closure on every frame
+                    var maximum114 = multiHostCounts288114.get(5)
+                    while (cpuNs114 > maximum114 &&
+                        !multiHostCounts288114.compareAndSet(5, maximum114, cpuNs114)) {
+                        maximum114 = multiHostCounts288114.get(5)
+                    }
+                    if (drawPosition.x + previewWidth < 0f || drawPosition.x > screenW ||
+                        drawPosition.y + previewHeight < 0f || drawPosition.y > screenH) {
+                        multiHostCounts288114.incrementAndGet(3)
+                    }
+                    if (multiHostWindow288114.get() == 0L)
+                        multiHostWindow288114.compareAndSet(0L, end114)
+                    val begin114 = multiHostWindow288114.get()
+                    if (end114 - begin114 >= 2_000_000_000L &&
+                        multiHostWindow288114.compareAndSet(begin114, end114)) {
+                        val native114 = multiHostCounts288114.getAndSet(0, 0L)
+                        val source114 = multiHostCounts288114.getAndSet(1, 0L)
+                        val commits114 = multiHostCounts288114.getAndSet(2, 0L)
+                        val off114 = multiHostCounts288114.getAndSet(3, 0L)
+                        val totalNs114 = multiHostCounts288114.getAndSet(4, 0L)
+                        val maxNs114 = multiHostCounts288114.getAndSet(5, 0L)
+                        android.util.Log.i("KyantPerf288114", "KYANT288114_HOST_WINDOW " +
+                            "host=$traceHost28890 elapsedMs=${(end114-begin114)/1_000_000L} " +
+                            "nativeDraw=$native114 sourceDraw=$source114 " +
+                            "composeCommits=$commits114 sourceOffscreen=$off114 " +
+                            "sourceCpuTotalMs=${totalNs114/1_000_000f} " +
+                            "sourceCpuMaxMs=${maxNs114/1_000_000f} " +
+                            "gpu=$gpuReference288110 cull=$offscreenCull288113")
+                    }
+                }
             }
             // Mode B: source Bitmap is displayed by Compose, but no Kyant backdrop
             // is captured or rendered. Mode C keeps the original optical pipeline.
@@ -4675,6 +4732,9 @@ object KyantLauncherLens270 {
                     style = com.kyant.backdrop.highlight.HighlightStyle.Plain) }
             ))
         }
-        SideEffect { onComposed() }
+        SideEffect {
+            if (multiHostProbe288114) multiHostCounts288114.incrementAndGet(2)
+            onComposed()
+        }
     }
 }

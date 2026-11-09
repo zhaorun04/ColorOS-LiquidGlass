@@ -1,4 +1,4 @@
-V1.9.205.288.113.1｜GPU 参考帧离屏绘制裁剪 A/B 实验版
+V1.9.205.288.114｜GPU 参考帧离屏绘制裁剪 A/B 实验版
 
 基于真机验证的 V288.112 共享参考帧硬件 Canvas 渲染路径，保留默认 V288.112 行为。V288.107.3 仍为历史稳定回退基线。
 
@@ -21,3 +21,12 @@ git push origin main
 验证：源码静态核对和 ZIP 完整性；完整 Gradle 编译及真机 A/B 待验证。
 
 V288.113.1 编译修复：将离屏裁剪开关及两个 AtomicLong 计数器显式传入独立的 LensContent270 @Composable 函数，消除未解析引用。裁剪条件、128px 安全边界、旧 GPU 路径及光学算法未改动。完整 Gradle 编译仍需 GitHub Actions 验证。
+
+
+V1.9.205.288.114 多 Host 调度诊断版（实验）
+保持 V288.112 GPU 参考帧与原光学算法不变；离屏裁剪默认关闭。
+启用：su -c 'settings put global liquidglass_kyant_multi_host_probe_288114 1'，然后重启 Launcher。
+日志：su -c 'logcat -d -b all -v brief | grep KYANT288114_HOST_WINDOW | tail -80'。
+字段：nativeDraw 为 Native Bridge View.onDraw 次数；sourceDraw 为 ComposeCanvas 来源绘制调用次数；composeCommits 为 SideEffect 提交数；sourceOffscreen 为绘制当时完全在屏幕外的调用次数；sourceCpuTotalMs/sourceCpuMaxMs 是 ComposeCanvas 回调的 CPU 耗时，不包括 GPU/RenderThread 时间。
+停用：su -c 'settings put global liquidglass_kyant_multi_host_probe_288114 0'，重启 Launcher。
+此版本仅增加诊断计数，不裁剪或降低玻璃质量；还应配合 gfxinfo、Perfetto 追踪 RenderThread 与合成耗时。
