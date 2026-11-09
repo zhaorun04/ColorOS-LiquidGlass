@@ -1,4 +1,4 @@
-ColorOS-LiquidGlass V1.9.205.288.107｜历史诊断清理与 Bridge 低开销计数版
+ColorOS-LiquidGlass V1.9.205.288.107.1｜历史诊断清理与 Bridge 低开销计数版
 
 基线：V1.9.205.288.105。继续使用 Kyant 光学引擎，不修改 Shader、折射、模糊、高光、Dock 几何、正常壁纸采样矩阵。
 
@@ -15,3 +15,5 @@ su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 0; settings pu
 校验点：Vector 作用域、文件夹/Dock 光学外观、UI-SP-Root-Launcher 参数原有映射，单小文件夹及多大文件夹 gfxinfo A/B。
 
 注意：未做 Android Gradle/Kotlin 编译，未验证真机效果。请 CI 通过后再安装。本版仅用于回归基线和性能诊断，不能宣称已解决掉帧。
+
+V288.107.1 编译修正：删除 KyantLauncherLens270.kt 原第 1349-1350 行与第 1340-1341 行重叠的 bridgePairAb288101 / bridgePairTrace288101 声明，避免 Kotlin Conflicting declarations。其余业务逻辑不变。

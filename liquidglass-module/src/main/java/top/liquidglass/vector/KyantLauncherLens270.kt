@@ -1346,8 +1346,7 @@ object KyantLauncherLens270 {
         val timingTraceEnabled288102 = false
         val coordinateBasisTrace288104 = false
         val timings288102 = TimingTrace288102()
-        val bridgePairAb288101 = 0
-        val bridgePairTrace288101 = false
+        // 288101 main-thread Bitmap.copy experiment remains permanently disabled above.
         val bridgePairFrame288101 = androidx.compose.runtime.mutableStateOf<VerifiedBridgeFrame288101?>(null)
         var lastPairCopyNs288101 = 0L
         var pairErrors288101 = 0
