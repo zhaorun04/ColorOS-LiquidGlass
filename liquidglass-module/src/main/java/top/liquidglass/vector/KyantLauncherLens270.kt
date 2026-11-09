@@ -1846,7 +1846,8 @@ object KyantLauncherLens270 {
             nativeCarrierAb28869 == 1 && fusionMode28889 == 0 &&
             !bufferExperiment28875 && !affineSampling28876 &&
             bitmapPipeline28880 < 0 && nodePipeline28881 < 0 &&
-            bridgePairAb288101 == 0 && reboundFrameAb28891 != 1 &&
+            bridgePairAb288101 == 0 &&
+            (reboundFrameAb28891 != 1 || pipelineMode28819 != 2) &&
             frameSync28822 == 0 && v230NativeMode28887 == 0 &&
             nativeLayerMode !in 2..3 && displayIsolationMode != 2
         // Emit once for EACH Host regardless of the requested switch value.
@@ -1862,16 +1863,18 @@ object KyantLauncherLens270 {
         if (bitmapPipeline28880 >= 0) gpuBlockers288111.add("bitmapPipeline=$bitmapPipeline28880")
         if (nodePipeline28881 >= 0) gpuBlockers288111.add("nodePipeline=$nodePipeline28881")
         if (bridgePairAb288101 != 0) gpuBlockers288111.add("bridgePair=$bridgePairAb288101")
-        if (reboundFrameAb28891 == 1) gpuBlockers288111.add("reboundFrame")
+        if (reboundFrameAb28891 == 1 && pipelineMode28819 == 2)
+            gpuBlockers288111.add("reboundFrameSnapshotPipeline2")
         if (frameSync28822 != 0) gpuBlockers288111.add("frameSync=$frameSync28822")
         if (v230NativeMode28887 != 0) gpuBlockers288111.add("v230=$v230NativeMode28887")
         if (nativeLayerMode in 2..3) gpuBlockers288111.add("nativeLayer=$nativeLayerMode")
         if (displayIsolationMode == 2) gpuBlockers288111.add("displayIsolation=2")
-        android.util.Log.i("KyantGpu288111", "KYANT288111_HOST host=$trace28815Host " +
+        android.util.Log.i("KyantGpu288112", "KYANT288112_HOST host=$trace28815Host " +
             "raw=$rawGpuReference288111 requested=$requestedGpuReference288110 " +
             "effective=$gpuReference288110 blockers=${gpuBlockers288111.joinToString(",").ifEmpty { "none" }} " +
             "reference=${reference.width}x${reference.height} " +
-            "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819")
+            "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "reboundFrame=$reboundFrameAb28891 gate=onlySnapshotPipeline2")
         val bridgeDedupe288108 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
@@ -2124,9 +2127,10 @@ object KyantLauncherLens270 {
                 }
                 count++
                 if (count == 1L || count % 240L == 0L) {
-                    android.util.Log.i("KyantGpu288111", "KYANT288111_NATIVE host=$trace28815Host " +
+                    android.util.Log.i("KyantGpu288112", "KYANT288112_NATIVE host=$trace28815Host " +
                         "draws=$count effective=$gpuReference288110 " +
                         "cpuBridgeExpected=${!gpuReference288110 && (frameSync28822 != 1 || nativeCarrierAb28869 == 1)} " +
+                        "cpuBridgeSamples=${bridgeDrawCount.get()} " +
                         "posX=${pos.x} posY=${pos.y}")
                 }
                 if ((frameSync28822 != 1 || nativeCarrierAb28869 == 1) &&
