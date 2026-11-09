@@ -143,6 +143,8 @@ object KyantLauncherLens270 {
     @Volatile private var touchActive28894 = false
     // V288.96 diagnostic clock: monotonic time of latest ACTION_DOWN.
     @Volatile private var touchDownNs28896 = 0L
+    // The down epoch associated with the latest accepted release, not the raw release counter.
+    @Volatile private var releaseDownSerial28899 = -1L
     @Volatile private var releaseBeforeVia28821 = ""
     @Volatile private var releaseAfterKey28821 = ""
     @Volatile private var activeTouchRoot28820: WeakReference<View>? = null
@@ -212,6 +214,7 @@ object KyantLauncherLens270 {
             releaseAction28820 = if (action == MotionEvent.ACTION_UP) "UP" else "CANCEL"
             selectedHostIds28821 = selectVisibleHosts28821()
             releaseNs28820.set(SystemClock.elapsedRealtimeNanos())
+            releaseDownSerial28899 = gestureDownSerial28893
             val serial = releaseSeq28820.incrementAndGet()
             XposedBridge.log("KYANT28893_TOUCH_END seq=$serial downSerial=$gestureDownSerial28893 " +
                 "action=$releaseAction28820 dx=$dx dy=$dy eventMs=${event.eventTime} via=$method")
@@ -1309,6 +1312,15 @@ object KyantLauncherLens270 {
         if (sampleSyncAb28898 > 0) XposedBridge.log("KYANT28898_HOST host=$trace28815Host " +
             "mode=$sampleSyncAb28898 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
             "bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
+        // V288.99: opt-in, read-only gesture/visibility-scoped diagnostics.
+        // This setting has no effect on the original drawBitmap path.
+        val visibleGestureTrace28899 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_visible_gesture_trace_28899", 0) == 1
+        } catch (_: Throwable) { false }
+        if (visibleGestureTrace28899) XposedBridge.log("KYANT28899_HOST host=$trace28815Host " +
+            "trace=1 mode98=$sampleSyncAb28898 pipeline=$pipelineMode28819 " +
+            "bitmap=$bitmapPipeline28880 node=$nodePipeline28881 carrier=$nativeCarrierAb28869")
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
         if (finalSampleTrace28897) XposedBridge.log("KYANT28897_HOST host=$trace28815Host " +
             "trace=1 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
@@ -2509,7 +2521,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3433,6 +3445,7 @@ object KyantLauncherLens270 {
         dualMotionTrace28896: Boolean,
         finalSampleTrace28897: Boolean,
         sampleSyncAb28898: Int,
+        visibleGestureTrace28899: Boolean,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3463,6 +3476,11 @@ object KyantLauncherLens270 {
         val finalTraceState28897 = androidx.compose.runtime.remember { longArrayOf(-1L, -1L, 0L, 0L) }
         // [last diagnostic time, draws in current host]. Kept out of Compose State.
         val syncTraceState28898 = androidx.compose.runtime.remember { longArrayOf(0L, 0L) }
+        // [last down, last release, last visible log, visible samples, last filter log].
+        // Local to one host, no Compose state invalidation or Bitmap writes.
+        val visibleTraceState28899 = androidx.compose.runtime.remember {
+            longArrayOf(-1L, -1L, 0L, 0L, 0L)
+        }
         val previousGap28893 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -4028,6 +4046,92 @@ object KyantLauncherLens270 {
                                     "bridgeGen=${bridgeMeta98?.generation} source=BRIDGE " +
                                     "comp91=$compensate91 comp74=$canShift74")
                             } catch (_: Throwable) { /* diagnostics must not impact optics */ }
+                        }
+                    }
+                    // V288.99: all diagnostics below are READ ONLY and do not
+                    // alter actualTx98/actualTy98, Bitmap, canvas, Shader or state.
+                    // Use one ACTION_DOWN epoch to pair the release and avoid
+                    // confusing a later ACTION_DOWN with an older rebound window.
+                    // Screen visibility is checked on the actual host, not inferred
+                    // from a non-null Bitmap or bridge position.
+                    if (visibleGestureTrace28899) {
+                        try {
+                            val now99 = SystemClock.elapsedRealtimeNanos()
+                            val down99 = gestureDownSerial28893
+                            val release99 = releaseSeq28820.get()
+                            val downAgeNs99 = now99 - touchDownNs28896
+                            val releaseAgeNs99 = now99 - releaseNs28820.get()
+                            val active99 = touchActive28894
+                            val matched99 = releaseDownSerial28899 == down99
+                            val start99 = active99 && down99 > 0L &&
+                                downAgeNs99 in 0L..150_000_000L
+                            val rebound99 = !active99 && matched99 && release99 > 0L &&
+                                releaseAction28820 == "UP" &&
+                                releaseAgeNs99 in 0L..850_000_000L
+                            if (visibleTraceState28899[0] != down99 ||
+                                visibleTraceState28899[1] != release99) {
+                                visibleTraceState28899[0] = down99
+                                visibleTraceState28899[1] = release99
+                                visibleTraceState28899[2] = 0L
+                                visibleTraceState28899[3] = 0L
+                                visibleTraceState28899[4] = 0L
+                            }
+                            if (start99 || rebound99) {
+                                // Only trace onscreen hosts; the old V288.98 logs
+                                // included offscreen containers with large offsets.
+                                val visible99 = try { visibleSource28867() }
+                                    catch (_: Throwable) { false }
+                                if (visible99 && selectedBitmap91 != null &&
+                                    visibleTraceState28899[3] < 20L &&
+                                    now99 - visibleTraceState28899[2] >= 55_000_000L) {
+                                    visibleTraceState28899[2] = now99
+                                    visibleTraceState28899[3]++
+                                    val ws99 = activeTouchWorkspace28820?.get()
+                                    val meta99 = bridgeCoordinate28892.get()
+                                    val pred99 = predrawSample28890.get()
+                                    val sx99 = selectedPos91?.x
+                                    val sy99 = selectedPos91?.y
+                                    val effX99 = sx99?.minus(actualTx98)
+                                    val effY99 = sy99?.minus(actualTy98)
+                                    XposedBridge.log("KYANT28899_VISIBLE host=$traceHost28890 " +
+                                        "phase=${if (start99) "TOUCH_START" else "REBOUND"} " +
+                                        "down=$down99 release=$release99 matched=$matched99 " +
+                                        "action=$releaseAction28820 dx=$releaseDx28820 " +
+                                        "ageMs=${if (start99) downAgeNs99/1_000_000f else releaseAgeNs99/1_000_000f} " +
+                                        "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
+                                        "selectedX=$sx99 selectedY=$sy99 " +
+                                        "tx=$actualTx98 ty=$actualTy98 " +
+                                        "residualX=${effX99?.let { drawPosition.x-it }} " +
+                                        "residualY=${effY99?.let { drawPosition.y-it }} " +
+                                        "bridgeX=${meta99?.position?.x} " +
+                                        "bridgeAgeMs=${meta99?.let { (now99-it.atNs)/1_000_000f }} " +
+                                        "predrawX=${pred99?.pos?.x} " +
+                                        "predrawAgeMs=${pred99?.let { (now99-it.atNs)/1_000_000f }} " +
+                                        "wsScrollX=${ws99?.scrollX} wsX=${ws99?.x} " +
+                                        "wsTx=${ws99?.translationX} " +
+                                        "source=${if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                        "mode98=$sampleSyncAb28898 applied98=$applySync98 " +
+                                        "visible=true")
+                                } else if (now99-visibleTraceState28899[4] >= 500_000_000L) {
+                                    visibleTraceState28899[4] = now99
+                                    XposedBridge.log("KYANT28899_SKIP host=$traceHost28890 " +
+                                        "reason=${if (!visible99) "OFFSCREEN" else if (selectedBitmap91 == null) "NO_BITMAP" else "RATE_LIMIT"} " +
+                                        "down=$down99 release=$release99 matched=$matched99")
+                                }
+                            } else if (release99 > 0L && !active99 &&
+                                releaseAgeNs99 in 0L..850_000_000L &&
+                                now99-visibleTraceState28899[4] >= 500_000_000L) {
+                                visibleTraceState28899[4] = now99
+                                XposedBridge.log("KYANT28899_SKIP host=$traceHost28890 " +
+                                    "reason=${if (!matched99) "OLD_GESTURE" else if (releaseAction28820 != "UP") "CANCELLED" else "OUTSIDE_WINDOW"} " +
+                                    "down=$down99 release=$release99 releaseDown=$releaseDownSerial28899")
+                            }
+                        } catch (traceError99: Throwable) {
+                            // Fail closed for diagnostics; preserve optical rendering.
+                            if (SystemClock.elapsedRealtimeNanos()-visibleTraceState28899[4] >= 1_000_000_000L) {
+                                visibleTraceState28899[4] = SystemClock.elapsedRealtimeNanos()
+                                XposedBridge.log("KYANT28899_TRACE_ERROR host=$traceHost28890 type=${traceError99.javaClass.simpleName}")
+                            }
                         }
                     }
                     // V288.97: FINAL sample mapping, before all optical compositing.

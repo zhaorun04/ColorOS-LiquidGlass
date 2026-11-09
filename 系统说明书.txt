@@ -1,29 +1,22 @@
-ColorOS-LiquidGlass V1.9.205.288.98｜回弹采样坐标 A/B 验证版
+ColorOS-LiquidGlass V1.9.205.288.99｜手势归属与可见帧诊断版
 
-基线：V1.9.205.288.97。仅在原有 BRIDGE Bitmap 绘制处加入可关闭的平移实验。默认模式 0 保持 V288.97 视觉与 drawBitmap 位移完全一致。没有改动二维曲面折射 Shader、模糊、高光、Dock、文件夹几何或参数键的原有含义。
+基线：V1.9.205.288.98。本版只增加只读诊断，不修改原有 Bitmap 绘制位移、二维折射、模糊、Dock 或参数映射。建议 V288.98 模式 0 使用，禁用无效的小位移实验。
 
-核心开关：Settings.Global liquidglass_kyant_sample_sync_ab_28898，Host 创建时读取；修改后需重新加载 Launcher。
-模式 0：原样绘制，不实验（出厂默认，安全回退）。
-模式 1：仅松手后的 850ms 回弹窗口对 BRIDGE 源做小幅横纵平移。
-模式 2：模式 1 + 手指按下后前 150ms；仅模式 1 真机验证正常后测试。
+关键问题：旧版 REBOUND 时间窗只检查 releaseAge，可能跨越下一次触摸；同时旧诊断的较大偏差包含未过滤的离屏 Host。本版在 ACTION_UP 关联 downSerial，排除 ACTION_CANCEL 与后续 ACTION_DOWN，增加当前 Host 可见性过滤，并在同一条日志关联绘制位置、已选 Bitmap 原点、实际平移、有效采样残差、桥接年龄、PreDraw 年龄及 Workspace scrollX/translationX。
 
-为防止偏移、错位和闪动放大：实验必须同时满足未使用 V288.91/V288.74 原补偿、Bitmap 与发布位置存在、发布元数据年龄 0~50ms、当前参考 Bitmap 一致、采样位置与桥接位置差<=1.5px、X/Y 差各<=24px。超出阈值（包括 71px）跳过，不改变任何东西。仅调整现有 Bitmap 的 drawBitmap 平移，不重新生成源图、不变更 Shader。注意：位置信息吻合不等于验证了 Bitmap 实际像素的生成时间，因此这仍是受控验证而非确定修复。
+设置：
+settings put global liquidglass_kyant_sample_sync_ab_28898 0
+settings put global liquidglass_kyant_visible_gesture_trace_28899 1
+以上在重新加载 Launcher 后生效；关闭诊断设置第二项为0。不要修改现有 pipeline 参数。Vector 中必须勾选桌面作用域。
 
-XposedBridge/Vector 日志：KYANT28898_HOST 表示 Host 读取了实验模式；KYANT28898_SYNC 含 phase、gapX/Y、tx/ty、effectiveX、residualX、reason、applied、bridgeAgeMs、bridgeGen。reason: APPLIED / LARGE_GAP / UNVERIFIED_SOURCE / LEGACY_COMPENSATION / NO_BITMAP / INVALID_POSITION / SUBPIXEL。40ms 限流，日志保存在 Vector 模块日志（未必在 Android logcat）。若当前管线未使用 BRIDGE 路径则不会产生 SYNC。
+日志：KYANT28899_HOST（生效情况）、KYANT28899_VISIBLE（仅屏幕内主机且有 Bitmap；每 Host 约55ms限流，每手势最多20条）、KYANT28899_SKIP（离屏/无 Bitmap/跨手势/取消/限流，约500ms限流）、KYANT28899_TRACE_ERROR（异常隔离）。XposedBridge 日志应从 Vector 模块日志导出，不一定进入系统 logcat。Workspace 值仍是诊断时读取的当前状态，不是 SurfaceFlinger 帧时间戳。
 
-使用前：确保 Vector 已开启模块并勾选系统桌面作用域。先设置模式0并重新加载 Launcher 确认文件夹和 Dock 正常。再设置模式1重载 Launcher，分别慢速左右滑不翻页归位。只有模式1无光学回归时才可以使用模式2测试快速右滑起始闪动。
-
-命令：
-su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 0'  # 关闭
-su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 1'  # 回弹
-su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 2'  # 起始+回弹
-
-禁止用修改 pipeline 模式来强制进入实验；保持当前稳定模式。
+真机：依次测试慢速左滑不翻页归位、慢速右滑不翻页归位与快速右滑起始闪动，并上传 Vector 模块日志。出现异常立即关闭28899诊断，确认28898模式0并重启 Launcher。
 
 Git：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.98 版本"
+git commit -m "V1.9.205.288.99 版本"
 git push origin main
 
-编译验证：已做静态结构检查，当前容器没有 Android SDK/Gradle 编译环境；需要 GitHub Actions 编译与真机验证。
+编译验证：仅完成源码静态检查、ZIP 检查；当前环境无 Android SDK / Gradle 编译验证，须在 GitHub Actions 编译并做真机验收。
