@@ -1,33 +1,18 @@
-ColorOS-LiquidGlass V1.9.205.288.101｜桥接 Bitmap 内容与坐标配对 A/B 实验版
+ColorOS-LiquidGlass V1.9.205.288.102｜零复制桥接与绘制时序诊断版
 
-基线：V1.9.205.288.100（原二维折射/模糊/高光/Dock 保持不变）。
+基线：V1.9.205.288.101 模式 0。针对模式 1 导致的严重抖动与明显掉帧，永久停用 V288.101 的高频 Bitmap.copy 配对实验（即使保留旧 settings 值也不会启用）。
 
-问题：V288.100 日志显示多数回弹帧 bridgeGen 比 PreDraw 晚一代；先前的 V288.91 快照生产受 pipeline=2 门槛限制，当前 pipeline=-1 路径通常只用共享可变 BRIDGE Bitmap。本版为验证共享像素与位置的发布关系，独立构建一组不可变 Bitmap+采样位置+代际+手势身份快照。
+本版仅增加轻量诊断数据：桥接绘制回调耗时、PreDraw 时间戳、Compose Canvas 提交耗时、相邻 Compose 诊断回调时间间隔、桥接/PreDraw 代际与坐标差。未创建新 Bitmap，未修改 Shader、二维折射、模糊、高光和 Dock 参数，也没有增加像素补偿。
 
-重要：A/B 实验不是已经证实的修复。Bitmap.copy 在 UI 桥接采样回调里执行，可能引起卡顿、内存和功耗负担，仅短时间真机验证。65ms 最小复制间隔、200万像素尺寸上限、90ms 选用年龄、手势和参考图身份匹配均为保护条件；不回收仍可能被消费的 Bitmap，以避免 drawBitmap 崩溃。此实验不能证明 SurfaceFlinger 同一帧。
+开关（启动时读取，修改后重新加载 Launcher）：
+liquidglass_kyant_zero_copy_timing_trace_288102=0（默认关闭）/1（开启）
+liquidglass_kyant_bridge_pair_ab_288101=0（旧实验已从代码强制停用）
+liquidglass_kyant_sample_sync_ab_28898=0（建议）
 
-开关（需重新加载 Launcher 生效）：
-liquidglass_kyant_bridge_pair_ab_288101=0：完全保留旧路径（默认，推荐安全基线）
-liquidglass_kyant_bridge_pair_ab_288101=1：仅在匹配的 UP 后回弹窗口尝试使用不可变配对快照
-liquidglass_kyant_bridge_pair_ab_288101=2：模式1 + 触摸开始前150ms（必须先验证模式1）
-liquidglass_kyant_bridge_pair_trace_288101=1：只读追踪 HOST / PAIR_PUBLISH / PAIR_CONSUME / PAIR_ERROR
-请始终保持 liquidglass_kyant_sample_sync_ab_28898=0，避免混合实验。
+Vector 模块日志关键字：KYANT288102_HOST、KYANT288102_TIMING。
 
-推荐真机测试：
-1. Vector 勾选 Launcher 作用域；安装 APK，确认光学效果正常。
-2. su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 0; settings put global liquidglass_kyant_bridge_pair_ab_288101 0; settings put global liquidglass_kyant_bridge_pair_trace_288101 1'
-3. 重新加载 Launcher，测试左右不翻页回弹；从 Vector 模块日志导出 HOST/PAIR_CONSUME。
-4. su -c 'settings put global liquidglass_kyant_bridge_pair_ab_288101 1'
-5. 重新加载 Launcher，重复左右回弹测试，关注 PAIR_PUBLISH / PAIR_CONSUME 的 selected=true 比例、流畅度、残差和视觉体验。
-6. 只有模式1稳定时才可短暂测试模式2快速右滑起始。
-7. 如出现异常、卡顿或发热：su -c 'settings put global liquidglass_kyant_bridge_pair_ab_288101 0; settings put global liquidglass_kyant_bridge_pair_trace_288101 0'，重新加载 Launcher。
+测试：确认 Vector 模块启用并勾选系统 Launcher 作用域；先确认原本光学正常，设置 timing_trace=1 后重新加载 Launcher；左右不翻页松手归位、快速右滑起始分别测试，再导出 Vector 模块日志。
 
-日志关键词：KYANT288101_HOST、KYANT288101_PAIR_PUBLISH、KYANT288101_PAIR_CONSUME、KYANT288101_PAIR_ERROR。
+注意：drawCadenceMs 是同一 Host 的 Compose 回调间隔，并非真实 FPS；canvasSubmitMs 是 CPU Canvas 命令提交时间，不包括 GPU 或 SurfaceFlinger 呈现耗时；bridgeWorkMs 是采样回调工作时间，不代表端到端 Bitmap 更新延迟。本版不会自动修复抖动。
 
-Termux Git（更新源码后）：
-cd ~/ColorOS-LiquidGlass-V1.0-Source
-git add .
-git commit -m "V1.9.205.288.101 版本"
-git push origin main
-
-验证状态：源码及 ZIP 静态检查完成，尚未运行 Android Gradle 编译或真机验证。请先查看 GitHub Actions 构建结果。
+构建：Android Studio / Gradle 项目源码，依赖 Android SDK/NDK 等本地环境。发布前需通过 GitHub Actions 编译及真机测试。

@@ -101,6 +101,17 @@ object KyantLauncherLens270 {
         val atNs: Long, val referenceId: Int,
         val down: Long, val release: Long, val phase: String
     )
+    // V288.102: lightweight, non-observable trace snapshots. These are CALLBACK
+    // timestamps, not GPU presentation fences or actual measured display FPS.
+    private data class TimingPoint288102(
+        val atNs: Long, val gen: Long, val pos: Offset,
+        val down: Long, val release: Long, val durationNs: Long,
+        val workspaceScrollX: Int?
+    )
+    private class TimingTrace288102 {
+        val bridge = java.util.concurrent.atomic.AtomicReference<TimingPoint288102?>(null)
+        val predraw = java.util.concurrent.atomic.AtomicReference<TimingPoint288102?>(null)
+    }
     // V288.92: observational metadata only. Not a GPU presentation timestamp and
     // not the OEM wallpaper Surface transform. Coordinates are screen/source pairs.
     private data class BridgeCoordinate28892(
@@ -1347,14 +1358,19 @@ object KyantLauncherLens270 {
             "node=$nodePipeline28881 carrier=$nativeCarrierAb28869 mode98=$sampleSyncAb28898")
         // 0=untouched, 1=paired bitmap during matched rebound, 2=also first 150ms of touch.
         // This key is read on host creation; reload Launcher after changing it.
-        val bridgePairAb288101 = try {
+        // V288.102 SAFETY: retire 288101's main-thread Bitmap.copy() A/B path.
+        // Force-disabled even if old global settings still contain mode 1 or 2.
+        val bridgePairAb288101 = 0
+        val bridgePairTrace288101 = false
+        val timingTraceEnabled288102 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_bridge_pair_ab_288101", 0).coerceIn(0, 2)
-        } catch (_: Throwable) { 0 }
-        val bridgePairTrace288101 = try {
-            Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_bridge_pair_trace_288101", 0) == 1
+                "liquidglass_kyant_zero_copy_timing_trace_288102", 0) == 1
         } catch (_: Throwable) { false }
+        val timings288102 = TimingTrace288102()
+        if (timingTraceEnabled288102) XposedBridge.log(
+            "KYANT288102_HOST host=$trace28815Host enabled=1 retiredPair101=true " +
+            "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
         if (bridgePairAb288101 > 0 || bridgePairTrace288101) XposedBridge.log(
             "KYANT288101_HOST host=$trace28815Host mode=$bridgePairAb288101 " +
             "trace=$bridgePairTrace288101 pipeline=$pipelineMode28819 " +
@@ -1845,6 +1861,7 @@ object KyantLauncherLens270 {
             if (target == null) return
             val activeReference = referenceState28832.value
             if (activeReference.isRecycled) return
+            val startNs102 = if (timingTraceEnabled288102) SystemClock.elapsedRealtimeNanos() else 0L
             val sw = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
             val sh = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
             val sx = activeReference.width.toFloat() / sw
@@ -2001,6 +2018,13 @@ object KyantLauncherLens270 {
             }
             recordNativeSettle28872("NATIVE_BITMAP_BRIDGE", pos, activeReference, gen,
                 bitmap.width, bitmap.height)
+            if (timingTraceEnabled288102) {
+                val endNs102 = SystemClock.elapsedRealtimeNanos()
+                timings288102.bridge.set(TimingPoint288102(
+                    endNs102, gen, pos, gestureDownSerial28893,
+                    releaseSeq28820.get(), endNs102 - startNs102,
+                    activeTouchWorkspace28820?.get()?.scrollX))
+            }
         }
         val bridgeView = if (bridgeBitmap != null) object : View(anchor.context) {
             private var count = 0L
@@ -2607,7 +2631,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, timings288102,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3367,6 +3391,12 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
+                    if (timingTraceEnabled288102) {
+                        timings288102.predraw.set(TimingPoint288102(
+                            SystemClock.elapsedRealtimeNanos(), bridgeDrawCount.get(),
+                            currentSample, gestureDownSerial28893, releaseSeq28820.get(),
+                            0L, activeTouchWorkspace28820?.get()?.scrollX))
+                    }
                     // V288.100: capture the host position and the bridge generation
                     // in this PreDraw callback, not later from Compose draw. Atomic
                     // publication keeps the fields from one callback together.
@@ -3551,6 +3581,8 @@ object KyantLauncherLens270 {
         bridgePairAb288101: Int,
         bridgePairTrace288101: Boolean,
         bridgePairFrame288101: androidx.compose.runtime.State<VerifiedBridgeFrame288101?>,
+        timingTraceEnabled288102: Boolean,
+        timings288102: TimingTrace288102,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3588,6 +3620,8 @@ object KyantLauncherLens270 {
         }
         // [last down, last release, last time, count], logging only.
         val pairLog288101 = androidx.compose.runtime.remember { longArrayOf(0L, 0L) }
+        // Draw-callback counters are non-observable; no Recompose triggers.
+        val timingLastLog288102 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
         val snapshotLog288100 = androidx.compose.runtime.remember {
             longArrayOf(-1L, -1L, 0L, 0L)
         }
@@ -4156,9 +4190,55 @@ object KyantLauncherLens270 {
                         (kotlin.math.abs(dx91) > 0.5f || kotlin.math.abs(dy91) > 0.5f)
                     val actualTx98 = if (applySync98) -dx91 else originalTx98
                     val actualTy98 = if (applySync98) -dy91 else originalTy98
+                    val bitmapDrawStart102 = if (timingTraceEnabled288102)
+                        SystemClock.elapsedRealtimeNanos() else 0L
                     if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
                             actualTx98, actualTy98, bitmapPaint)
+                    }
+                    if (timingTraceEnabled288102 && selectedBitmap91 != null) {
+                        // Canvas submission duration, NOT GPU execution or actual FPS.
+                        val now102 = SystemClock.elapsedRealtimeNanos()
+                        val reboundAge102 = now102 - releaseNs28820.get()
+                        val touchAge102 = now102 - touchDownNs28896
+                        val matching102 = releaseDownSerial28899 == gestureDownSerial28893 &&
+                            releaseAction28820 == "UP"
+                        val phase102 = when {
+                            touchActive28894 && touchAge102 in 0L..150_000_000L -> "TOUCH_START"
+                            !touchActive28894 && matching102 &&
+                                reboundAge102 in 0L..850_000_000L -> "REBOUND"
+                            else -> "OTHER"
+                        }
+                        val cadence102 = if (timingLastLog288102[1] > 0L)
+                            now102 - timingLastLog288102[1] else -1L
+                        timingLastLog288102[1] = now102
+                        timingLastLog288102[2]++
+                        if (phase102 != "OTHER" && visibleSource28867() &&
+                            now102 - timingLastLog288102[0] >= 120_000_000L) {
+                            timingLastLog288102[0] = now102
+                            try {
+                                val b102 = timings288102.bridge.get()
+                                val p102 = timings288102.predraw.get()
+                                val bAge102 = b102?.let { (now102 - it.atNs) / 1_000_000f }
+                                val pAge102 = p102?.let { (now102 - it.atNs) / 1_000_000f }
+                                val gapX102 = b102?.let { drawPosition.x - it.pos.x }
+                                val preGap102 = p102?.let { drawPosition.x - it.pos.x }
+                                XposedBridge.log("KYANT288102_TIMING host=$traceHost28890 " +
+                                    "phase=$phase102 down=$gestureDownSerial28893 " +
+                                    "release=${releaseSeq28820.get()} " +
+                                    "drawCadenceMs=${if (cadence102 >= 0L) cadence102/1_000_000f else -1f} " +
+                                    "canvasSubmitMs=${(now102-bitmapDrawStart102)/1_000_000f} " +
+                                    "bridgeWorkMs=${b102?.durationNs?.div(1_000_000f)} " +
+                                    "bridgeAgeMs=$bAge102 preAgeMs=$pAge102 " +
+                                    "preGen=${p102?.gen} bridgeGen=${b102?.gen} " +
+                                    "genDelta=${if (b102 != null && p102 != null) b102.gen-p102.gen else null} " +
+                                    "drawX=${drawPosition.x} bridgeGapX=$gapX102 preGapX=$preGap102 " +
+                                    "wsPre=${p102?.workspaceScrollX} wsBridge=${b102?.workspaceScrollX} " +
+                                    "selectedSource=${if (useFrame91) "FRAME91" else "BRIDGE"} " +
+                                    "bitmapId=${System.identityHashCode(selectedBitmap91)} " +
+                                    "drawCount=${timingLastLog288102[2]}")
+                            } catch (_: Throwable) { /* diagnostics must not affect rendering */ }
+                        }
                     }
                     if (bridgePairAb288101 > 0 || bridgePairTrace288101) {
                         pairLog288101[1]++
