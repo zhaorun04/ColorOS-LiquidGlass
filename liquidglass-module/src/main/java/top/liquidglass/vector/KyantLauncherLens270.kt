@@ -93,6 +93,14 @@ object KyantLauncherLens270 {
         val sampledAtNs: Long, val referenceIdentity: Int,
         val downSerial28894: Long, val releaseSerial28894: Long
     )
+    // V288.101: immutable bitmap AND sampled position are published as one object.
+    // A/B is explicitly opt-in, with age and gesture gates on the consumer.
+    // It cannot prove the SurfaceFlinger presentation frame.
+    private data class VerifiedBridgeFrame288101(
+        val bitmap: Bitmap, val pos: Offset, val gen: Long,
+        val atNs: Long, val referenceId: Int,
+        val down: Long, val release: Long, val phase: String
+    )
     // V288.92: observational metadata only. Not a GPU presentation timestamp and
     // not the OEM wallpaper Surface transform. Coordinates are screen/source pairs.
     private data class BridgeCoordinate28892(
@@ -1337,6 +1345,23 @@ object KyantLauncherLens270 {
         if (snapshotTrace288100) XposedBridge.log("KYANT288100_HOST host=$trace28815Host " +
             "trace=1 pipeline=$pipelineMode28819 bitmap=$bitmapPipeline28880 " +
             "node=$nodePipeline28881 carrier=$nativeCarrierAb28869 mode98=$sampleSyncAb28898")
+        // 0=untouched, 1=paired bitmap during matched rebound, 2=also first 150ms of touch.
+        // This key is read on host creation; reload Launcher after changing it.
+        val bridgePairAb288101 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_pair_ab_288101", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 }
+        val bridgePairTrace288101 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_pair_trace_288101", 0) == 1
+        } catch (_: Throwable) { false }
+        if (bridgePairAb288101 > 0 || bridgePairTrace288101) XposedBridge.log(
+            "KYANT288101_HOST host=$trace28815Host mode=$bridgePairAb288101 " +
+            "trace=$bridgePairTrace288101 pipeline=$pipelineMode28819 " +
+            "carrier=$nativeCarrierAb28869 bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
+        val bridgePairFrame288101 = androidx.compose.runtime.mutableStateOf<VerifiedBridgeFrame288101?>(null)
+        var lastPairCopyNs288101 = 0L
+        var pairErrors288101 = 0
         val checkpoint288100 = java.util.concurrent.atomic.AtomicReference<PredrawCheckpoint288100?>(null)
         var checkpointSerial288100 = 0L
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
@@ -1898,6 +1923,49 @@ object KyantLauncherLens270 {
                 } catch (t: Throwable) {
                     if (bitmapTrace28880 && gen % 90L == 1L) XposedBridge.log(
                         "KYANT28880_SNAPSHOT_ERROR ${t.javaClass.simpleName}")
+                }
+            }
+            // V288.101: producer-side immutable pixel/position pairing. The old
+            // shared bridge bitmap remains the default and is never modified here.
+            if (bridgePairAb288101 > 0 && nativeCarrierAb28869 == 1 &&
+                sampleSyncAb28898 == 0 && !disposed) {
+                val pairNow101 = SystemClock.elapsedRealtimeNanos()
+                val pairDown101 = gestureDownSerial28893
+                val pairRelease101 = releaseSeq28820.get()
+                val pairStart101 = bridgePairAb288101 == 2 && touchActive28894 &&
+                    pairDown101 > 0L && pairNow101 - touchDownNs28896 in 0L..150_000_000L
+                val pairRebound101 = !touchActive28894 && pairDown101 > 0L &&
+                    releaseDownSerial28899 == pairDown101 &&
+                    releaseAction28820 == "UP" &&
+                    pairNow101 - releaseNs28820.get() in 0L..650_000_000L
+                if ((pairStart101 || pairRebound101) &&
+                    bitmap.width.toLong() * bitmap.height.toLong() <= 2_000_000L &&
+                    pairNow101 - lastPairCopyNs288101 >= 65_000_000L) {
+                    // Copy is performed only after target.draw... completed.
+                    // A single immutable publication contains all metadata.
+                    try {
+                        val frozen101 = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                        if (gestureDownSerial28893 == pairDown101 &&
+                            releaseSeq28820.get() == pairRelease101 &&
+                            (if (pairStart101) touchActive28894 else !touchActive28894)) {
+                            val frame101 = VerifiedBridgeFrame288101(
+                                frozen101, pos, gen, SystemClock.elapsedRealtimeNanos(),
+                                System.identityHashCode(activeReference), pairDown101,
+                                pairRelease101, if (pairStart101) "TOUCH_START" else "REBOUND")
+                            bridgePairFrame288101.value = frame101
+                            lastPairCopyNs288101 = pairNow101
+                            if (bridgePairTrace288101) XposedBridge.log(
+                                "KYANT288101_PAIR_PUBLISH host=$trace28815Host " +
+                                "gen=$gen phase=${frame101.phase} x=${pos.x} y=${pos.y} " +
+                                "down=$pairDown101 release=$pairRelease101 " +
+                                "bitmapId=${System.identityHashCode(frozen101)}")
+                        }
+                    } catch (t101: Throwable) {
+                        pairErrors288101++
+                        if (pairErrors288101 <= 3) XposedBridge.log(
+                            "KYANT288101_PAIR_ERROR host=$trace28815Host " +
+                            "type=${t101.javaClass.simpleName}")
+                    }
                 }
             }
             bridgePublishedPosition.set(pos)
@@ -2539,7 +2607,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3480,6 +3548,9 @@ object KyantLauncherLens270 {
         visibleGestureTrace28899: Boolean,
         snapshotTrace288100: Boolean,
         checkpoint288100: java.util.concurrent.atomic.AtomicReference<PredrawCheckpoint288100?>,
+        bridgePairAb288101: Int,
+        bridgePairTrace288101: Boolean,
+        bridgePairFrame288101: androidx.compose.runtime.State<VerifiedBridgeFrame288101?>,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3516,6 +3587,7 @@ object KyantLauncherLens270 {
             longArrayOf(-1L, -1L, 0L, 0L, 0L)
         }
         // [last down, last release, last time, count], logging only.
+        val pairLog288101 = androidx.compose.runtime.remember { longArrayOf(0L, 0L) }
         val snapshotLog288100 = androidx.compose.runtime.remember {
             longArrayOf(-1L, -1L, 0L, 0L)
         }
@@ -3989,8 +4061,37 @@ object KyantLauncherLens270 {
                             "currentRelease=${releaseSeq28820.get()} active=$touchActive28894 " +
                             "ageMs=${frameAge91 / 1_000_000f} rawGapX=${drawPosition.x - frame91.position.x}")
                     }
-                    val selectedBitmap91 = if (useFrame91) frame91!!.bitmap else visibleBridge75
-                    val selectedPos91 = if (useFrame91) frame91!!.position else visiblePosition75
+                    // V288.101 A/B: prefer a real immutable producer snapshot only
+                    // in its original gesture window. Default mode 0 is identical
+                    // to V288.100; reject all stale/mismatched snapshots.
+                    val pair101 = if (bridgePairAb288101 > 0) bridgePairFrame288101.value else null
+                    val now101 = if (bridgePairAb288101 > 0 || bridgePairTrace288101)
+                        SystemClock.elapsedRealtimeNanos() else 0L
+                    val pairAge101 = if (pair101 != null) now101 - pair101.atNs else -1L
+                    val pairStart101 = pair101?.phase == "TOUCH_START" &&
+                        bridgePairAb288101 == 2 && touchActive28894 &&
+                        now101 - touchDownNs28896 in 0L..150_000_000L
+                    val pairRebound101 = pair101?.phase == "REBOUND" &&
+                        !touchActive28894 && releaseAction28820 == "UP" &&
+                        releaseDownSerial28899 == gestureDownSerial28893 &&
+                        now101 - releaseNs28820.get() in 0L..650_000_000L
+                    val usePair101 = pair101 != null && !useFrame91 &&
+                        pairAge101 in 0L..90_000_000L &&
+                        pair101.down == gestureDownSerial28893 &&
+                        pair101.release == releaseSeq28820.get() &&
+                        pair101.referenceId == System.identityHashCode(reference) &&
+                        !pair101.bitmap.isRecycled &&
+                        (pairStart101 || pairRebound101)
+                    val selectedBitmap91 = when {
+                        useFrame91 -> frame91!!.bitmap
+                        usePair101 -> pair101!!.bitmap
+                        else -> visibleBridge75
+                    }
+                    val selectedPos91 = when {
+                        useFrame91 -> frame91!!.position
+                        usePair101 -> pair101!!.pos
+                        else -> visiblePosition75
+                    }
                     val dx91 = if (selectedPos91 != null) drawPosition.x - selectedPos91.x else 0f
                     val dy91 = if (selectedPos91 != null) drawPosition.y - selectedPos91.y else 0f
                     // V288.91 compensates only small residual motion. A large
@@ -4021,9 +4122,9 @@ object KyantLauncherLens270 {
                     // small residual when neither legacy compensator is active. Never resample,
                     // mutate state, replace the bitmap or jump across a new gesture.
                     val originalTx98 = if (compensate91) -dx91 else
-                        if (canShift74 && !useFrame91) -lagX74 else 0f
+                        if (canShift74 && !useFrame91 && !usePair101) -lagX74 else 0f
                     val originalTy98 = if (compensate91) -dy91 else
-                        if (canShift74 && !useFrame91) -lagY74 else 0f
+                        if (canShift74 && !useFrame91 && !usePair101) -lagY74 else 0f
                     val now98 = if (sampleSyncAb28898 > 0) SystemClock.elapsedRealtimeNanos() else 0L
                     val startAge98 = now98 - touchDownNs28896
                     val releaseAge98 = now98 - releaseNs28820.get()
@@ -4058,6 +4159,22 @@ object KyantLauncherLens270 {
                     if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
                             actualTx98, actualTy98, bitmapPaint)
+                    }
+                    if (bridgePairAb288101 > 0 || bridgePairTrace288101) {
+                        pairLog288101[1]++
+                        if (now101 - pairLog288101[0] >= 70_000_000L) {
+                            pairLog288101[0] = now101
+                            val gap101 = selectedPos91?.let { drawPosition.x - it.x }
+                            XposedBridge.log("KYANT288101_PAIR_CONSUME host=$traceHost28890 " +
+                                "mode=$bridgePairAb288101 selected=$usePair101 " +
+                                "phase=${pair101?.phase} ageMs=${if (pairAge101 >= 0L) pairAge101 / 1_000_000f else -1f} " +
+                                "gen=${pair101?.gen} down=${gestureDownSerial28893} " +
+                                "frameDown=${pair101?.down} release=${releaseSeq28820.get()} " +
+                                "frameRelease=${pair101?.release} x=${drawPosition.x} " +
+                                "sampleX=${selectedPos91?.x} gapX=$gap101 " +
+                                "bitmapId=${System.identityHashCode(selectedBitmap91)} " +
+                                "reason=${when { bridgePairAb288101 == 0 -> "CONTROL"; usePair101 -> "PAIRED"; pair101 == null -> "NO_FRAME"; pairAge101 !in 0L..90_000_000L -> "STALE"; pair101.down != gestureDownSerial28893 -> "OTHER_GESTURE"; else -> "WINDOW_OR_REFERENCE" }}")
+                        }
                     }
                     if (experimentWindow98) {
                         syncTraceState28898[1]++
@@ -4235,7 +4352,7 @@ object KyantLauncherLens270 {
                                     "bridgeGapX=$bridgeGap100 " +
                                     "wsScrollX=${pre100?.wsScrollX} wsX=${pre100?.wsX} " +
                                     "wsTx=${pre100?.wsTx} bitmapId=${System.identityHashCode(selectedBitmap91)} " +
-                                    "source=${if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                    "source=${if (usePair101) "PAIR101" else if (useFrame91) "PAIRED" else "BRIDGE"} " +
                                     "applied98=$applySync98")
                             }
                         } catch (t100: Throwable) {
@@ -4276,9 +4393,9 @@ object KyantLauncherLens270 {
                             finalTraceState28897[3]++
                             try {
                                 val tx97 = if (compensate91) -dx91 else
-                                    if (canShift74 && !useFrame91) -lagX74 else 0f
+                                    if (canShift74 && !useFrame91 && !usePair101) -lagX74 else 0f
                                 val ty97 = if (compensate91) -dy91 else
-                                    if (canShift74 && !useFrame91) -lagY74 else 0f
+                                    if (canShift74 && !useFrame91 && !usePair101) -lagY74 else 0f
                                 val effectiveX97 = selectedPos91?.x?.minus(tx97)
                                 val effectiveY97 = selectedPos91?.y?.minus(ty97)
                                 val bridge97 = bridgeCoordinate28892.get()
@@ -4410,8 +4527,8 @@ object KyantLauncherLens270 {
                             val pre92 = predrawSample28890.get()
                             val chosenX92 = selectedPos91?.x
                             val chosenY92 = selectedPos91?.y
-                            val appliedX92 = if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f
-                            val appliedY92 = if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f
+                            val appliedX92 = if (compensate91) -dx91 else if (canShift74 && !useFrame91 && !usePair101) -lagX74 else 0f
+                            val appliedY92 = if (compensate91) -dy91 else if (canShift74 && !useFrame91 && !usePair101) -lagY74 else 0f
                             // This is the source-image local matrix, NOT the OEM live wallpaper matrix.
                             XposedBridge.log("KYANT28892_COORD host=$traceHost28890 release=$seq92 " +
                                 "releaseAgeMs=${relAge92/1_000_000f} visible=$visible92 " +
