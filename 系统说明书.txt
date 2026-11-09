@@ -1,4 +1,12 @@
-V1.9.205.288.95.2｜光学渲染回归安全修正版
+V1.9.205.288.96 双方向回弹与触摸起始帧只读诊断版
+
+基于 V288.95.2 安全光学基线。本版仅新增 KYANT28896_DUAL 日志；不修改渲染结果、Bitmap 来源、折射、模糊、高光及 Dock。
+开关：su -c 'settings put global liquidglass_kyant_dual_motion_trace_28896 1'
+重新加载 Launcher 后生效。记录 TOUCH_START（触摸起始 150ms）与 REBOUND（左右松手 800ms），对每个 Host 限频。
+导出：su -c 'logcat -d -v threadtime | grep -E "KYANT28896_|KYANT28893_TOUCH_|KYANT28894_ISOLATE" > /sdcard/Download/KYANT28896_完整诊断日志.txt'
+警告：日志中的 Bitmap/Compose 坐标是 UI 绘制阶段数据，不代表 SurfaceFlinger 的实际合成帧。
+
+V1.9.205.288.96｜光学渲染回归安全修正版
 用户真机验证 V288.95.1：模式1开启时玻璃渲染全部消失。已彻底移除 REFERENCE 直接绘制分支；模式0/1/2均使用 V288.94 的 PAIRED/BRIDGE 光学绘制路径。模式1/2仅输出 REFERENCE 候选诊断，不再是改善闪动的修复实验。日志新增 referenceCandidate 与 safeBypass=true。保留其他手势隔离功能。未经 Gradle/真机验证。
 
 V1.9.205.288.95.1 编译修正：修复 LensContent270 中 fusionMode28889 / affineSampling28876 跨函数作用域引用；通过 directReferenceEligible28895 传递原有 Host 路径判断，保持 A/B 实验行为不变。GitHub Actions 编译及真机效果仍待验证。

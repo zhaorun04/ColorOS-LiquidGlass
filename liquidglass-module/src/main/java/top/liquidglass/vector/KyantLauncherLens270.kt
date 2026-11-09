@@ -141,6 +141,8 @@ object KyantLauncherLens270 {
     @Volatile private var gestureDownSerial28893 = 0L
     // V288.94: fail closed when a new gesture begins. Only mode 1 reads this.
     @Volatile private var touchActive28894 = false
+    // V288.96 diagnostic clock: monotonic time of latest ACTION_DOWN.
+    @Volatile private var touchDownNs28896 = 0L
     @Volatile private var releaseBeforeVia28821 = ""
     @Volatile private var releaseAfterKey28821 = ""
     @Volatile private var activeTouchRoot28820: WeakReference<View>? = null
@@ -188,6 +190,7 @@ object KyantLauncherLens270 {
                 lastTouchDownKey28821 = eventKey
                 gestureDownSerial28893++
                 touchActive28894 = true
+                touchDownNs28896 = SystemClock.elapsedRealtimeNanos()
                 XposedBridge.log("KYANT28893_TOUCH_DOWN downSerial=$gestureDownSerial28893 " +
                     "priorRelease=${releaseSeq28820.get()} eventMs=${event.eventTime} " +
                     "rawX=${event.rawX} rawY=${event.rawY} via=$method")
@@ -1287,7 +1290,15 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_timeline_trace_28893", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.96 read-only both-directions / first-motion sampling; default OFF.
+        val dualMotionTrace28896 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_dual_motion_trace_28896", 0) == 1
+        } catch (_: Throwable) { false }
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
+        if (dualMotionTrace28896) XposedBridge.log("KYANT28896_HOST host=$trace28815Host " +
+            "trace=1 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "frame=$reboundFrameAb28891 isolation=$gestureIsolation28894")
         if (timelineTrace28893) XposedBridge.log("KYANT28893_HOST host=$trace28815Host " +
             "timeline=1 coordinateTrace=$coordinateTrace28892 carrier=$nativeCarrierAb28869 " +
             "pipeline=$pipelineMode28819")
@@ -2480,7 +2491,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3401,6 +3412,7 @@ object KyantLauncherLens270 {
         coordinateTrace28892: Boolean,
         bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
         timelineTrace28893: Boolean,
+        dualMotionTrace28896: Boolean,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3425,6 +3437,8 @@ object KyantLauncherLens270 {
         // [release sequence, last log timestamp, samples]; no composition mutation.
         val coordinateLogState28892 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
         val timelineLogState28893 = androidx.compose.runtime.remember { longArrayOf(-1L, 0L, 0L) }
+        // [last touch epoch, last release, last log timestamp, per-epoch count].
+        val dualTraceState28896 = androidx.compose.runtime.remember { longArrayOf(-1L, -1L, 0L, 0L) }
         val previousGap28893 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -3926,6 +3940,55 @@ object KyantLauncherLens270 {
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
                             if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f,
                             if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f, bitmapPaint)
+                    }
+                    // V288.96 strictly observational: log start-of-touch (both
+                    // directions) and snap-back for right AND left releases.
+                    // No Bitmap replacement, no Compose state mutation, no extra
+                    // sampling, no draw translation or extra invalidation.
+                    if (dualMotionTrace28896 && nativeCarrierAb28869 == 1 &&
+                        pipelineMode28819 == 2) {
+                        val now96 = SystemClock.elapsedRealtimeNanos()
+                        val down96 = gestureDownSerial28893
+                        val rel96 = releaseSeq28820.get()
+                        val touchAge96 = now96 - touchDownNs28896
+                        val reboundAge96 = now96 - releaseNs28820.get()
+                        val startup96 = touchActive28894 && touchAge96 in 0L..150_000_000L
+                        val rebound96 = !touchActive28894 && rel96 > 0L &&
+                            reboundAge96 in 0L..800_000_000L
+                        if (dualTraceState28896[0] != down96 || dualTraceState28896[1] != rel96) {
+                            dualTraceState28896[0] = down96
+                            dualTraceState28896[1] = rel96
+                            dualTraceState28896[2] = 0L
+                            dualTraceState28896[3] = 0L
+                        }
+                        if ((startup96 || rebound96) &&
+                            dualTraceState28896[3] < 22L &&
+                            now96 - dualTraceState28896[2] >= 30_000_000L &&
+                            (try { visibleSource28867() } catch (_: Throwable) { false })) {
+                            dualTraceState28896[2] = now96
+                            dualTraceState28896[3]++
+                            val bridge96 = bridgeCoordinate28892.get()
+                            val pre96 = predrawSample28890.get()
+                            val sample96 = bridgeSample28890.get()
+                            val ws96 = activeTouchWorkspace28820?.get()
+                            val sampleBitmap96 = selectedBitmap91
+                            XposedBridge.log("KYANT28896_DUAL host=$traceHost28890 " +
+                                "phase=${if (startup96) "TOUCH_START" else "REBOUND"} " +
+                                "down=$down96 release=$rel96 dx=$releaseDx28820 " +
+                                "touchAgeMs=${touchAge96/1_000_000f} releaseAgeMs=${reboundAge96/1_000_000f} " +
+                                "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
+                                "bridgeX=${bridge96?.position?.x} bridgeY=${bridge96?.position?.y} " +
+                                "gapX=${bridge96?.let { drawPosition.x-it.position.x }} " +
+                                "gapY=${bridge96?.let { drawPosition.y-it.position.y }} " +
+                                "predrawX=${pre96?.pos?.x} predrawAgeMs=${pre96?.let { (now96-it.atNs)/1_000_000f }} " +
+                                "sampleAgeMs=${sample96?.let { (now96-it.atNs)/1_000_000f }} " +
+                                "bridgeAgeMs=${bridge96?.let { (now96-it.atNs)/1_000_000f }} " +
+                                "source=${if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                "frameGen=${frame91?.generation} bridgeGen=${bridge96?.generation} " +
+                                "bitmapId=${if (sampleBitmap96 != null) System.identityHashCode(sampleBitmap96) else -1} " +
+                                "workspaceScroll=${ws96?.scrollX} workspaceTx=${ws96?.translationX} " +
+                                "refMatch=${bridge96?.referenceIdentity == System.identityHashCode(reference)}")
+                        }
                     }
                     if (continuityAb28895 > 0) {
                         val source95 = if (useFrame91) 2L else 3L
