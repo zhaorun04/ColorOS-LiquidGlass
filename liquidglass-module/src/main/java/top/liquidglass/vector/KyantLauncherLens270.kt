@@ -1295,7 +1295,17 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_dual_motion_trace_28896", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.97: independent, observational final-source coordinate diagnostic.
+        // Read once during host creation; no changes to drawing or bitmap ownership.
+        val finalSampleTrace28897 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_final_sample_trace_28897", 0) == 1
+        } catch (_: Throwable) { false }
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
+        if (finalSampleTrace28897) XposedBridge.log("KYANT28897_HOST host=$trace28815Host " +
+            "trace=1 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "bitmap=$bitmapPipeline28880 node=$nodePipeline28881 " +
+            "frame=$reboundFrameAb28891 isolation=$gestureIsolation28894")
         if (dualMotionTrace28896) XposedBridge.log("KYANT28896_HOST host=$trace28815Host " +
             "trace=1 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
             "frame=$reboundFrameAb28891 isolation=$gestureIsolation28894")
@@ -2491,7 +2501,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3413,6 +3423,7 @@ object KyantLauncherLens270 {
         bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
         timelineTrace28893: Boolean,
         dualMotionTrace28896: Boolean,
+        finalSampleTrace28897: Boolean,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3439,6 +3450,8 @@ object KyantLauncherLens270 {
         val timelineLogState28893 = androidx.compose.runtime.remember { longArrayOf(-1L, 0L, 0L) }
         // [last touch epoch, last release, last log timestamp, per-epoch count].
         val dualTraceState28896 = androidx.compose.runtime.remember { longArrayOf(-1L, -1L, 0L, 0L) }
+        // [last down serial, last release serial, last trace time, samples]
+        val finalTraceState28897 = androidx.compose.runtime.remember { longArrayOf(-1L, -1L, 0L, 0L) }
         val previousGap28893 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -3940,6 +3953,69 @@ object KyantLauncherLens270 {
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
                             if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f,
                             if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f, bitmapPaint)
+                    }
+                    // V288.97: FINAL sample mapping, before all optical compositing.
+                    // At destination pixel x=0, a bitmap painted with translation tx
+                    // yields a source bitmap coordinate -tx. Therefore the effective
+                    // wallpaper origin is selectedPos.x - tx, not necessarily bridgeX.
+                    // This is a CPU-side mapping estimate, NOT a SurfaceFlinger proof.
+                    // Do not change the original drawBitmap call above.
+                    if (finalSampleTrace28897 && nativeCarrierAb28869 == 1) {
+                        val now97 = SystemClock.elapsedRealtimeNanos()
+                        val down97 = gestureDownSerial28893
+                        val release97 = releaseSeq28820.get()
+                        val startAge97 = now97 - touchDownNs28896
+                        val releaseAge97 = now97 - releaseNs28820.get()
+                        val isStart97 = touchActive28894 && startAge97 in 0L..150_000_000L
+                        val isRebound97 = !touchActive28894 && release97 > 0L &&
+                            releaseAge97 in 0L..850_000_000L
+                        if (finalTraceState28897[0] != down97 || finalTraceState28897[1] != release97) {
+                            finalTraceState28897[0] = down97
+                            finalTraceState28897[1] = release97
+                            finalTraceState28897[2] = 0L
+                            finalTraceState28897[3] = 0L
+                        }
+                        if ((isStart97 || isRebound97) && finalTraceState28897[3] < 28L &&
+                            now97 - finalTraceState28897[2] >= 25_000_000L &&
+                            (try { visibleSource28867() } catch (_: Throwable) { false })) {
+                            finalTraceState28897[2] = now97
+                            finalTraceState28897[3]++
+                            try {
+                                val tx97 = if (compensate91) -dx91 else
+                                    if (canShift74 && !useFrame91) -lagX74 else 0f
+                                val ty97 = if (compensate91) -dy91 else
+                                    if (canShift74 && !useFrame91) -lagY74 else 0f
+                                val effectiveX97 = selectedPos91?.x?.minus(tx97)
+                                val effectiveY97 = selectedPos91?.y?.minus(ty97)
+                                val bridge97 = bridgeCoordinate28892.get()
+                                val pre97 = predrawSample28890.get()
+                                val sample97 = bridgeSample28890.get()
+                                val ws97 = activeTouchWorkspace28820?.get()
+                                val selectedGen97 = if (useFrame91) frame91?.generation else visibleGen75
+                                XposedBridge.log("KYANT28897_FINAL host=$traceHost28890 " +
+                                    "phase=${if (isStart97) "TOUCH_START" else "REBOUND"} " +
+                                    "down=$down97 release=$release97 releaseDx=$releaseDx28820 " +
+                                    "ageMs=${if (isStart97) startAge97 / 1_000_000f else releaseAge97 / 1_000_000f} " +
+                                    "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
+                                    "selectedX=${selectedPos91?.x} selectedY=${selectedPos91?.y} " +
+                                    "translationX=$tx97 translationY=$ty97 " +
+                                    "effectiveX=$effectiveX97 effectiveY=$effectiveY97 " +
+                                    "residualX=${effectiveX97?.let { drawPosition.x - it }} " +
+                                    "residualY=${effectiveY97?.let { drawPosition.y - it }} " +
+                                    "bridgeX=${bridge97?.position?.x} bridgeGen=${bridge97?.generation} " +
+                                    "bridgeAgeMs=${bridge97?.let { (now97 - it.atNs) / 1_000_000f }} " +
+                                    "predrawX=${pre97?.pos?.x} predrawAgeMs=${pre97?.let { (now97 - it.atNs) / 1_000_000f }} " +
+                                    "sampleAgeMs=${sample97?.let { (now97 - it.atNs) / 1_000_000f }} " +
+                                    "source=${if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                    "selectedGen=$selectedGen97 bitmapId=${System.identityHashCode(selectedBitmap91)} " +
+                                    "comp91=$compensate91 comp74=${canShift74 && !useFrame91} " +
+                                    "workspaceScroll=${ws97?.scrollX} workspaceTx=${ws97?.translationX} " +
+                                    "refMatch=${bridge97?.referenceIdentity == System.identityHashCode(reference)}")
+                            } catch (traceError97: Throwable) {
+                                // Log diagnostics failures without terminating the optical path.
+                                XposedBridge.log("KYANT28897_TRACE_ERROR host=$traceHost28890 type=${traceError97.javaClass.simpleName}")
+                            }
+                        }
                     }
                     // V288.96 strictly observational: log start-of-touch (both
                     // directions) and snap-back for right AND left releases.
