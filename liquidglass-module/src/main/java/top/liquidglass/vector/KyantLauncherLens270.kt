@@ -4169,6 +4169,22 @@ object KyantLauncherLens270 {
                             }
                             if (perfProfile288109) KyantPerf288109.recordGpuReference288110(hw)
                             val num288110 = sourceDrawCount.get()
+                            // V288.115: observe Bitmap identity / mutation only at the
+                            // existing 240-draw cadence. This is NOT proof of the
+                            // owner of HWUI Texture upload trace slices.
+                            // No Bitmap copies, writes, texture allocations or
+                            // additional per-frame instrumentation are introduced.
+                            if (num288110 == 0L || num288110 % 240L == 0L) {
+                                android.util.Log.i("KyantTexture288115", "KYANT288115_BITMAP " +
+                                    "host=$traceHost28890 hw=$hw " +
+                                    "refId=${System.identityHashCode(reference)} " +
+                                    "refGeneration=${reference.generationId} " +
+                                    "refSize=${reference.width}x${reference.height} " +
+                                    "bridgeId=${System.identityHashCode(bridgeBitmap)} " +
+                                    "bridgeGeneration=${bridgeBitmap.generationId} " +
+                                    "bridgeSize=${bridgeBitmap.width}x${bridgeBitmap.height} " +
+                                    "target=${size.width}x${size.height}")
+                            }
                             if (num288110 == 0L || num288110 % 240L == 0L) {
                                 android.util.Log.i("KyantGpu288110", "KYANT288110_DRAW " +
                                     "host=$traceHost28890 hw=$hw gpu=${hw && !reference.isRecycled} " +

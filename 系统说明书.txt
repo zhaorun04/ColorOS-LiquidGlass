@@ -30,3 +30,16 @@ V1.9.205.288.114 多 Host 调度诊断版（实验）
 字段：nativeDraw 为 Native Bridge View.onDraw 次数；sourceDraw 为 ComposeCanvas 来源绘制调用次数；composeCommits 为 SideEffect 提交数；sourceOffscreen 为绘制当时完全在屏幕外的调用次数；sourceCpuTotalMs/sourceCpuMaxMs 是 ComposeCanvas 回调的 CPU 耗时，不包括 GPU/RenderThread 时间。
 停用：su -c 'settings put global liquidglass_kyant_multi_host_probe_288114 0'，重启 Launcher。
 此版本仅增加诊断计数，不裁剪或降低玻璃质量；还应配合 gfxinfo、Perfetto 追踪 RenderThread 与合成耗时。
+
+
+V1.9.205.288.115｜GPU 图层纹理归属初步核查版
+基于 V288.114，不改变已测试有效的 GPU 共享参考帧采样、Kyant 光学渲染、文件夹位置同步，也不增加离屏优化。默认仍建议：GPU 参考帧开启（288110=1）、离屏裁剪关闭（288113=0）、多 Host 诊断关闭（288114=0）。
+新增：每 240 次 GPU 参考帧背景绘制，输出 KYANT288115_BITMAP。记录 reference 与 bridgeBitmap 的 identityHashCode、generationId、尺寸、目标尺寸、Canvas 硬件状态。只记录实际存在的 Bitmap，确认是否发生频繁替换或内容修改；没有创建新 Bitmap，也没有额外触发绘制。
+真机采集：su -c 'logcat -d -b all -v brief | grep KYANT288115_BITMAP | tail -80'
+注意：Bitmap generationId 不变只能排除这些 Bitmap 的内容修改，不能证明 Perfetto 中的 Texture upload 属于哪个纹理，也不能排除 Skia/Compose 光学缓存、Launcher 图标和其他原生纹理的上传。不能因此声称已经解决 RenderThread 卡顿。
+构建：完整 Gradle/Kotlin 编译和真机验证均待 GitHub Actions/真机执行。此版本仅作为更精确的纹理来源诊断。
+Termux Git：
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.115 版本"
+git push origin main
