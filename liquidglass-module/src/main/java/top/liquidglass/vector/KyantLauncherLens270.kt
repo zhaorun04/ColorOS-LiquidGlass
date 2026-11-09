@@ -75,6 +75,16 @@ import kotlinx.coroutines.launch
 /** V269.1: isolated Compose composition/host-draw/disposal verification; no Launcher glass replacement. */
 object KyantLauncherLens270 {
     private val reboundLayerGuard28818 = AtomicBoolean(false)
+    // V288.90: read-only correlation. These samples describe UI/Compose draw
+    // callbacks, NOT GPU presentation or SurfaceFlinger frame timelines.
+    private data class ReboundSample28890(
+        val serial: Long, val atNs: Long, val pos: Offset,
+        val releaseSeq: Long
+    )
+    private data class BridgeSample28890(
+        val gen: Long, val atNs: Long, val pos: Offset,
+        val referenceIdentity: Int
+    )
     // V288.21: isolated trace of release BEFORE and AFTER actual OEM touch handling.
     // The rendering pipeline remains identical to V288.19 mode 2.
     private const val RELEASE_TRACE_28821_KEY = "liquidglass_kyant_release_trace_28821"
@@ -1199,6 +1209,23 @@ object KyantLauncherLens270 {
         val bridgeVersion = androidx.compose.runtime.mutableIntStateOf(0)
         val bridgePublishedPosition = java.util.concurrent.atomic.AtomicReference<Offset?>(null)
         val bridgeDrawCount = java.util.concurrent.atomic.AtomicLong(0L)
+        // Read the trace switch only at host creation. Disabled by default.
+        val reboundTrace28890 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_rebound_trace_28890", 0) == 1
+        } catch (_: Throwable) { false }
+        val predrawSample28890 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
+        val bridgeSample28890 = java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>(null)
+        var predrawSerial28890 = 0L
+        var previousPredrawX28890 = Float.NaN
+        var previousPredrawDx28890 = 0f
+        var lastReversalNs28890 = 0L
+        var lastPredrawLogNs28890 = 0L
+        var predrawLogBudget28890 = 0
+        if (reboundTrace28890) XposedBridge.log(
+            "KYANT28890_HOST host=$trace28815Host engine=$selectedEngine28888 " +
+            "carrier=$nativeCarrierAb28869 fusion=$fusionMode28889 " +
+            "folderContained=$folderContainment28886 trace=true")
         val bridgeMismatchObserved = java.util.concurrent.atomic.AtomicLong(0L)
         // Native View and Compose draw run on the Launcher UI thread. This single
         // reusable Bitmap is updated atomically relative to those draw callbacks.
@@ -1671,6 +1698,9 @@ object KyantLauncherLens270 {
                 target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
             }
             val gen = bridgeDrawCount.incrementAndGet()
+            if (reboundTrace28890) bridgeSample28890.set(BridgeSample28890(
+                gen, SystemClock.elapsedRealtimeNanos(), pos,
+                System.identityHashCode(activeReference)))
             if (fusionMode28889 == 1 && fusionTrace28889 && (gen <= 2L || gen % 180L == 0L))
                 XposedBridge.log("KYANT28889_V230_SOURCE_TO_KYANT host=$trace28815Host " +
                     "generation=$gen x=${pos.x} y=${pos.y} " +
@@ -2301,6 +2331,7 @@ object KyantLauncherLens270 {
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
+                reboundTrace28890, trace28815Host, predrawSample28890, bridgeSample28890,
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
@@ -3070,6 +3101,45 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
+                    if (reboundTrace28890) {
+                        val now90 = SystemClock.elapsedRealtimeNanos()
+                        val releaseSeq90 = releaseSeq28820.get()
+                        predrawSerial28890++
+                        predrawSample28890.set(ReboundSample28890(
+                            predrawSerial28890, now90, currentSample, releaseSeq90))
+                        val step90 = if (previousPredrawX28890.isFinite())
+                            currentSample.x - previousPredrawX28890 else 0f
+                        val reversal90 = kotlin.math.abs(step90) > 0.35f &&
+                            kotlin.math.abs(previousPredrawDx28890) > 0.35f &&
+                            step90 * previousPredrawDx28890 < 0f
+                        if (reversal90) lastReversalNs28890 = now90
+                        val releaseAge90 = now90 - releaseNs28820.get()
+                        val inRelease90 = releaseSeq90 > 0L &&
+                            releaseAge90 in 0L..650_000_000L
+                        val relevant90 = inRelease90 ||
+                            now90 - lastReversalNs28890 in 0L..350_000_000L
+                        // No every-frame logging. At most 9 events per host,
+                        // with a minimum 45ms spacing; records include real source
+                        // and host observations but cannot establish GPU display time.
+                        if (relevant90 && predrawLogBudget28890 < 9 &&
+                            now90 - lastPredrawLogNs28890 >= 45_000_000L &&
+                            trace28815Host in selectedHostIds28821) {
+                            predrawLogBudget28890++
+                            lastPredrawLogNs28890 = now90
+                            val b90 = bridgeSample28890.get()
+                            XposedBridge.log("KYANT28890_PREDRAW host=$trace28815Host " +
+                                "seq=$predrawSerial28890 release=$releaseSeq90 " +
+                                "releaseAgeMs=${if (inRelease90) releaseAge90 / 1_000_000f else -1f} " +
+                                "reverse=$reversal90 stepX=$step90 originX=${currentSample.x} " +
+                                "composeStateX=${samplePosition.value.x} " +
+                                "bridgeGen=${b90?.gen ?: -1L} bridgeX=${b90?.pos?.x} " +
+                                "bridgeAgeMs=${if (b90 != null) (now90-b90.atNs)/1_000_000f else -1f} " +
+                                "hostTx=${frame.translationX}")
+                        }
+                        if (!relevant90) predrawLogBudget28890 = 0
+                        previousPredrawX28890 = currentSample.x
+                        if (kotlin.math.abs(step90) > 0.35f) previousPredrawDx28890 = step90
+                    }
                     predrawMatrixSnapshot.set(Pair(currentSample, SystemClock.elapsedRealtimeNanos()))
                     releaseTrace28820("POST_PREDRAW", currentSample,
                         "committedX=${samplePosition.value.x} committedY=${samplePosition.value.y} changed=$updatePosition")
@@ -3165,6 +3235,9 @@ object KyantLauncherLens270 {
         bridgeMismatchObserved: java.util.concurrent.atomic.AtomicLong,
         bridgeResample: (Offset) -> Unit,
         predrawMatrixSnapshot: java.util.concurrent.atomic.AtomicReference<Pair<Offset, Long>>,
+        reboundTrace28890: Boolean, traceHost28890: Int,
+        predrawSample28890: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
+        bridgeSample28890: java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>,
         currentNativePosition: () -> Offset,
         sourceMatrixAb28866: Int, currentComposeViewPosition28866: () -> Offset,
         zeroLensAb28868: Int, continuousMotionProbe28868: Boolean,
@@ -3199,6 +3272,7 @@ object KyantLauncherLens270 {
         // Compose State. Capture on the first actual draw to avoid startup offset.
         val frozenSource = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicReference<Offset?>(null) }
         val sourceDrawCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
+        val reboundLogState28890 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -3415,6 +3489,37 @@ object KyantLauncherLens270 {
                     }
                 }
 
+                if (reboundTrace28890 && traceHost28890 in selectedHostIds28821) {
+                    val now90 = SystemClock.elapsedRealtimeNanos()
+                    val releaseSeq90 = releaseSeq28820.get()
+                    val releaseAge90 = now90 - releaseNs28820.get()
+                    val inRelease90 = releaseSeq90 > 0L && releaseAge90 in 0L..650_000_000L
+                    if (releaseSeq90 != reboundLogState28890[0]) {
+                        reboundLogState28890[0] = releaseSeq90
+                        reboundLogState28890[2] = 0L
+                    }
+                    val p90 = predrawSample28890.get()
+                    val b90 = bridgeSample28890.get()
+                    if (inRelease90 && reboundLogState28890[2] < 12L &&
+                        now90 - reboundLogState28890[1] >= 35_000_000L) {
+                        reboundLogState28890[1] = now90
+                        reboundLogState28890[2]++
+                        val uiAge90 = if (p90 != null) (now90 - p90.atNs)/1_000_000f else -1f
+                        val pubAge90 = if (b90 != null) (now90 - b90.atNs)/1_000_000f else -1f
+                        XposedBridge.log("KYANT28890_COMPOSE_SOURCE host=$traceHost28890 " +
+                            "release=$releaseSeq90 releaseAgeMs=${releaseAge90/1_000_000f} " +
+                            "preSeq=${p90?.serial ?: -1L} preAgeMs=$uiAge90 " +
+                            "preX=${p90?.pos?.x} stateX=${committedPosition.x} " +
+                            "drawX=${drawPosition.x} nativeX=${try { currentNativePosition().x } catch (_: Throwable) { Float.NaN }} " +
+                            "bridgeGen=${b90?.gen ?: -1L} bridgeX=${b90?.pos?.x} " +
+                            "bridgeAgeMs=$pubAge90 visibleBridgeVersion=${bridgeVersion.value} " +
+                            "reference=${System.identityHashCode(reference)} " +
+                            "bridgeReference=${b90?.referenceIdentity ?: -1} " +
+                            "opticsStrength=${optics28827.strength} blur=${optics28827.blur} " +
+                            "highlight=${optics28827.highlight} " +
+                            "backdropPath=${rootPipeline28879 < 0 && nodePipeline28881 < 0}")
+                    }
+                }
                 val rootScreenX = drawPosition.x
                 val rootScreenY = drawPosition.y
                 val x = rootScreenX * scaleX

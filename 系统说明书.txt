@@ -1,3 +1,27 @@
+ColorOS-LiquidGlass V1.9.205.288.90｜Kyant 回弹首帧采样—绘制关联诊断版
+
+本版基于 V288.89，恢复原始 Kyant 路径（fusion=0；native mode=0），保持 V288.86 的文件夹内部安全承载层级。不改变 Shader、壁纸采样数学、UI 三光学参数或 Dock。
+
+启用诊断：
+su -c 'settings put global liquidglass_kyant_rebound_trace_28890 1; settings put global liquidglass_kyant_v230_native_ab_28887 0; settings put global liquidglass_kyant_fusion_ab_28889 0; settings put global liquidglass_kyant_folder_containment_28886 1'
+并在 UI 开启 Kyant0 光学后重新加载 Launcher。
+
+日志：
+su -c 'logcat -d -v threadtime | grep -E "KYANT28890_(HOST|PREDRAW|COMPOSE_SOURCE)|KYANT28821_TOUCH_RELEASE" | tail -100'
+
+诊断字段：
+preSeq=PreDraw 应用侧序号，preX=同次采样位置；bridgeGen=原生 Bitmap 写入次数；bridgeX=最近发布时使用的位置；visibleBridgeVersion=Compose 已观察的通知版本；drawX=Compose 源绘制采用的采样坐标；stateX=Compose State；nativeX=draw 阶段的同步位置；bridgeAgeMs / preAgeMs=应用层回调时间差。所有这些不是 GPU 呈现时间。
+
+日志仅在检测到已记录手指松开后约 650ms 且被选中的可见 Host 上节流输出；PREDRAW 还能在反向变化时提供少量事件。若无 KYANT28821_TOUCH_RELEASE，说明 OEM 手势捕获未命中，可补充完整 Vector 模块日志。日志本身不能证明 SurfaceFlinger 丢帧或 GPU 采样滞后。
+
+停用诊断：
+su -c settings put global liquidglass_kyant_rebound_trace_28890 0
+再重新加载 Launcher。正常模式不主动改变现有光学行为。
+
+重要：V230 与 Kyant 混合采样模式 1 曾使抖动恶化，本版默认不启用。避免同时开启 V288.79～288.85 的根图层实验开关。
+
+本版本未在本地 Android SDK / Gradle 中完成真实构建，需 GitHub Actions 验证 Kotlin 编译与真机日志。
+
 V1.9.205.288.89｜V230 原生壁纸采样与 Kyant 光学输入对照版
 
 【使用前提】
