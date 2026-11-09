@@ -127,11 +127,26 @@ internal class HighlightNode(
             highlightLayer.blendMode = highlight.style.blendMode
             // Rectangles and rounded rectangles have value-stable geometry.
             // Generic paths may be mutated in place, so always re-record them.
+            // V288.116.1: observe outline type without relaxing cache safety.
+            if (StaticLayerRecordReuse288116.enabled) {
+                when (outline) {
+                    is Outline.Rectangle -> StaticLayerRecordReuse288116.highlightRectangle++
+                    is Outline.Rounded -> StaticLayerRecordReuse288116.highlightRounded++
+                    else -> StaticLayerRecordReuse288116.highlightGeneric++
+                }
+            }
             val cacheable = outline is Outline.Rectangle || outline is Outline.Rounded
             val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
                 RecordedHighlightKey(safeSize, size, density.density, density.fontScale,
                     layoutDirection, outline, highlight)
             } else null
+            if (StaticLayerRecordReuse288116.enabled && key != null) {
+                if (lastRecordedHighlight == null) {
+                    StaticLayerRecordReuse288116.highlightCold++
+                } else if (key != lastRecordedHighlight) {
+                    StaticLayerRecordReuse288116.highlightKeyChanged++
+                }
+            }
             if (key == null || key != lastRecordedHighlight) {
                 configurePaint(highlight)
                 highlightLayer.record(safeSize) {
@@ -156,6 +171,7 @@ internal class HighlightNode(
     }
 
     override fun onAttach() {
+        if (StaticLayerRecordReuse288116.enabled) StaticLayerRecordReuse288116.highlightNodeAttached++
         val graphicsContext = requireGraphicsContext()
         highlightLayer = graphicsContext.createGraphicsLayer()
     }

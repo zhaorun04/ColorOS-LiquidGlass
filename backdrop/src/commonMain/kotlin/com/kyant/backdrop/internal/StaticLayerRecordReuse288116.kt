@@ -16,4 +16,17 @@ object StaticLayerRecordReuse288116 {
     var highlightReuses: Long = 0L
     var shadowRecords: Long = 0L
     var shadowReuses: Long = 0L
+    // V288.116.1: diagnostic-only counters; cache eligibility is unchanged.
+    var highlightGeneric: Long = 0L
+    var highlightRectangle: Long = 0L
+    var highlightRounded: Long = 0L
+    var highlightCold: Long = 0L
+    var highlightKeyChanged: Long = 0L
+    var highlightNodeAttached: Long = 0L
+    var shadowGeneric: Long = 0L
+    var shadowRectangle: Long = 0L
+    var shadowRounded: Long = 0L
+    var shadowCold: Long = 0L
+    var shadowKeyChanged: Long = 0L
+    var shadowNodeAttached: Long = 0L
 }

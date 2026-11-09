@@ -4205,7 +4205,13 @@ object KyantLauncherLens270 {
                                         "highlightRecorded=${cache116.highlightRecords} " +
                                         "highlightReused=${cache116.highlightReuses} " +
                                         "shadowRecorded=${cache116.shadowRecords} " +
-                                        "shadowReused=${cache116.shadowReuses}")
+                                        "shadowReused=${cache116.shadowReuses} " +
+                                        "hRect=${cache116.highlightRectangle} hRounded=${cache116.highlightRounded} " +
+                                        "hGeneric=${cache116.highlightGeneric} hCold=${cache116.highlightCold} " +
+                                        "hKeyChanged=${cache116.highlightKeyChanged} hNodeAttach=${cache116.highlightNodeAttached} " +
+                                        "sRect=${cache116.shadowRectangle} sRounded=${cache116.shadowRounded} " +
+                                        "sGeneric=${cache116.shadowGeneric} sCold=${cache116.shadowCold} " +
+                                        "sKeyChanged=${cache116.shadowKeyChanged} sNodeAttach=${cache116.shadowNodeAttached}")
                                 }
                             }
                             if (num288110 == 0L || num288110 % 240L == 0L) {

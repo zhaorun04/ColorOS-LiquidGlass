@@ -104,11 +104,26 @@ internal class ShadowNode(
             shadowLayer.blendMode = shadow.blendMode
             // Preserve live mask updates for mutable/custom paths and any
             // changed outline, density, shadow style, or target size.
+            // V288.116.1: observe outline type without relaxing cache safety.
+            if (StaticLayerRecordReuse288116.enabled) {
+                when (outline) {
+                    is Outline.Rectangle -> StaticLayerRecordReuse288116.shadowRectangle++
+                    is Outline.Rounded -> StaticLayerRecordReuse288116.shadowRounded++
+                    else -> StaticLayerRecordReuse288116.shadowGeneric++
+                }
+            }
             val cacheable = outline is Outline.Rectangle || outline is Outline.Rounded
             val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
                 RecordedShadowKey(shadowSize, size, density.density, density.fontScale,
                     layoutDirection, outline, shadow)
             } else null
+            if (StaticLayerRecordReuse288116.enabled && key != null) {
+                if (lastRecordedShadow == null) {
+                    StaticLayerRecordReuse288116.shadowCold++
+                } else if (key != lastRecordedShadow) {
+                    StaticLayerRecordReuse288116.shadowKeyChanged++
+                }
+            }
             if (key == null || key != lastRecordedShadow) {
                 configurePaint(shadow)
                 shadowLayer.record(shadowSize) {
@@ -135,6 +150,7 @@ internal class ShadowNode(
     }
 
     override fun onAttach() {
+        if (StaticLayerRecordReuse288116.enabled) StaticLayerRecordReuse288116.shadowNodeAttached++
         val graphicsContext = requireGraphicsContext()
         shadowLayer =
             graphicsContext.createGraphicsLayer().apply {
