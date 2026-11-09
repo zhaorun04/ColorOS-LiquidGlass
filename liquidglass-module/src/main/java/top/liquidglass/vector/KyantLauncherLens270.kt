@@ -2380,6 +2380,7 @@ object KyantLauncherLens270 {
                 { nativeCarrierDrawPosition28876(frame, glassScreenPosition(lastBounds)) },
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
+                reboundFrameAb28891, reboundFrame28891,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3292,6 +3293,8 @@ object KyantLauncherLens270 {
         bridgeFront28875: androidx.compose.runtime.State<Bitmap?>,
         bridgeFrontGen28875: androidx.compose.runtime.State<Long>,
         bridgeFrontPosition28875: androidx.compose.runtime.State<Offset?>,
+        reboundFrameAb28891: Int,
+        reboundFrame28891: androidx.compose.runtime.State<BridgeFrame28891?>,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3758,7 +3761,7 @@ object KyantLauncherLens270 {
                     val releaseAge91 = SystemClock.elapsedRealtimeNanos() - releaseNs28820.get()
                     val useFrame91 = frame91 != null && frameAge91 in 0L..50_000_000L &&
                         releaseAge91 in 0L..650_000_000L && releaseDx28820 > 0f &&
-                        frame91.referenceIdentity == System.identityHashCode(referenceState28832.value)
+                        frame91.referenceIdentity == System.identityHashCode(reference)
                     val selectedBitmap91 = if (useFrame91) frame91!!.bitmap else visibleBridge75
                     val selectedPos91 = if (useFrame91) frame91!!.position else visiblePosition75
                     val dx91 = if (selectedPos91 != null) drawPosition.x - selectedPos91.x else 0f

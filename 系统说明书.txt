@@ -1,3 +1,8 @@
+V1.9.205.288.91.1｜Kyant 回弹帧参数作用域编译修正版
+
+修复：LensContent270 显式接收 reboundFrameAb28891、reboundFrame28891；使用当前 reference 进行帧来源身份校验。未改变实验算法及默认关闭逻辑。
+注意：尚未执行 Gradle 编译与真机验证。
+
 ColorOS-LiquidGlass V1.9.205.288.91｜回弹桥接位图—坐标绑定 A/B 实验版
 
 基于 V288.90；新增默认关闭的实验开关，不更改 Kyant 光学 Shader、Dock、三参数 UI/SharedPreferences/Root/Launcher 原映射。
