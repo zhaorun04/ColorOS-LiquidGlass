@@ -100,6 +100,31 @@ object KyantLauncherLens270 {
         val screenWidth: Int, val screenHeight: Int, val scaleX: Float, val scaleY: Float,
         val sourceMatrixTx: Float, val sourceMatrixTy: Float, val path: String
     )
+    // V288.93: aggregate only diagnostic observations from the same release and
+    // 50ms time bucket. This is NOT a verified screen-space or GPU-frame offset.
+    private data class HostGap28893(val host: Int, val x: Float, val atNs: Long)
+    private val commonGaps28893 = ConcurrentHashMap<String, MutableMap<Int, HostGap28893>>()
+    private fun observeCommonGap28893(seq: Long, host: Int, elapsedNs: Long,
+                                      x: Float, enabled: Boolean) {
+        if (!enabled || !x.isFinite()) return
+        val bucket = elapsedNs / 50_000_000L
+        val key = "$seq:$bucket"
+        val group = commonGaps28893.getOrPut(key) { ConcurrentHashMap<Int, HostGap28893>() }
+        group[host] = HostGap28893(host, x, elapsedNs)
+        if (group.size == 3) {
+            val values = group.values.toList()
+            val min = values.minOf { it.x }
+            val max = values.maxOf { it.x }
+            val timeSpanMs = (values.maxOf { it.atNs } - values.minOf { it.atNs }) / 1_000_000f
+            XposedBridge.log("KYANT28893_COMMON seq=$seq bucket=$bucket hosts=${values.map { it.host }} " +
+                "minGap=$min maxGap=$max spread=${max - min} spanMs=$timeSpanMs " +
+                "sameGap=${max-min <= 1.5f}")
+        }
+        // Limit retained aggregation to current and prior release time buckets.
+        if (commonGaps28893.size > 80) {
+            commonGaps28893.keys.removeAll { it != key && !it.startsWith("$seq:") }
+        }
+    }
     // V288.21: isolated trace of release BEFORE and AFTER actual OEM touch handling.
     // The rendering pipeline remains identical to V288.19 mode 2.
     private const val RELEASE_TRACE_28821_KEY = "liquidglass_kyant_release_trace_28821"
@@ -112,6 +137,7 @@ object KyantLauncherLens270 {
     @Volatile private var touchDownY28820 = Float.NaN
     @Volatile private var lastTouchEventKey28820 = ""
     @Volatile private var lastTouchDownKey28821 = ""
+    @Volatile private var gestureDownSerial28893 = 0L
     @Volatile private var releaseBeforeVia28821 = ""
     @Volatile private var releaseAfterKey28821 = ""
     @Volatile private var activeTouchRoot28820: WeakReference<View>? = null
@@ -157,6 +183,10 @@ object KyantLauncherLens270 {
         if (action == MotionEvent.ACTION_DOWN) {
             if (phase == "BEFORE" && eventKey != lastTouchDownKey28821) {
                 lastTouchDownKey28821 = eventKey
+                gestureDownSerial28893++
+                XposedBridge.log("KYANT28893_TOUCH_DOWN downSerial=$gestureDownSerial28893 " +
+                    "priorRelease=${releaseSeq28820.get()} eventMs=${event.eventTime} " +
+                    "rawX=${event.rawX} rawY=${event.rawY} via=$method")
                 touchDownX28820 = event.rawX
                 touchDownY28820 = event.rawY
             }
@@ -174,6 +204,8 @@ object KyantLauncherLens270 {
             selectedHostIds28821 = selectVisibleHosts28821()
             releaseNs28820.set(SystemClock.elapsedRealtimeNanos())
             val serial = releaseSeq28820.incrementAndGet()
+            XposedBridge.log("KYANT28893_TOUCH_END seq=$serial downSerial=$gestureDownSerial28893 " +
+                "action=$releaseAction28820 dx=$dx dy=$dy eventMs=${event.eventTime} via=$method")
             XposedBridge.log("KYANT28821_TOUCH_RELEASE seq=$serial action=$releaseAction28820 " +
                 "dx=$dx dy=$dy rawX=${event.rawX} rawY=${event.rawY} eventMs=${event.eventTime} via=$method")
             releaseSnapshot28821("BEFORE", serial, method)
@@ -1234,7 +1266,14 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_coordinate_trace_28892", 0) == 1
         } catch (_: Throwable) { false }
+        val timelineTrace28893 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_timeline_trace_28893", 0) == 1
+        } catch (_: Throwable) { false }
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
+        if (timelineTrace28893) XposedBridge.log("KYANT28893_HOST host=$trace28815Host " +
+            "timeline=1 coordinateTrace=$coordinateTrace28892 carrier=$nativeCarrierAb28869 " +
+            "pipeline=$pipelineMode28819")
         if (coordinateTrace28892) XposedBridge.log(
             "KYANT28892_HOST host=$trace28815Host trace=1 carrier=$nativeCarrierAb28869 " +
             "pipeline=$pipelineMode28819 fusion=$fusionMode28889 " +
@@ -1735,13 +1774,13 @@ object KyantLauncherLens270 {
                 target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
             }
             val gen = bridgeDrawCount.incrementAndGet()
-            if (coordinateTrace28892) bridgeCoordinate28892.set(BridgeCoordinate28892(
+            if (coordinateTrace28892 || timelineTrace28893) bridgeCoordinate28892.set(BridgeCoordinate28892(
                 gen, SystemClock.elapsedRealtimeNanos(), pos,
                 System.identityHashCode(activeReference), activeReference.width, activeReference.height,
                 sw, sh, sx, sy, -pos.x, -pos.y,
                 if (fusionMode28889 == 1) "shader" else if (affineUsed28892) "affine" else "rect"
             ))
-            if (reboundTrace28890) bridgeSample28890.set(BridgeSample28890(
+            if (reboundTrace28890 || timelineTrace28893) bridgeSample28890.set(BridgeSample28890(
                 gen, SystemClock.elapsedRealtimeNanos(), pos,
                 System.identityHashCode(activeReference)))
             if (fusionMode28889 == 1 && fusionTrace28889 && (gen <= 2L || gen % 180L == 0L))
@@ -2406,7 +2445,7 @@ object KyantLauncherLens270 {
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891,
-                coordinateTrace28892, bridgeCoordinate28892,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3166,7 +3205,7 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
-                    if (reboundTrace28890) {
+                    if (reboundTrace28890 || timelineTrace28893) {
                         val now90 = SystemClock.elapsedRealtimeNanos()
                         val releaseSeq90 = releaseSeq28820.get()
                         predrawSerial28890++
@@ -3186,7 +3225,7 @@ object KyantLauncherLens270 {
                         // No every-frame logging. At most 9 events per host,
                         // with a minimum 45ms spacing; records include real source
                         // and host observations but cannot establish GPU display time.
-                        if (relevant90 && predrawLogBudget28890 < 9 &&
+                        if (reboundTrace28890 && relevant90 && predrawLogBudget28890 < 9 &&
                             now90 - lastPredrawLogNs28890 >= 45_000_000L &&
                             trace28815Host in selectedHostIds28821) {
                             predrawLogBudget28890++
@@ -3323,6 +3362,7 @@ object KyantLauncherLens270 {
         reboundFrame28891: androidx.compose.runtime.State<BridgeFrame28891?>,
         coordinateTrace28892: Boolean,
         bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
+        timelineTrace28893: Boolean,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3344,6 +3384,8 @@ object KyantLauncherLens270 {
         val reboundLogState28890 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
         // [release sequence, last log timestamp, samples]; no composition mutation.
         val coordinateLogState28892 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
+        val timelineLogState28893 = androidx.compose.runtime.remember { longArrayOf(-1L, 0L, 0L) }
+        val previousGap28893 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -3858,6 +3900,60 @@ object KyantLauncherLens270 {
                                 "refMatch=${diag92?.referenceIdentity == System.identityHashCode(reference)} " +
                                 "predrawX=${pre92?.pos?.x} " +
                                 "sourceBitmap=${if (selectedBitmap91 != null) System.identityHashCode(selectedBitmap91) else -1}")
+                        }
+                    }
+                    // V288.93: independent read-only timeline. Do not infer actual GPU
+                    // presentation timing from these UI-thread callback timestamps.
+                    if (timelineTrace28893 && nativeCarrierAb28869 == 1 &&
+                        pipelineMode28819 == 2) {
+                        val now93 = SystemClock.elapsedRealtimeNanos()
+                        val seq93 = releaseSeq28820.get()
+                        val sinceRelease93 = now93 - releaseNs28820.get()
+                        val currentBucket93 = sinceRelease93 / 50_000_000L
+                        if (timelineLogState28893[0] != seq93) {
+                            timelineLogState28893[0] = seq93
+                            timelineLogState28893[1] = 0L
+                            timelineLogState28893[2] = 0L
+                            previousGap28893[0] = Float.NaN
+                            previousGap28893[1] = Float.NaN
+                        }
+                        val eligible93 = seq93 > 0L && releaseDx28820 > 0f &&
+                            sinceRelease93 in 0L..950_000_000L &&
+                            try { visibleSource28867() } catch (_: Throwable) { false }
+                        if (eligible93 && timelineLogState28893[2] < 18L &&
+                            now93 - timelineLogState28893[1] >= 40_000_000L) {
+                            timelineLogState28893[1] = now93
+                            timelineLogState28893[2]++
+                            val bridge93 = bridgeCoordinate28892.get()
+                            val pre93 = predrawSample28890.get()
+                            val live93 = bridgeSample28890.get()
+                            val gap93 = bridge93?.let { drawPosition.x-it.position.x }
+                            val gapY93 = bridge93?.let { drawPosition.y-it.position.y }
+                            val preAge93 = pre93?.let { (now93-it.atNs)/1_000_000f }
+                            val bridgeAge93 = bridge93?.let { (now93-it.atNs)/1_000_000f }
+                            val sampleAge93 = live93?.let { (now93-it.atNs)/1_000_000f }
+                            val ws93 = activeTouchWorkspace28820?.get()
+                            XposedBridge.log("KYANT28893_TIMELINE host=$traceHost28890 release=$seq93 " +
+                                "releaseAgeMs=${sinceRelease93/1_000_000f} bucket=$currentBucket93 " +
+                                "downSerial=$gestureDownSerial28893 " +
+                                "drawX=${drawPosition.x} bridgeX=${bridge93?.position?.x} " +
+                                "gapX=$gap93 gapY=$gapY93 " +
+                                "previousGapX=${previousGap28893[0]} " +
+                                "gapStepX=${gap93?.let { if (previousGap28893[0].isFinite()) it-previousGap28893[0] else Float.NaN }} " +
+                                "frameSelected=$useFrame91 chosenGen=${frame91?.generation} " +
+                                "bridgeGen=${bridge93?.generation} " +
+                                "predrawSeq=${pre93?.serial} predrawRelease=${pre93?.releaseSeq} " +
+                                "predrawX=${pre93?.pos?.x} predrawAgeMs=$preAge93 " +
+                                "bridgeAgeMs=$bridgeAge93 sampledAgeMs=$sampleAge93 " +
+                                "workspaceX=${ws93?.x} workspaceTx=${ws93?.translationX} " +
+                                "workspaceScrollX=${ws93?.scrollX} " +
+                                "refMatch=${bridge93?.referenceIdentity == System.identityHashCode(reference)}")
+                            if (gap93 != null) {
+                                observeCommonGap28893(seq93, traceHost28890,
+                                    sinceRelease93, gap93, kotlin.math.abs(gap93) >= 0.5f)
+                                previousGap28893[0] = gap93
+                            }
+                            if (gapY93 != null) previousGap28893[1] = gapY93
                         }
                     }
                     if (bufferExperiment28875 && sourceDrawCount.get() % 24L == 0L)

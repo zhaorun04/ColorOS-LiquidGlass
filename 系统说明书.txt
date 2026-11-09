@@ -1,3 +1,33 @@
+V1.9.205.288.93｜Kyant 回弹位置跳变与绘制时间线只读诊断版
+
+基于 V1.9.205.288.92，保留原版光学、Dock、像素采样、Compose 渲染及 V288.91 的原有选择逻辑。
+本次仅增加日志关联，不做 116px 补偿，也不声称能直接读取 SurfaceFlinger GPU 最终呈现时间。
+
+新增独立开关（默认关闭，设置后需要重启 Launcher）：
+settings put global liquidglass_kyant_timeline_trace_28893 1
+
+标志：
+KYANT28893_HOST：确认新 Host 已读取独立开关
+KYANT28893_TOUCH_DOWN / TOUCH_END：新手势与旧 release 的关联
+KYANT28893_TIMELINE：按 Host 限频输出原始绘制坐标、桥接采样坐标、gap、上一条 gap、代际、预绘制年龄、工作区变换
+KYANT28893_COMMON：同一次 release 的 50ms 时间桶内，多个 Host 的 gap 是否接近；仅是回调时间聚类，不是 GPU 同帧证明
+
+建议采集：
+su -c 'logcat -c'
+（重新执行 3～5 次向右拖动松手动作）
+su -c 'logcat -d -v threadtime | grep -E "KYANT28893_|KYANT28892_COORD|KYANT28821_TOUCH_RELEASE" > /sdcard/Download/KYANT28893_完整诊断日志.txt'
+
+Termux：
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.93 版本"
+git push origin main
+
+编译状态：本地 Gradle wrapper 缺少离线分发包且无法下载，未能完成 APK 编译。需要 CI 验证。
+
+---
+以下为上一版系统说明与历史内容：
+
 V1.9.205.288.92｜Kyant 壁纸采样坐标系只读诊断版
 
 基于 V1.9.205.288.91.1。保留原来折射、Dock、Compose/Bitmap 采样和 A/B 功能，不调整绘制补偿阈值。
