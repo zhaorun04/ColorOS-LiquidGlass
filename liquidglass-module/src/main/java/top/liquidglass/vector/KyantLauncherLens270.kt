@@ -3946,7 +3946,7 @@ object KyantLauncherLens270 {
                     // No Bitmap replacement, no Compose state mutation, no extra
                     // sampling, no draw translation or extra invalidation.
                     if (dualMotionTrace28896 && nativeCarrierAb28869 == 1 &&
-                        pipelineMode28819 == 2) {
+                        (pipelineMode28819 == 2 || pipelineMode28819 == -1)) {
                         val now96 = SystemClock.elapsedRealtimeNanos()
                         val down96 = gestureDownSerial28893
                         val rel96 = releaseSeq28820.get()
