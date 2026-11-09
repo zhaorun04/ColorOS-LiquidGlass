@@ -1,3 +1,25 @@
+V1.9.205.288.92｜Kyant 壁纸采样坐标系只读诊断版
+
+基于 V1.9.205.288.91.1。保留原来折射、Dock、Compose/Bitmap 采样和 A/B 功能，不调整绘制补偿阈值。
+
+新增诊断开关（默认关闭）：
+settings put global liquidglass_kyant_coordinate_trace_28892 1
+需要重启 Launcher 重新创建 Host 以读取开关。
+
+原有 V288.91 开关：liquidglass_kyant_rebound_frame_ab_28891
+原生桥接键：liquidglass_kyant_native_carrier_ab_28869
+管线键：liquidglass_kyant_pipeline_ab_28819
+
+向右滑动后松手，采集：
+logcat -d -v threadtime | grep -E 'KYANT28892_(HOST|COORD)' | tail -120
+
+KYANT28892_COORD 仅在可见 Host、右滑松手后的 850ms 内采集，每 Host 每次松手最多12条且间隔不小于40ms。
+rawDraw 是绘制时未补偿的位置；bridgeSample 是桥接采样时的位置；chosenSample 是最终采用的帧坐标；appliedShift 是实际 Bitmap 绘制平移（屏幕像素）；path 是 rect/shader/affine 路径。
+sourceMatrixTx/Ty 是本项目源图->容器的平移，不是系统壁纸 SurfaceFlinger 的显示变换；本版不声称已测量 OEM 壁纸真实矩阵，也不保证完全 GPU 同帧。
+
+验证目标：定位用户观察的1～10px错位，区分动态时序/坐标系/基准壁纸变换。只增加诊断，不宣称已修复。
+
+原版本系统说明：
 V1.9.205.288.91.1｜Kyant 回弹帧参数作用域编译修正版
 
 修复：LensContent270 显式接收 reboundFrameAb28891、reboundFrame28891；使用当前 reference 进行帧来源身份校验。未改变实验算法及默认关闭逻辑。

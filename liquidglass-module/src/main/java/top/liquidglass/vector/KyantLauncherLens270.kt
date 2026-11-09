@@ -92,6 +92,14 @@ object KyantLauncherLens270 {
         val bitmap: Bitmap, val position: Offset, val generation: Long,
         val sampledAtNs: Long, val referenceIdentity: Int
     )
+    // V288.92: observational metadata only. Not a GPU presentation timestamp and
+    // not the OEM wallpaper Surface transform. Coordinates are screen/source pairs.
+    private data class BridgeCoordinate28892(
+        val generation: Long, val atNs: Long, val position: Offset,
+        val referenceIdentity: Int, val referenceWidth: Int, val referenceHeight: Int,
+        val screenWidth: Int, val screenHeight: Int, val scaleX: Float, val scaleY: Float,
+        val sourceMatrixTx: Float, val sourceMatrixTy: Float, val path: String
+    )
     // V288.21: isolated trace of release BEFORE and AFTER actual OEM touch handling.
     // The rendering pipeline remains identical to V288.19 mode 2.
     private const val RELEASE_TRACE_28821_KEY = "liquidglass_kyant_release_trace_28821"
@@ -1221,6 +1229,16 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_rebound_frame_ab_28891", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
+        // Disabled by default. Set before restarting Launcher to activate.
+        val coordinateTrace28892 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_coordinate_trace_28892", 0) == 1
+        } catch (_: Throwable) { false }
+        val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
+        if (coordinateTrace28892) XposedBridge.log(
+            "KYANT28892_HOST host=$trace28815Host trace=1 carrier=$nativeCarrierAb28869 " +
+            "pipeline=$pipelineMode28819 fusion=$fusionMode28889 " +
+            "display=${displayWidth}x${displayHeight} reference=${reference.width}x${reference.height}")
         val reboundFrame28891 = androidx.compose.runtime.mutableStateOf<BridgeFrame28891?>(null)
         var reboundCopyFailures28891 = 0
         if (reboundFrameAb28891 != 0) XposedBridge.log(
@@ -1693,6 +1711,7 @@ object KyantLauncherLens270 {
                 (activeReference.width - x) * bitmap.width / cropW.coerceAtLeast(.001f),
                 (activeReference.height - y) * bitmap.height / cropH.coerceAtLeast(.001f))
             target.drawColor(android.graphics.Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+            var affineUsed28892 = false
             if (fusionMode28889 == 1) {
                 if (fusionReference28889 !== activeReference || fusionShader28889 == null) {
                     fusionReference28889 = activeReference
@@ -1712,10 +1731,16 @@ object KyantLauncherLens270 {
                     fusionPaint28889)
                 fusionPaint28889.shader = null
             } else if (!(affineSampling28876 && carrier28876 != null &&
-                    drawAffineWallpaper28876(target, carrier28876, activeReference, "BRIDGE"))) {
+                    drawAffineWallpaper28876(target, carrier28876, activeReference, "BRIDGE").also { affineUsed28892 = it })) {
                 target.drawBitmap(activeReference, null, bridgeDst, bridgePaint)
             }
             val gen = bridgeDrawCount.incrementAndGet()
+            if (coordinateTrace28892) bridgeCoordinate28892.set(BridgeCoordinate28892(
+                gen, SystemClock.elapsedRealtimeNanos(), pos,
+                System.identityHashCode(activeReference), activeReference.width, activeReference.height,
+                sw, sh, sx, sy, -pos.x, -pos.y,
+                if (fusionMode28889 == 1) "shader" else if (affineUsed28892) "affine" else "rect"
+            ))
             if (reboundTrace28890) bridgeSample28890.set(BridgeSample28890(
                 gen, SystemClock.elapsedRealtimeNanos(), pos,
                 System.identityHashCode(activeReference)))
@@ -2381,6 +2406,7 @@ object KyantLauncherLens270 {
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891,
+                coordinateTrace28892, bridgeCoordinate28892,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3295,6 +3321,8 @@ object KyantLauncherLens270 {
         bridgeFrontPosition28875: androidx.compose.runtime.State<Offset?>,
         reboundFrameAb28891: Int,
         reboundFrame28891: androidx.compose.runtime.State<BridgeFrame28891?>,
+        coordinateTrace28892: Boolean,
+        bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3314,6 +3342,8 @@ object KyantLauncherLens270 {
         val frozenSource = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicReference<Offset?>(null) }
         val sourceDrawCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val reboundLogState28890 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
+        // [release sequence, last log timestamp, samples]; no composition mutation.
+        val coordinateLogState28892 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -3781,6 +3811,55 @@ object KyantLauncherLens270 {
                         "gen=${frame91?.generation} drawX=${drawPosition.x} sampleX=${selectedPos91?.x} " +
                         "deltaX=$dx91 deltaY=$dy91 compensated=$compensate91 " +
                         "ageMs=${if (frameAge91 >= 0L && frameAge91 < 1_000_000_000L) frameAge91/1_000_000f else -1f}")
+                    // V288.92: report raw (pre-compensation) positions alongside the
+                    // chosen bitmap/position. Only visible hosts during rebound; ≤12
+                    // messages per host/release, spaced by at least 40 ms.
+                    if (coordinateTrace28892 && nativeCarrierAb28869 == 1 &&
+                        pipelineMode28819 == 2) {
+                        val diagNow92 = SystemClock.elapsedRealtimeNanos()
+                        val seq92 = releaseSeq28820.get()
+                        val relAge92 = diagNow92 - releaseNs28820.get()
+                        if (coordinateLogState28892[0] != seq92) {
+                            coordinateLogState28892[0] = seq92
+                            coordinateLogState28892[1] = 0L
+                            coordinateLogState28892[2] = 0L
+                        }
+                        val visible92 = try { visibleSource28867() } catch (_: Throwable) { false }
+                        if (visible92 && seq92 > 0L && releaseDx28820 > 0f &&
+                            relAge92 in 0L..850_000_000L &&
+                            coordinateLogState28892[2] < 12L &&
+                            diagNow92 - coordinateLogState28892[1] >= 40_000_000L) {
+                            coordinateLogState28892[1] = diagNow92
+                            coordinateLogState28892[2]++
+                            val diag92 = bridgeCoordinate28892.get()
+                            val age92 = if (diag92 != null) (diagNow92 - diag92.atNs)/1_000_000f else -1f
+                            val pre92 = predrawSample28890.get()
+                            val chosenX92 = selectedPos91?.x
+                            val chosenY92 = selectedPos91?.y
+                            val appliedX92 = if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f
+                            val appliedY92 = if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f
+                            // This is the source-image local matrix, NOT the OEM live wallpaper matrix.
+                            XposedBridge.log("KYANT28892_COORD host=$traceHost28890 release=$seq92 " +
+                                "releaseAgeMs=${relAge92/1_000_000f} visible=$visible92 " +
+                                "rawDrawX=${drawPosition.x} rawDrawY=${drawPosition.y} " +
+                                "bridgeSampleX=${diag92?.position?.x} bridgeSampleY=${diag92?.position?.y} " +
+                                "chosenSampleX=$chosenX92 chosenSampleY=$chosenY92 " +
+                                "rawGapX=${diag92?.let { drawPosition.x-it.position.x }} " +
+                                "rawGapY=${diag92?.let { drawPosition.y-it.position.y }} " +
+                                "appliedShiftX=$appliedX92 appliedShiftY=$appliedY92 " +
+                                "frameSelected=$useFrame91 frameGen=${frame91?.generation} " +
+                                "bridgeGen=${diag92?.generation} bridgeAgeMs=$age92 " +
+                                "path=${diag92?.path} sourceMatrixTx=${diag92?.sourceMatrixTx} " +
+                                "sourceMatrixTy=${diag92?.sourceMatrixTy} " +
+                                "sourceScaleX=${diag92?.scaleX} sourceScaleY=${diag92?.scaleY} " +
+                                "drawScaleX=$scaleX drawScaleY=$scaleY " +
+                                "screen=${diag92?.screenWidth}x${diag92?.screenHeight} " +
+                                "ref=${diag92?.referenceWidth}x${diag92?.referenceHeight} " +
+                                "refMatch=${diag92?.referenceIdentity == System.identityHashCode(reference)} " +
+                                "predrawX=${pre92?.pos?.x} " +
+                                "sourceBitmap=${if (selectedBitmap91 != null) System.identityHashCode(selectedBitmap91) else -1}")
+                        }
+                    }
                     if (bufferExperiment28875 && sourceDrawCount.get() % 24L == 0L)
                         XposedBridge.log("KYANT28875_BUFFER_CONSUME gen=$visibleGen75 " +
                             "front=${System.identityHashCode(visibleBridge75)} " +
