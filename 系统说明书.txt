@@ -1,15 +1,22 @@
-ColorOS-LiquidGlass V1.9.205.288.104｜可见 Host 与 Workspace 坐标基准诊断版
+ColorOS-LiquidGlass V1.9.205.288.105｜文件夹容器与玻璃绘制层隔离诊断版
 
-基线：V1.9.205.288.103。保留 V288.102 起的零复制绘制路径，V288.101 的高频 Bitmap.copy() 实验继续强制停用；不修改 Shader、二维折射、模糊、高光和 Dock 外观。
+基础：V1.9.205.288.104。实验仅用于已启用 Kyant Compose 引擎、处于 FolderIcon 内部的文件夹玻璃，不触及 Dock。正常模式 0 完全保留既有绘制和光学参数。
 
-用途：V288.103 已观察到 Bridge-PreDraw 位置差与 Workspace.scrollX 差值高度吻合，但这可能来自同一套位置计算公式。本版验证 Host 的真实全局可见矩形、屏幕坐标、Workspace 视图屏幕位置与各回调采样位置之间的关系，区分回弹时间差、离屏和额外变换。可见矩形仅用于诊断，并非 SurfaceFlinger 实际显示帧证明。
+实验开关：
+- liquidglass_kyant_solid_folder_ab_288105 = 0（默认；原有玻璃效果）
+- liquidglass_kyant_solid_folder_ab_288105 = 1（仅文件夹：固定灰蓝色圆角画布；不使用 Kyant backdrop / lens / blur / highlight 和壁纸 Bitmap 绘制；桥接壁纸采样函数直接返回）
+修改开关后重新加载 Launcher 或重启手机。实验模式会暂时隐藏正常玻璃效果，是预期行为；切回 0 后恢复。勿清除配置。
 
-开关：liquidglass_kyant_coordinate_basis_trace_288104=0（默认关闭）/1（开启）。启用时自动打开 V288.102 的时间戳采集；设置后需要重新加载 Launcher。新日志：KYANT288104_HOST、KYANT288104_BASIS、KYANT288104_TRACE_ERROR。日志限流沿用 V288.102 的每 Host 120ms 一条，因此不会覆盖每个显示帧。
+实验限制：
+- 模式 1 的固定画布保留同一个 FolderIcon 注入父级、ComposeView、布局位置、裁剪圆角和 OEM Workspace 手势动画。
+- 不会修改 Dock，也不改变 UI / SharedPreferences / Root 快照的任何现有参数映射。
+- 由于模式 1 不消费 Bitmap 与光学材质，它可以隔离“整个文件夹容器/渲染层跳动”和“壁纸采样纹理跳动”；但若两者恰好同动，单凭目视仍不能判定最终 SurfaceFlinger 是否跳帧。
+- 只读日志：KYANT288105_HOST / KYANT288105_COMPOSITION_OK / KYANT288105_SOLID，SOLID 每个 Host 限流约 150ms；不是完整 GPU 帧时间序列。
 
-BASIS 分类：OFFSCREEN、CROSS_GESTURE、MISSING_COORDINATE、INVALID_COORDINATE、EXTRA_TRANSFORM、COMPOSE_AFTER_PREDRAW、WORKSPACE_SCROLL_ALIGNED。bridgePredictionError 是按两个回调 Workspace.scrollX 差值推算的位置预测误差，不是实际 GPU 视觉错位；本版不对它作渲染补偿。
+测试顺序：
+1. 确认 LSPosed Vector 已勾选系统桌面作用域，安装后正常模式 0，确保光学效果仍正常。
+2. 执行：su -c 'settings put global liquidglass_kyant_bridge_pair_ab_288101 0; settings put global liquidglass_kyant_sample_sync_ab_28898 0; settings put global liquidglass_kyant_solid_folder_ab_288105 1'
+3. 重新加载 Launcher；文件夹应呈灰蓝色实心圆角平面，无壁纸纹理。测试左右轻滑不翻页的归位及快速右滑起始闪动，注意文件夹外轮廓是否仍抖动。导出 Vector 模块日志。
+4. 恢复：su -c 'settings put global liquidglass_kyant_solid_folder_ab_288105 0' 然后重新加载 Launcher。
 
-真机执行：
-su -c 'settings put global liquidglass_kyant_bridge_pair_ab_288101 0; settings put global liquidglass_kyant_sample_sync_ab_28898 0; settings put global liquidglass_kyant_coordinate_basis_trace_288104 1'
-确认 LSPosed Vector 作用域中勾选系统桌面，重新加载 Launcher，分别测试左滑不翻页归位、右滑不翻页归位、快速右滑起始闪动，并导出 Vector 模块日志。若日志过多或性能受到影响，将上述诊断开关设为 0 后重新加载 Launcher。
-
-当前只做第一阶段只读验证，不直接开启零复制同步 A/B。此前 V288.98 的坐标偏移未改善、V288.101 的复制帧显著恶化，未经可靠坐标系验证前不再直接替换采样位置。版本号与源码一起更新。本机 Gradle 编译若不可用，须以 GitHub Actions CI 结果为准。
+开发状态：ZIP 已打包并进行结构静态校验。Android Gradle / Kotlin 编译与真机效果需进一步验证，不能据此保证编译与实际性能。

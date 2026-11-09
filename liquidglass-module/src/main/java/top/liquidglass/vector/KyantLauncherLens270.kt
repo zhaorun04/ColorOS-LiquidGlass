@@ -428,6 +428,16 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_folder_containment_28886", 1) != 0
         } catch (_: Throwable) { true }
+        // V288.105: static-color host/Compose isolation experiment. Never enable
+        // on root overlays or alternate native engines. Defaults to mode 0.
+        val solidFolderAb288105 = if (folderContainment28886 && selectedEngine28888 == 0) try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_solid_folder_ab_288105", 0) == 1
+        } catch (_: Throwable) { false } else false
+        if (solidFolderAb288105) XposedBridge.log(
+            "KYANT288105_HOST host=${System.identityHashCode(anchor)} mode=1 " +
+            "folderContained=$folderContainment28886 engine=$selectedEngine28888 " +
+            "noOpticalComposition=true bridgeSampleDisabled=true")
         XposedBridge.log("KYANT28886_CONTAINMENT host=${System.identityHashCode(anchor)} " +
             "enabled=$folderContainment28886 parent=FOLDER_CHILD_INDEX_0 " +
             "rootOverlayAllowed=${!folderContainment28886}")
@@ -1876,6 +1886,8 @@ object KyantLauncherLens270 {
         val bridgeExtraCanvas28875 = bridgeExtraBitmap28875?.let { Canvas(it) }
         var bridgeLastReference28875: Bitmap? = null
         fun sampleBridgeAt(pos: Offset, carrier28876: View? = null) {
+            // V288.105: a truly flat reference requires no bridge wallpaper sampling.
+            if (solidFolderAb288105) return
             val bitmap = if (bufferExperiment28875) bridgeBack28875 else bridgeBitmap
             if (bitmap == null) return
             val target = if (bufferExperiment28875) {
@@ -2633,6 +2645,37 @@ object KyantLauncherLens270 {
                         if (v230NativeMode28887 != 0) XposedBridge.log(
                             "KYANT28888_COMPOSE_OPTICS_SKIPPED host=$trace28815Host " +
                             "nativeMode=$v230NativeMode28887 alpha=${compose.alpha}")
+                    }
+                } else if (solidFolderAb288105) {
+                    // V288.105 mode 1: draw one *constant* color in the original
+                    // ComposeView hosted at FolderIcon child index 0. The normal
+                    // frame geometry, rounded clip, and OEM page/gesture animation
+                    // remain untouched. No Kyant backdrop/shader/Bitmap consumer.
+                    val solidRadiusDp105 = (sampleRadiusPx.floatValue /
+                        anchor.resources.displayMetrics.density.coerceAtLeast(0.1f)).dp
+                    val solidTrace105 = androidx.compose.runtime.remember {
+                        longArrayOf(0L, 0L, 0L) // last log ns, last draw ns, draw count
+                    }
+                    ComposeCanvas(Modifier.fillMaxSize().clip(RoundedCornerShape(solidRadiusDp105))) {
+                        // Keep the baseline screenPosition read in draw phase, to
+                        // retain identical position-state invalidation behavior.
+                        val sourcePos105 = samplePosition.value
+                        drawRect(color = androidx.compose.ui.graphics.Color(0xFF657889))
+                        val now105 = SystemClock.elapsedRealtimeNanos()
+                        solidTrace105[2]++
+                        if (now105 - solidTrace105[0] >= 150_000_000L) {
+                            val prev105 = solidTrace105[1]
+                            solidTrace105[0] = now105
+                            XposedBridge.log("KYANT288105_SOLID host=$trace28815Host " +
+                                "draws=${solidTrace105[2]} x=${sourcePos105.x} y=${sourcePos105.y} " +
+                                "gapMs=${if (prev105 > 0L) (now105 - prev105)/1_000_000f else -1f} " +
+                                "w=${size.width} h=${size.height} mode=1")
+                        }
+                        solidTrace105[1] = now105
+                    }
+                    androidx.compose.runtime.SideEffect {
+                        if (compositionSeen.compareAndSet(false, true))
+                            XposedBridge.log("KYANT288105_COMPOSITION_OK host=$trace28815Host")
                     }
                 } else {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
