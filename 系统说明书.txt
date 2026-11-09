@@ -1,25 +1,29 @@
-ColorOS-LiquidGlass V1.9.205.288.97｜回弹采样坐标同步验证版
+ColorOS-LiquidGlass V1.9.205.288.98｜回弹采样坐标 A/B 验证版
 
-基线：V1.9.205.288.96.1。保留原有光学渲染，不修改 Shader、Bitmap 采样、绘图平移、Dock、文件夹轮廓与参数映射。
+基线：V1.9.205.288.97。仅在原有 BRIDGE Bitmap 绘制处加入可关闭的平移实验。默认模式 0 保持 V288.97 视觉与 drawBitmap 位移完全一致。没有改动二维曲面折射 Shader、模糊、高光、Dock、文件夹几何或参数键的原有含义。
 
-本版仅新增只读 KYANT28897_FINAL 诊断，用来判断 V288.96 的 drawX 与 bridgeX 差异是否进入最终位图采样。
+核心开关：Settings.Global liquidglass_kyant_sample_sync_ab_28898，Host 创建时读取；修改后需重新加载 Launcher。
+模式 0：原样绘制，不实验（出厂默认，安全回退）。
+模式 1：仅松手后的 850ms 回弹窗口对 BRIDGE 源做小幅横纵平移。
+模式 2：模式 1 + 手指按下后前 150ms；仅模式 1 真机验证正常后测试。
 
-诊断入口：Settings.Global liquidglass_kyant_final_sample_trace_28897；默认 0，开启为 1。Launcher 创建 Host 时读取开关，修改后请重新加载 Launcher。
+为防止偏移、错位和闪动放大：实验必须同时满足未使用 V288.91/V288.74 原补偿、Bitmap 与发布位置存在、发布元数据年龄 0~50ms、当前参考 Bitmap 一致、采样位置与桥接位置差<=1.5px、X/Y 差各<=24px。超出阈值（包括 71px）跳过，不改变任何东西。仅调整现有 Bitmap 的 drawBitmap 平移，不重新生成源图、不变更 Shader。注意：位置信息吻合不等于验证了 Bitmap 实际像素的生成时间，因此这仍是受控验证而非确定修复。
 
-日志在 LSPosed Vector 模块日志内，由 XposedBridge.log 输出。KYANT28897_HOST 表示 Host 读到开关；KYANT28897_FINAL 在触摸前 150ms 或松手后 850ms 可见时出现。日志对每一触摸/松手周期限流。
+XposedBridge/Vector 日志：KYANT28898_HOST 表示 Host 读取了实验模式；KYANT28898_SYNC 含 phase、gapX/Y、tx/ty、effectiveX、residualX、reason、applied、bridgeAgeMs、bridgeGen。reason: APPLIED / LARGE_GAP / UNVERIFIED_SOURCE / LEGACY_COMPENSATION / NO_BITMAP / INVALID_POSITION / SUBPIXEL。40ms 限流，日志保存在 Vector 模块日志（未必在 Android logcat）。若当前管线未使用 BRIDGE 路径则不会产生 SYNC。
 
-关键公式：原始 drawBitmap 源在局部 translationX 平移后，容器 x=0 对应 selectedPos.x-translationX。effectiveX 为这一推算的壁纸全局原点；residualX=drawX-effectiveX。此值仅是 CPU 采样/坐标估计，不能直接证明最终 SurfaceFlinger 合成画面的像素差。
+使用前：确保 Vector 已开启模块并勾选系统桌面作用域。先设置模式0并重新加载 Launcher 确认文件夹和 Dock 正常。再设置模式1重载 Launcher，分别慢速左右滑不翻页归位。只有模式1无光学回归时才可以使用模式2测试快速右滑起始闪动。
 
-启动：su -c 'settings put global liquidglass_kyant_final_sample_trace_28897 1'，再重新加载 Launcher。保持原有 pipeline 与光学设置不变。
+命令：
+su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 0'  # 关闭
+su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 1'  # 回弹
+su -c 'settings put global liquidglass_kyant_sample_sync_ab_28898 2'  # 起始+回弹
 
-导出：打开 Vector 模块日志导出文件，查找 KYANT28897_HOST / KYANT28897_FINAL。Android logcat 可能不包含 XposedBridge.log。
-
-注意：Vector 作用域必须勾选系统桌面，否则模块无任何光学效果或诊断。
+禁止用修改 pipeline 模式来强制进入实验；保持当前稳定模式。
 
 Git：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.97 版本"
+git commit -m "V1.9.205.288.98 版本"
 git push origin main
 
-编译：该包仅完成静态源码检查，尚未在本环境运行 Android SDK/Gradle 编译与真实设备验证。
+编译验证：已做静态结构检查，当前容器没有 Android SDK/Gradle 编译环境；需要 GitHub Actions 编译与真机验证。

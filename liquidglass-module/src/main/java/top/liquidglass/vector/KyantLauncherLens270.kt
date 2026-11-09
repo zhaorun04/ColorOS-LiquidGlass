@@ -1301,6 +1301,14 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_final_sample_trace_28897", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.98: bounded A/B of source-coordinate translation only; 0 is identical to V288.97.
+        val sampleSyncAb28898 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_sample_sync_ab_28898", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 }
+        if (sampleSyncAb28898 > 0) XposedBridge.log("KYANT28898_HOST host=$trace28815Host " +
+            "mode=$sampleSyncAb28898 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
         val bridgeCoordinate28892 = java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>(null)
         if (finalSampleTrace28897) XposedBridge.log("KYANT28897_HOST host=$trace28815Host " +
             "trace=1 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
@@ -2501,7 +2509,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3424,6 +3432,7 @@ object KyantLauncherLens270 {
         timelineTrace28893: Boolean,
         dualMotionTrace28896: Boolean,
         finalSampleTrace28897: Boolean,
+        sampleSyncAb28898: Int,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
         lifecycleProbe28864: Boolean, drawProbe28865: Boolean,
@@ -3452,6 +3461,8 @@ object KyantLauncherLens270 {
         val dualTraceState28896 = androidx.compose.runtime.remember { longArrayOf(-1L, -1L, 0L, 0L) }
         // [last down serial, last release serial, last trace time, samples]
         val finalTraceState28897 = androidx.compose.runtime.remember { longArrayOf(-1L, -1L, 0L, 0L) }
+        // [last diagnostic time, draws in current host]. Kept out of Compose State.
+        val syncTraceState28898 = androidx.compose.runtime.remember { longArrayOf(0L, 0L) }
         val previousGap28893 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
         val sourceLastDrawNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val drawCadenceWindowNs = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
@@ -3949,10 +3960,75 @@ object KyantLauncherLens270 {
                     // and caused all glass effects to disappear on device. Keep the
                     // original selected paired/bridge raster source in every mode.
                     // direct95 is now *candidate only* and never changes rendering.
+                    // V288.98: A/B ONLY on the existing BRIDGE bitmap, not Shader or wallpaper source.
+                    // Mode 0 uses the precise V288.97 draw offsets. Modes 1/2 change only the
+                    // small residual when neither legacy compensator is active. Never resample,
+                    // mutate state, replace the bitmap or jump across a new gesture.
+                    val originalTx98 = if (compensate91) -dx91 else
+                        if (canShift74 && !useFrame91) -lagX74 else 0f
+                    val originalTy98 = if (compensate91) -dy91 else
+                        if (canShift74 && !useFrame91) -lagY74 else 0f
+                    val now98 = if (sampleSyncAb28898 > 0) SystemClock.elapsedRealtimeNanos() else 0L
+                    val startAge98 = now98 - touchDownNs28896
+                    val releaseAge98 = now98 - releaseNs28820.get()
+                    val inTouchStart98 = touchActive28894 &&
+                        startAge98 in 0L..150_000_000L
+                    val inRebound98 = !touchActive28894 && releaseSeq28820.get() > 0L &&
+                        releaseAge98 in 0L..850_000_000L
+                    val experimentWindow98 = sampleSyncAb28898 > 0 &&
+                        (inRebound98 || (sampleSyncAb28898 == 2 && inTouchStart98))
+                    val bridgeMeta98 = if (experimentWindow98) bridgeCoordinate28892.get() else null
+                    val bridgeAge98 = if (bridgeMeta98 != null) now98 - bridgeMeta98.atNs else -1L
+                    // IMPORTANT: bridge position metadata does not prove pixel-content identity.
+                    // Restrict to a fresh and position-consistent publication, and do not
+                    // touch large offsets. This is a bounded diagnostic experiment, not a fix.
+                    val validPosition98 = selectedPos91 != null &&
+                        selectedPos91.x.isFinite() && selectedPos91.y.isFinite() &&
+                        drawPosition.x.isFinite() && drawPosition.y.isFinite()
+                    val freshMatchingBridge98 = bridgeMeta98 != null &&
+                        bridgeAge98 in 0L..50_000_000L &&
+                        bridgeMeta98.referenceIdentity == System.identityHashCode(reference) &&
+                        selectedPos91 != null &&
+                        kotlin.math.abs(bridgeMeta98.position.x - selectedPos91.x) <= 1.5f &&
+                        kotlin.math.abs(bridgeMeta98.position.y - selectedPos91.y) <= 1.5f
+                    val boundedGap98 = validPosition98 &&
+                        kotlin.math.abs(dx91) <= 24f && kotlin.math.abs(dy91) <= 24f
+                    val applySync98 = experimentWindow98 && nativeCarrierAb28869 == 1 &&
+                        !useFrame91 && !compensate91 && !canShift74 &&
+                        freshMatchingBridge98 && boundedGap98 && selectedBitmap91 != null &&
+                        (kotlin.math.abs(dx91) > 0.5f || kotlin.math.abs(dy91) > 0.5f)
+                    val actualTx98 = if (applySync98) -dx91 else originalTx98
+                    val actualTy98 = if (applySync98) -dy91 else originalTy98
                     if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
-                            if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f,
-                            if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f, bitmapPaint)
+                            actualTx98, actualTy98, bitmapPaint)
+                    }
+                    if (experimentWindow98) {
+                        syncTraceState28898[1]++
+                        if (now98 - syncTraceState28898[0] >= 40_000_000L) {
+                            syncTraceState28898[0] = now98
+                            val reason98 = when {
+                                selectedBitmap91 == null -> "NO_BITMAP"
+                                useFrame91 || compensate91 || canShift74 -> "LEGACY_COMPENSATION"
+                                !validPosition98 -> "INVALID_POSITION"
+                                !freshMatchingBridge98 -> "UNVERIFIED_SOURCE"
+                                !boundedGap98 -> "LARGE_GAP"
+                                applySync98 -> "APPLIED"
+                                else -> "SUBPIXEL"
+                            }
+                            try {
+                                XposedBridge.log("KYANT28898_SYNC host=$traceHost28890 " +
+                                    "mode=$sampleSyncAb28898 phase=${if (inTouchStart98) "TOUCH_START" else "REBOUND"} " +
+                                    "reason=$reason98 applied=$applySync98 " +
+                                    "down=$gestureDownSerial28893 release=${releaseSeq28820.get()} " +
+                                    "gapX=$dx91 gapY=$dy91 tx=$actualTx98 ty=$actualTy98 " +
+                                    "effectiveX=${selectedPos91?.let { it.x-actualTx98 }} " +
+                                    "residualX=${selectedPos91?.let { drawPosition.x-it.x+actualTx98 }} " +
+                                    "bridgeAgeMs=${bridgeAge98/1_000_000f} " +
+                                    "bridgeGen=${bridgeMeta98?.generation} source=BRIDGE " +
+                                    "comp91=$compensate91 comp74=$canShift74")
+                            } catch (_: Throwable) { /* diagnostics must not impact optics */ }
+                        }
                     }
                     // V288.97: FINAL sample mapping, before all optical compositing.
                     // At destination pixel x=0, a bitmap painted with translation tx
