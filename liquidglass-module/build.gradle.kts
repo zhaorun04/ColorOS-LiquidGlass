@@ -10,8 +10,8 @@ android {
         applicationId = "top.liquidglass.vector"
         minSdk = 28
         targetSdk = 28
-        versionCode = 192052909
-        versionName = "1.9.205.288.91"
+        versionCode = 192052995
+        versionName = "1.9.205.288.95"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

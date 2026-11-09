@@ -1272,6 +1272,13 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_gesture_isolation_ab_28894", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
+        // V288.95 A/B: 0 legacy; 1 direct reference while touch is active;
+        // 2 direct reference during touch and first 120ms of right-release.
+        // Only the ordinary screen-aligned RECT bridge is eligible.
+        val continuityAb28895 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_source_continuity_ab_28895", 0).coerceIn(0, 2)
+        } catch (_: Throwable) { 0 }
         val coordinateTrace28892 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_coordinate_trace_28892", 0) == 1
@@ -1292,6 +1299,10 @@ object KyantLauncherLens270 {
         if (gestureIsolation28894 == 1) XposedBridge.log(
             "KYANT28894_HOST host=$trace28815Host isolation=1 frame=$reboundFrameAb28891 " +
             "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819")
+        if (continuityAb28895 > 0) XposedBridge.log(
+            "KYANT28895_HOST host=$trace28815Host mode=$continuityAb28895 " +
+            "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "fusion=$fusionMode28889 affine=$affineSampling28876")
         var reboundCopyFailures28891 = 0
         if (reboundFrameAb28891 != 0) XposedBridge.log(
             "KYANT28891_HOST host=$trace28815Host ab=$reboundFrameAb28891 " +
@@ -2467,7 +2478,7 @@ object KyantLauncherLens270 {
                 { nativeCarrierDrawPosition28876(frame, glassScreenPosition(lastBounds)) },
                 nativeCarrierAb28869, distanceAb28874, distanceTrace28874,
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
-                reboundFrameAb28891, reboundFrame28891, gestureIsolation28894,
+                reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
@@ -3384,6 +3395,7 @@ object KyantLauncherLens270 {
         reboundFrameAb28891: Int,
         reboundFrame28891: androidx.compose.runtime.State<BridgeFrame28891?>,
         gestureIsolation28894: Int,
+        continuityAb28895: Int,
         coordinateTrace28892: Boolean,
         bridgeCoordinate28892: java.util.concurrent.atomic.AtomicReference<BridgeCoordinate28892?>,
         timelineTrace28893: Boolean,
@@ -3405,6 +3417,8 @@ object KyantLauncherLens270 {
         // Compose State. Capture on the first actual draw to avoid startup offset.
         val frozenSource = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicReference<Offset?>(null) }
         val sourceDrawCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
+        // Last reported drawing source (not a SurfaceFlinger frame id).
+        val sourceTraceState28895 = androidx.compose.runtime.remember { longArrayOf(-1L, 0L) }
         val reboundLogState28890 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
         // [release sequence, last log timestamp, samples]; no composition mutation.
         val coordinateLogState28892 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
@@ -3887,10 +3901,53 @@ object KyantLauncherLens270 {
                     // offset falls back to the untouched 288.90 draw transform.
                     val compensate91 = useFrame91 && kotlin.math.abs(dx91) <= 10f &&
                         kotlin.math.abs(dy91) <= 10f
-                    if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
+                    // V288.95: isolate the source transition responsible for a
+                    // suspected first-move flash. This is an opt-in A/B experiment,
+                    // NOT a confirmed fix: the direct reference bypasses mutable
+                    // carrier pixels only while touching (optionally through 120ms
+                    // of rebound). Never apply it to shader/affine sampling because
+                    // those sources have a different transform.
+                    val directWindow95 = touchActive28894 ||
+                        (continuityAb28895 == 2 && releaseSeq28820.get() > 0L &&
+                            releaseDx28820 > 0f && releaseAge91 in 0L..120_000_000L)
+                    val direct95 = continuityAb28895 > 0 && nativeCarrierAb28869 == 1 &&
+                        pipelineMode28819 == 2 && fusionMode28889 != 1 &&
+                        !affineSampling28876 && directWindow95 &&
+                        !reference.isRecycled && reference.width == screenW &&
+                        reference.height == screenH &&
+                        size.width > 0f && size.height > 0f
+                    if (direct95) {
+                        // Screen-aligned reference: wallpaper sample at the actual
+                        // Compose position, using floats rather than integer crop.
+                        drawIntoCanvas { canvas ->
+                            canvas.nativeCanvas.drawBitmap(reference, null,
+                                RectF(-drawPosition.x, -drawPosition.y,
+                                    reference.width.toFloat() - drawPosition.x,
+                                    reference.height.toFloat() - drawPosition.y), bitmapPaint)
+                        }
+                    } else if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
                             if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f,
                             if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f, bitmapPaint)
+                    }
+                    if (continuityAb28895 > 0) {
+                        val source95 = if (direct95) 1L else if (useFrame91) 2L else 3L
+                        val now95 = SystemClock.elapsedRealtimeNanos()
+                        val switched95 = sourceTraceState28895[0] != source95
+                        if (switched95 || now95 - sourceTraceState28895[1] >= 130_000_000L) {
+                            sourceTraceState28895[0] = source95
+                            sourceTraceState28895[1] = now95
+                            val latest95 = bridgeCoordinate28892.get()
+                            XposedBridge.log("KYANT28895_SOURCE host=$traceHost28890 " +
+                                "mode=$continuityAb28895 source=${if (direct95) "REFERENCE" else if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                "switch=$switched95 active=$touchActive28894 down=$gestureDownSerial28893 " +
+                                "release=${releaseSeq28820.get()} releaseAgeMs=${releaseAge91 / 1_000_000f} " +
+                                "drawX=${drawPosition.x} bridgeX=${latest95?.position?.x} " +
+                                "gapX=${latest95?.let { drawPosition.x - it.position.x }} " +
+                                "bridgeAgeMs=${latest95?.let { (now95-it.atNs)/1_000_000f }} " +
+                                "pairedGen=${frame91?.generation} bridgeGen=${latest95?.generation} " +
+                                "frameSelected=$useFrame91 bitmapId=${if (selectedBitmap91 != null) System.identityHashCode(selectedBitmap91) else -1}")
+                        }
                     }
                     if (reboundFrameAb28891 == 1 && reboundTrace28890 &&
                         sourceDrawCount.get() % 12L == 1L) XposedBridge.log(
