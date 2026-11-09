@@ -1815,6 +1815,17 @@ object KyantLauncherLens270 {
         val bridgeCanvas = bridgeBitmap?.let { Canvas(it) }
         val bridgeExtraCanvas28875 = bridgeExtraBitmap28875?.let { Canvas(it) }
         var bridgeLastReference28875: Bitmap? = null
+        // V288.108: skip a redundant CPU bitmap resample only when both the
+        // source identity and the full sampling position are unchanged.
+        // Opt-out: settings put global liquidglass_kyant_bridge_dedupe_288108 0
+        val bridgeDedupe288108 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
+        } catch (_: Throwable) { true }
+        var lastBridgeSampleSource288108: Bitmap? = null
+        var lastBridgeSampleTarget288108: Bitmap? = null
+        var lastBridgeSamplePosition288108 = Offset(Float.NaN, Float.NaN)
+        var skippedBridgeSamples288108 = 0L
         // V288.107: per-host aggregate only. No allocations/logging on ordinary draws.
         var perfSamples107 = 0L
         var perfTotalNs107 = 0L
@@ -1828,6 +1839,18 @@ object KyantLauncherLens270 {
             if (target == null) return
             val activeReference = referenceState28832.value
             if (activeReference.isRecycled) return
+            // Do not suppress diagnostic/alternate pipelines: they may require
+            // per-draw publications even when the wallpaper origin is unchanged.
+            val dedupeSafe288108 = bridgeDedupe288108 && !bufferExperiment28875 &&
+                bitmapPipeline28880 != 4 && bridgePairAb288101 == 0 &&
+                reboundFrameAb28891 != 1 && !coordinateTrace28892 &&
+                !timelineTrace28893 && !snapshotTrace288100 && !reboundTrace28890
+            if (dedupeSafe288108 && lastBridgeSampleSource288108 === activeReference &&
+                lastBridgeSampleTarget288108 === bitmap &&
+                lastBridgeSamplePosition288108 == pos) {
+                skippedBridgeSamples288108++
+                return
+            }
             val perfStart107 = SystemClock.elapsedRealtimeNanos()
             val sw = android.content.res.Resources.getSystem().displayMetrics.widthPixels.coerceAtLeast(1)
             val sh = android.content.res.Resources.getSystem().displayMetrics.heightPixels.coerceAtLeast(1)
@@ -1952,6 +1975,11 @@ object KyantLauncherLens270 {
                     }
                 }
             }
+            // Record only after drawing completed; changes to source, target or
+            // position force the next full sample. Never alter optical parameters.
+            lastBridgeSampleSource288108 = activeReference
+            lastBridgeSampleTarget288108 = bitmap
+            lastBridgeSamplePosition288108 = pos
             bridgePublishedPosition.set(pos)
             if (reboundFrameAb28891 == 1 && nativeCarrierAb28869 == 1 &&
                 pipelineMode28819 == 2 && !disposed) {
