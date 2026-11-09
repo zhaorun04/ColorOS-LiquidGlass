@@ -3918,22 +3918,17 @@ object KyantLauncherLens270 {
                         !reference.isRecycled && reference.width == screenW &&
                         reference.height == screenH &&
                         size.width > 0f && size.height > 0f
-                    if (direct95) {
-                        // Screen-aligned reference: wallpaper sample at the actual
-                        // Compose position, using floats rather than integer crop.
-                        drawIntoCanvas { canvas ->
-                            canvas.nativeCanvas.drawBitmap(reference, null,
-                                RectF(-drawPosition.x, -drawPosition.y,
-                                    reference.width.toFloat() - drawPosition.x,
-                                    reference.height.toFloat() - drawPosition.y), bitmapPaint)
-                        }
-                    } else if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
+                    // V288.95.2 SAFETY: direct reference replaces the optical carrier
+                    // and caused all glass effects to disappear on device. Keep the
+                    // original selected paired/bridge raster source in every mode.
+                    // direct95 is now *candidate only* and never changes rendering.
+                    if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
                         canvas.nativeCanvas.drawBitmap(selectedBitmap91,
                             if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f,
                             if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f, bitmapPaint)
                     }
                     if (continuityAb28895 > 0) {
-                        val source95 = if (direct95) 1L else if (useFrame91) 2L else 3L
+                        val source95 = if (useFrame91) 2L else 3L
                         val now95 = SystemClock.elapsedRealtimeNanos()
                         val switched95 = sourceTraceState28895[0] != source95
                         if (switched95 || now95 - sourceTraceState28895[1] >= 130_000_000L) {
@@ -3941,7 +3936,7 @@ object KyantLauncherLens270 {
                             sourceTraceState28895[1] = now95
                             val latest95 = bridgeCoordinate28892.get()
                             XposedBridge.log("KYANT28895_SOURCE host=$traceHost28890 " +
-                                "mode=$continuityAb28895 source=${if (direct95) "REFERENCE" else if (useFrame91) "PAIRED" else "BRIDGE"} " +
+                                "mode=$continuityAb28895 source=${if (useFrame91) "PAIRED" else "BRIDGE"} referenceCandidate=$direct95 safeBypass=true " +
                                 "switch=$switched95 active=$touchActive28894 down=$gestureDownSerial28893 " +
                                 "release=${releaseSeq28820.get()} releaseAgeMs=${releaseAge91 / 1_000_000f} " +
                                 "drawX=${drawPosition.x} bridgeX=${latest95?.position?.x} " +

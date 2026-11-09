@@ -1,3 +1,6 @@
+V1.9.205.288.95.2｜光学渲染回归安全修正版
+用户真机验证 V288.95.1：模式1开启时玻璃渲染全部消失。已彻底移除 REFERENCE 直接绘制分支；模式0/1/2均使用 V288.94 的 PAIRED/BRIDGE 光学绘制路径。模式1/2仅输出 REFERENCE 候选诊断，不再是改善闪动的修复实验。日志新增 referenceCandidate 与 safeBypass=true。保留其他手势隔离功能。未经 Gradle/真机验证。
+
 V1.9.205.288.95.1 编译修正：修复 LensContent270 中 fusionMode28889 / affineSampling28876 跨函数作用域引用；通过 directReferenceEligible28895 传递原有 Host 路径判断，保持 A/B 实验行为不变。GitHub Actions 编译及真机效果仍待验证。
 
 V1.9.205.288.94｜Kyant 回弹位置跳变与绘制时间线只读诊断版
@@ -773,6 +776,6 @@ KYANT28894_HOST / KYANT28894_ISOLATE 便于验证是否进入实验路径及拒�
 
 V1.9.205.288.95.1｜快速右滑桥接绘制来源连续性 A/B 实验
 本版以 V288.94 为基线，不更改 Kyant 光学 Shader、Dock/图标几何。
-设置键 liquidglass_kyant_source_continuity_ab_28895：0=原路径（默认），1=触摸期间使用屏幕对齐参考壁纸直接绘制，2=触摸及向右松手后120ms采用直接绘制。仅原生桥接、管线2、非融合非仿射、参考图与屏幕同尺寸时生效。
+设置键 liquidglass_kyant_source_continuity_ab_28895：0=原路径（默认），1/2=仅诊断直接绘制候选窗口，不替换光学源。仅原生桥接、管线2、非融合非仿射、参考图与屏幕同尺寸时生效。
 日志 KYANT28895_HOST / KYANT28895_SOURCE 记录绘制来源变化及桥接年龄。实验仅用于区分 Bitmap 来源切换是否引发闪动，不能等同于已经验证的视觉修复。
 启用前后应重启 Launcher 创建新 Host；每次只更改28895开关，保持28891/28894等其他参数不变。
