@@ -1370,10 +1370,23 @@ object KyantLauncherLens270 {
         } catch (_: Throwable) { false }
         val timingTraceEnabled288102 = scrollTraceEnabled288103 || try {
             Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_coordinate_basis_trace_288104", 0) == 1
+        } catch (_: Throwable) { false } || try {
+            Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_zero_copy_timing_trace_288102", 0) == 1
         } catch (_: Throwable) { false }
         if (scrollTraceEnabled288103) XposedBridge.log(
             "KYANT288103_HOST host=$trace28815Host trace=1 zeroCopy=true " +
+            "pipeline=$pipelineMode28819 carrier=$nativeCarrierAb28869 " +
+            "bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
+        // V288.104: strict visible-host and coordinate-basis checks only.
+        // No bitmap copy, rendering transform or Compose state mutation.
+        val coordinateBasisTrace288104 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_coordinate_basis_trace_288104", 0) == 1
+        } catch (_: Throwable) { false }
+        if (coordinateBasisTrace288104) XposedBridge.log(
+            "KYANT288104_HOST host=$trace28815Host trace=1 zeroCopy=true " +
             "pipeline=$pipelineMode28819 carrier=$nativeCarrierAb28869 " +
             "bitmap=$bitmapPipeline28880 node=$nodePipeline28881")
         val timings288102 = TimingTrace288102()
@@ -2641,7 +2654,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, scrollTraceEnabled288103, timings288102,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, scrollTraceEnabled288103, coordinateBasisTrace288104, anchor, timings288102,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3593,6 +3606,8 @@ object KyantLauncherLens270 {
         bridgePairFrame288101: androidx.compose.runtime.State<VerifiedBridgeFrame288101?>,
         timingTraceEnabled288102: Boolean,
         scrollTraceEnabled288103: Boolean,
+        coordinateBasisTrace288104: Boolean,
+        diagnosticAnchor288104: View,
         timings288102: TimingTrace288102,
         uvProbe28867: Boolean, visibleSource28867: () -> Boolean,
         recordSourceMatrix28866: (Offset, Offset) -> Unit,
@@ -4272,6 +4287,68 @@ object KyantLauncherLens270 {
                                         "bridgeGapX=$gapX102 positionDelta=$positionDelta103 " +
                                         "scrollResidual=$scrollResidual103 drawResidual=$drawResidual103 " +
                                         "bitmapId=${System.identityHashCode(selectedBitmap91)}")
+                                }
+                                // V288.104: compare the actual visible host rectangle with
+                                // sample and Workspace coordinate bases. A partial on-screen
+                                // overlap is not proof that a sample point is in screen bounds.
+                                // This runs only inside the existing 120ms logging throttle.
+                                if (coordinateBasisTrace288104) {
+                                    try {
+                                        val workspace104 = activeTouchWorkspace28820?.get()
+                                        val frame104 = diagnosticAnchor288104
+                                        val visible104 = android.graphics.Rect()
+                                        val hostVisible104 = frame104.isAttachedToWindow &&
+                                            frame104.isShown && frame104.getGlobalVisibleRect(visible104) &&
+                                            !visible104.isEmpty
+                                        val hostScreen104 = IntArray(2)
+                                        val wsScreen104 = IntArray(2)
+                                        frame104.getLocationOnScreen(hostScreen104)
+                                        workspace104?.getLocationOnScreen(wsScreen104)
+                                        val wsPre104 = p102?.workspaceScrollX
+                                        val wsBridge104 = b102?.workspaceScrollX
+                                        val scrollDelta104 = if (wsPre104 != null && wsBridge104 != null &&
+                                            wsPre104 != Int.MIN_VALUE && wsBridge104 != Int.MIN_VALUE)
+                                            wsBridge104 - wsPre104 else null
+                                        val predictedBridge104 = if (scrollDelta104 != null && p102 != null)
+                                            p102.pos.x - scrollDelta104 else null
+                                        val bridgePredictionError104 = if (predictedBridge104 != null && b102 != null)
+                                            b102.pos.x - predictedBridge104 else null
+                                        val preDrawError104 = p102?.let { drawPosition.x - it.pos.x }
+                                        val bridgeDrawGap104 = b102?.let { drawPosition.x - it.pos.x }
+                                        val sameGesture104 = p102 != null && b102 != null &&
+                                            p102.down == b102.down && p102.release == b102.release &&
+                                            b102.down == gestureDownSerial28893 &&
+                                            b102.release == releaseSeq28820.get()
+                                        val hostWidth104 = visible104.width().coerceAtLeast(0)
+                                        val hostHeight104 = visible104.height().coerceAtLeast(0)
+                                        val viewport104 = hostVisible104 && hostWidth104 > 0 && hostHeight104 > 0
+                                        val class104 = when {
+                                            !viewport104 -> "OFFSCREEN"
+                                            !sameGesture104 -> "CROSS_GESTURE"
+                                            scrollDelta104 == null || b102 == null || p102 == null -> "MISSING_COORDINATE"
+                                            !drawPosition.x.isFinite() || !b102.pos.x.isFinite() -> "INVALID_COORDINATE"
+                                            kotlin.math.abs(bridgePredictionError104 ?: Float.MAX_VALUE) > 1f -> "EXTRA_TRANSFORM"
+                                            kotlin.math.abs(preDrawError104 ?: Float.MAX_VALUE) > 1f -> "COMPOSE_AFTER_PREDRAW"
+                                            else -> "WORKSPACE_SCROLL_ALIGNED"
+                                        }
+                                        XposedBridge.log("KYANT288104_BASIS host=$traceHost28890 " +
+                                            "phase=$phase102 class=$class104 visible=$viewport104 " +
+                                            "rect=${visible104.left},${visible104.top},${visible104.right},${visible104.bottom} " +
+                                            "hostScreenX=${hostScreen104[0]} hostScreenY=${hostScreen104[1]} " +
+                                            "wsScreenX=${if (workspace104 != null) wsScreen104[0] else null} " +
+                                            "wsX=${workspace104?.x} wsTx=${workspace104?.translationX} " +
+                                            "wsPre=$wsPre104 wsBridge=$wsBridge104 wsDelta=$scrollDelta104 " +
+                                            "predictedBridgeX=$predictedBridge104 bridgePredictionError=$bridgePredictionError104 " +
+                                            "drawX=${drawPosition.x} preX=${p102?.pos?.x} bridgeX=${b102?.pos?.x} " +
+                                            "preDrawError=$preDrawError104 bridgeDrawGap=$bridgeDrawGap104 " +
+                                            "bridgeGen=${b102?.gen} preGen=${p102?.gen} " +
+                                            "bridgeAgeMs=$bAge102 preAgeMs=$pAge102 " +
+                                            "down=$gestureDownSerial28893 release=${releaseSeq28820.get()} " +
+                                            "bitmapId=${System.identityHashCode(selectedBitmap91)}")
+                                    } catch (t: Throwable) {
+                                        XposedBridge.log("KYANT288104_TRACE_ERROR host=$traceHost28890 " +
+                                            "type=${t.javaClass.simpleName}")
+                                    }
                                 }
                                 XposedBridge.log("KYANT288102_TIMING host=$traceHost28890 " +
                                     "phase=$phase102 down=$gestureDownSerial28893 " +
