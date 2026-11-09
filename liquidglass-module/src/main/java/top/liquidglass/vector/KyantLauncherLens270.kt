@@ -1875,6 +1875,18 @@ object KyantLauncherLens270 {
             "reference=${reference.width}x${reference.height} " +
             "carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
             "reboundFrame=$reboundFrameAb28891 gate=onlySnapshotPipeline2")
+        // V288.113 opt-in conservative offscreen reference draw culling.
+        // This affects ONLY the GPU-reference branch and keeps every Host's
+        // position/invalidation pipeline running for immediate re-entry.
+        val offscreenCull288113 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_offscreen_cull_288113", 0) == 1
+        } catch (_: Throwable) { false }
+        val offscreenDraws288113 = java.util.concurrent.atomic.AtomicLong(0L)
+        val onscreenDraws288113 = java.util.concurrent.atomic.AtomicLong(0L)
+        android.util.Log.i("KyantCull288113", "KYANT288113_HOST host=$trace28815Host " +
+            "cull=$offscreenCull288113 gpuEffective=$gpuReference288110 " +
+            "screen=${reference.width}x${reference.height}")
         val bridgeDedupe288108 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_dedupe_288108", 1) == 1
@@ -4097,28 +4109,49 @@ object KyantLauncherLens270 {
                         -drawPosition.y * localScaleY288110,
                         (screenW - drawPosition.x) * localScaleX288110,
                         (screenH - drawPosition.y) * localScaleY288110)
-                    drawIntoCanvas { canvas ->
-                        val hw = canvas.nativeCanvas.isHardwareAccelerated
-                        if (hw && !reference.isRecycled) {
-                            canvas.nativeCanvas.drawBitmap(reference, null,
-                                wholeDestination, bitmapPaint)
-                        } else {
-                            // Preserve the original source pixels if a software
-                            // canvas or disposed reference is encountered. This
-                            // fallback is deliberately limited to exceptional
-                            // frames and is not used by the GPU fast path.
-                            bridgeResample(drawPosition)
-                            bridgeBitmap.let { canvas.nativeCanvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+                    // The reference is already mapped to screen space. A Host
+                    // fully outside the display cannot contribute visible pixels.
+                    // Use a generous 128px guard band on all sides to avoid a
+                    // blank frame when a Workspace page approaches the viewport.
+                    // Do NOT skip coordinate updates, Compose state reads, or
+                    // in-viewport samples; this is not frame throttling.
+                    val guardPx288113 = 128f
+                    val fullyOffscreen288113 = offscreenCull288113 &&
+                        drawPosition.x.isFinite() && drawPosition.y.isFinite() &&
+                        (drawPosition.x + previewWidth.toFloat() < -guardPx288113 ||
+                         drawPosition.x > screenW.toFloat() + guardPx288113 ||
+                         drawPosition.y + previewHeight.toFloat() < -guardPx288113 ||
+                         drawPosition.y > screenH.toFloat() + guardPx288113)
+                    if (fullyOffscreen288113) {
+                        val count113 = offscreenDraws288113.incrementAndGet()
+                        if (count113 == 1L || count113 % 600L == 0L) {
+                            android.util.Log.i("KyantCull288113", "KYANT288113_CULL " +
+                                "host=$traceHost28890 skipped=$count113 " +
+                                "onscreen=${onscreenDraws288113.get()} " +
+                                "posX=${drawPosition.x} posY=${drawPosition.y}")
                         }
-                        if (perfProfile288109) KyantPerf288109.recordGpuReference288110(hw)
-                        val num288110 = sourceDrawCount.get()
-                        if (num288110 == 0L || num288110 % 240L == 0L) {
-                            android.util.Log.i("KyantGpu288110", "KYANT288110_DRAW " +
-                                "host=$traceHost28890 hw=$hw gpu=${hw && !reference.isRecycled} " +
-                                "posX=${drawPosition.x} posY=${drawPosition.y} " +
-                                "source=${reference.width}x${reference.height} " +
-                                "target=${size.width}x${size.height} " +
-                                "backdropCapture=${nodePipeline28881 < 0 && pipelineMode28819 < 0}")
+                    } else {
+                        onscreenDraws288113.incrementAndGet()
+                        drawIntoCanvas { canvas ->
+                            val hw = canvas.nativeCanvas.isHardwareAccelerated
+                            if (hw && !reference.isRecycled) {
+                                canvas.nativeCanvas.drawBitmap(reference, null,
+                                    wholeDestination, bitmapPaint)
+                            } else {
+                                // Keep the original software fallback intact.
+                                bridgeResample(drawPosition)
+                                bridgeBitmap.let { canvas.nativeCanvas.drawBitmap(it, 0f, 0f, bitmapPaint) }
+                            }
+                            if (perfProfile288109) KyantPerf288109.recordGpuReference288110(hw)
+                            val num288110 = sourceDrawCount.get()
+                            if (num288110 == 0L || num288110 % 240L == 0L) {
+                                android.util.Log.i("KyantGpu288110", "KYANT288110_DRAW " +
+                                    "host=$traceHost28890 hw=$hw gpu=${hw && !reference.isRecycled} " +
+                                    "posX=${drawPosition.x} posY=${drawPosition.y} " +
+                                    "source=${reference.width}x${reference.height} " +
+                                    "target=${size.width}x${size.height} " +
+                                    "backdropCapture=${nodePipeline28881 < 0 && pipelineMode28819 < 0}")
+                            }
                         }
                     }
                 } else if (bridgeBitmap != null && bitmapPipeline28880 != 2 &&
