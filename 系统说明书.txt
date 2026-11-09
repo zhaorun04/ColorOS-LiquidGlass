@@ -1,3 +1,36 @@
+ColorOS-LiquidGlass V1.9.205.288.91｜回弹桥接位图—坐标绑定 A/B 实验版
+
+基于 V288.90；新增默认关闭的实验开关，不更改 Kyant 光学 Shader、Dock、三参数 UI/SharedPreferences/Root/Launcher 原映射。
+
+【实验目的】
+松手向右回弹约 650 ms 内，将桥接采样 Bitmap 拷贝为不可变快照，并把 Bitmap/采样坐标/代际/时间戳/参考壁纸身份作为一个 Compose State 对象发布。Compose 消费同一个对象的像素与坐标（不再跨代读取）。只有位置残差单轴不超过 10px 时使用浮点平移补偿。快照超过 50ms、参考壁纸变化或离开回弹窗口立即回退到 V288.90 旧路径。此处仍是应用侧同代绑定，尚未证明 GPU 同帧呈现。
+
+【必要前提】
+本实验只作用于 nativeCarrierAb28869=1、pipelineMode28819=2 的桥接 Bitmap 路径。其它配置不会触发实验。右滑释放事件取 dx>0（触摸原始 X 方向）。注意：V288.90 的 release hook 由 liquidglass_kyant_release_trace_28821=1 安装，故实验时必须同时开启该选项。V288.91 不会自动更改你已有的引擎选择、其它实验开关或 UI。
+
+【A/B 使用命令；重载 Launcher 后生效】
+启用观测及实验：
+su -c 'settings put global liquidglass_kyant_release_trace_28821 1; settings put global liquidglass_kyant_rebound_trace_28890 1; settings put global liquidglass_kyant_rebound_frame_ab_28891 1'
+
+A 组：关闭实验，保留观测：
+su -c 'settings put global liquidglass_kyant_rebound_frame_ab_28891 0'
+
+B 组：开启实验：
+su -c 'settings put global liquidglass_kyant_rebound_frame_ab_28891 1'
+
+日志：
+su -c 'logcat -d -v threadtime | grep -E "KYANT28891_(HOST|PUBLISH|CONSUME|COPY_FAILED)|KYANT28890_(PREDRAW|COMPOSE_SOURCE)|KYANT28821_TOUCH_RELEASE" | tail -150'
+
+验证必须先有 KYANT28891_HOST ab=1 且 carrier=1 mode=2、KYANT28821_TOUCH_RELEASE dx>0，再出现 KYANT28891_PUBLISH 与 CONSUME selected=true。若缺少任一项则实验未实际命中。source mismatch/快照超时自然回退，不应算实验成功。对比右滑后最初 650ms 内视觉错位、掉帧、边界空白；实验期间使用 Bitmap.copy 会有内存和帧耗时开销，故绝不默认打开。
+
+回退：
+su -c 'settings put global liquidglass_kyant_rebound_frame_ab_28891 0; settings put global liquidglass_kyant_rebound_trace_28890 0; settings put global liquidglass_kyant_release_trace_28821 0'
+然后重新加载 Launcher。此命令仅重置此次实验的三个开关。
+
+【构建验证】
+本环境未完成 Android SDK API 37 的真实 Gradle 构建，GitHub Actions 仍需验证 :liquidglass-module:assembleDebug，真机需要确认 selected=true 后的效果；不可据此声称 1～10px 已修复。
+
+=== 历史系统说明 ===
 ColorOS-LiquidGlass V1.9.205.288.90｜Kyant 回弹首帧采样—绘制关联诊断版
 
 本版基于 V288.89，恢复原始 Kyant 路径（fusion=0；native mode=0），保持 V288.86 的文件夹内部安全承载层级。不改变 Shader、壁纸采样数学、UI 三光学参数或 Dock。

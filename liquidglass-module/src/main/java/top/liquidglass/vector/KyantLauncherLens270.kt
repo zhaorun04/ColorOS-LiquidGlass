@@ -85,6 +85,13 @@ object KyantLauncherLens270 {
         val gen: Long, val atNs: Long, val pos: Offset,
         val referenceIdentity: Int
     )
+    // V288.91: an immutable bitmap and its source coordinates travel together.
+    // The producer never repaints a published bitmap; stale generations may be
+    // retained briefly by the Compose renderer without pixel/position tearing.
+    private data class BridgeFrame28891(
+        val bitmap: Bitmap, val position: Offset, val generation: Long,
+        val sampledAtNs: Long, val referenceIdentity: Int
+    )
     // V288.21: isolated trace of release BEFORE and AFTER actual OEM touch handling.
     // The rendering pipeline remains identical to V288.19 mode 2.
     private const val RELEASE_TRACE_28821_KEY = "liquidglass_kyant_release_trace_28821"
@@ -1208,6 +1215,17 @@ object KyantLauncherLens270 {
         val immutableGen28880 = androidx.compose.runtime.mutableLongStateOf(0L)
         val bridgeVersion = androidx.compose.runtime.mutableIntStateOf(0)
         val bridgePublishedPosition = java.util.concurrent.atomic.AtomicReference<Offset?>(null)
+        // Strict opt-in, read at host creation; mode 0 leaves V288.90 unchanged.
+        // Mode 1 only snapshots for 650 ms after a right-swipe release.
+        val reboundFrameAb28891 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_rebound_frame_ab_28891", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        val reboundFrame28891 = androidx.compose.runtime.mutableStateOf<BridgeFrame28891?>(null)
+        var reboundCopyFailures28891 = 0
+        if (reboundFrameAb28891 != 0) XposedBridge.log(
+            "KYANT28891_HOST host=$trace28815Host ab=$reboundFrameAb28891 " +
+            "carrier=$nativeCarrierAb28869 mode=$pipelineMode28819")
         val bridgeDrawCount = java.util.concurrent.atomic.AtomicLong(0L)
         // Read the trace switch only at host creation. Disabled by default.
         val reboundTrace28890 = try {
@@ -1736,6 +1754,26 @@ object KyantLauncherLens270 {
                 }
             }
             bridgePublishedPosition.set(pos)
+            if (reboundFrameAb28891 == 1 && nativeCarrierAb28869 == 1 &&
+                pipelineMode28819 == 2 && !disposed) {
+                val age = SystemClock.elapsedRealtimeNanos() - releaseNs28820.get()
+                val eligible = releaseSeq28820.get() > 0L &&
+                    age in 0L..650_000_000L && releaseDx28820 > 0f
+                // Never publish a partial copy or mismatched position.
+                if (eligible) try {
+                    val frozen = bitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    val frame91 = BridgeFrame28891(frozen, pos, gen,
+                        SystemClock.elapsedRealtimeNanos(), System.identityHashCode(activeReference))
+                    reboundFrame28891.value = frame91
+                    if (reboundTrace28890 && gen % 12L == 1L) XposedBridge.log(
+                        "KYANT28891_PUBLISH host=$trace28815Host gen=$gen x=${pos.x} " +
+                        "bitmap=${System.identityHashCode(frozen)} ageMs=${age/1_000_000f}")
+                } catch (t: Throwable) {
+                    reboundCopyFailures28891++
+                    if (reboundCopyFailures28891 <= 3) XposedBridge.log(
+                        "KYANT28891_COPY_FAILED error=${t.javaClass.simpleName}")
+                }
+            }
             recordNativeSettle28872("NATIVE_BITMAP_BRIDGE", pos, activeReference, gen,
                 bitmap.width, bitmap.height)
         }
@@ -3709,11 +3747,37 @@ object KyantLauncherLens270 {
                         bridgeFrontGen28875.value else version.toLong()
                     val visiblePosition75 = if (bufferExperiment28875)
                         bridgeFrontPosition28875.value else published74
-                    if (visibleBridge75 != null) drawIntoCanvas { canvas ->
-                        canvas.nativeCanvas.drawBitmap(visibleBridge75,
-                            if (canShift74) -lagX74 else 0f,
-                            if (canShift74) -lagY74 else 0f, bitmapPaint)
+                    // V288.91: only in the opt-in right-swipe rebound window,
+                    // consume the image and position from the SAME publication.
+                    // A stale snapshot is not substituted for a live bridge.
+                    val frame91 = if (reboundFrameAb28891 == 1 &&
+                        nativeCarrierAb28869 == 1 && pipelineMode28819 == 2)
+                        reboundFrame28891.value else null
+                    val frameAge91 = if (frame91 != null)
+                        SystemClock.elapsedRealtimeNanos() - frame91.sampledAtNs else Long.MAX_VALUE
+                    val releaseAge91 = SystemClock.elapsedRealtimeNanos() - releaseNs28820.get()
+                    val useFrame91 = frame91 != null && frameAge91 in 0L..50_000_000L &&
+                        releaseAge91 in 0L..650_000_000L && releaseDx28820 > 0f &&
+                        frame91.referenceIdentity == System.identityHashCode(referenceState28832.value)
+                    val selectedBitmap91 = if (useFrame91) frame91!!.bitmap else visibleBridge75
+                    val selectedPos91 = if (useFrame91) frame91!!.position else visiblePosition75
+                    val dx91 = if (selectedPos91 != null) drawPosition.x - selectedPos91.x else 0f
+                    val dy91 = if (selectedPos91 != null) drawPosition.y - selectedPos91.y else 0f
+                    // V288.91 compensates only small residual motion. A large
+                    // offset falls back to the untouched 288.90 draw transform.
+                    val compensate91 = useFrame91 && kotlin.math.abs(dx91) <= 10f &&
+                        kotlin.math.abs(dy91) <= 10f
+                    if (selectedBitmap91 != null) drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.drawBitmap(selectedBitmap91,
+                            if (compensate91) -dx91 else if (canShift74 && !useFrame91) -lagX74 else 0f,
+                            if (compensate91) -dy91 else if (canShift74 && !useFrame91) -lagY74 else 0f, bitmapPaint)
                     }
+                    if (reboundFrameAb28891 == 1 && reboundTrace28890 &&
+                        sourceDrawCount.get() % 12L == 1L) XposedBridge.log(
+                        "KYANT28891_CONSUME host=$traceHost28890 selected=$useFrame91 " +
+                        "gen=${frame91?.generation} drawX=${drawPosition.x} sampleX=${selectedPos91?.x} " +
+                        "deltaX=$dx91 deltaY=$dy91 compensated=$compensate91 " +
+                        "ageMs=${if (frameAge91 >= 0L && frameAge91 < 1_000_000_000L) frameAge91/1_000_000f else -1f}")
                     if (bufferExperiment28875 && sourceDrawCount.get() % 24L == 0L)
                         XposedBridge.log("KYANT28875_BUFFER_CONSUME gen=$visibleGen75 " +
                             "front=${System.identityHashCode(visibleBridge75)} " +
