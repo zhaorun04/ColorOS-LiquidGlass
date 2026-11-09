@@ -2606,7 +2606,7 @@ object KyantLauncherLens270 {
                 bufferExperiment28875, bridgeFront28875, bridgeFrontGen28875, bridgeFrontPosition28875,
                 reboundFrameAb28891, reboundFrame28891, gestureIsolation28894, continuityAb28895,
                 fusionMode28889 != 1 && !affineSampling28876,
-                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, checkpoint288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, scrollTraceEnabled288103, coordinateBasisTrace288104, anchor, timings288102,
+                coordinateTrace28892, bridgeCoordinate28892, timelineTrace28893, dualMotionTrace28896, finalSampleTrace28897, sampleSyncAb28898, visibleGestureTrace28899, snapshotTrace288100, bridgePairAb288101, bridgePairTrace288101, bridgePairFrame288101, timingTraceEnabled288102, scrollTraceEnabled288103, coordinateBasisTrace288104, anchor, timings288102,
                 uvProbe28867, { frame.visibility == View.VISIBLE &&
                     frame.isShown && frame.width > 0 && frame.height > 0 &&
                     glassScreenPosition(lastBounds).let { pos ->
@@ -3532,7 +3532,6 @@ object KyantLauncherLens270 {
         sampleSyncAb28898: Int,
         visibleGestureTrace28899: Boolean,
         snapshotTrace288100: Boolean,
-        checkpoint288100: java.util.concurrent.atomic.AtomicReference<PredrawCheckpoint288100?>,
         bridgePairAb288101: Int,
         bridgePairTrace288101: Boolean,
         bridgePairFrame288101: androidx.compose.runtime.State<VerifiedBridgeFrame288101?>,
