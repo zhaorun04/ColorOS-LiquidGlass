@@ -29,6 +29,11 @@ object StaticLayerRecordReuse288116 {
     var shadowCold: Long = 0L
     var shadowKeyChanged: Long = 0L
     var shadowNodeAttached: Long = 0L
+    // V288.119: provider-wrapper preservation experiment.
+    var highlightProviderRetained288119: Long = 0L
+    var shadowProviderRetained288119: Long = 0L
+    var highlightProviderInvalidated288119: Long = 0L
+    var shadowProviderInvalidated288119: Long = 0L
     // V288.118: explicit causes for unexpected Cold misses.
     var highlightProviderReplaced288118: Long = 0L
     var shadowProviderReplaced288118: Long = 0L

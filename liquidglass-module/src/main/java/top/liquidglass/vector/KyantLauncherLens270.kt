@@ -4221,7 +4221,11 @@ object KyantLauncherLens270 {
                                         "hDetachLive=${cache116.highlightDetachedLive288118} " +
                                         "sDetachLive=${cache116.shadowDetachedLive288118} " +
                                         "hColdRevGt1=${cache116.highlightColdProviderRevisionGt1_288118} " +
-                                        "sColdRevGt1=${cache116.shadowColdProviderRevisionGt1_288118}")
+                                        "sColdRevGt1=${cache116.shadowColdProviderRevisionGt1_288118} " +
+                                        "hProviderRetained=${cache116.highlightProviderRetained288119} " +
+                                        "sProviderRetained=${cache116.shadowProviderRetained288119} " +
+                                        "hProviderInvalidated=${cache116.highlightProviderInvalidated288119} " +
+                                        "sProviderInvalidated=${cache116.shadowProviderInvalidated288119}")
                                 }
                             }
                             if (num288110 == 0L || num288110 % 240L == 0L) {

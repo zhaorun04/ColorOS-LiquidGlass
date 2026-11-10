@@ -42,7 +42,20 @@ internal class ShadowElement(
                     StaticLayerRecordReuse288116.shadowProviderInvalidatedLive288118++
                 }
             }
-            node.invalidateRecorded288117()
+            // V288.119: do not discard a live layer just because a new
+            // ShapeProvider wrapper was allocated. Only retain a known,
+            // value-equal Kyant RoundedRectangle from the last *recorded* key.
+            // Unknown/mutable paths still invalidate exactly as before.
+            val retain = StaticLayerRecordReuse288116.enabled &&
+                node.canRetainRecordedShape288119(shapeProvider.innerShape)
+            if (retain) {
+                StaticLayerRecordReuse288116.shadowProviderRetained288119++
+            } else {
+                node.invalidateRecorded288117()
+                if (StaticLayerRecordReuse288116.enabled) {
+                    StaticLayerRecordReuse288116.shadowProviderInvalidated288119++
+                }
+            }
         }
         node.shapeProvider = shapeProvider
         node.shadow = shadow
@@ -86,14 +99,20 @@ internal class ShadowNode(
         val density: Float,
         val fontScale: Float,
         val direction: androidx.compose.ui.unit.LayoutDirection,
-        val outline: Outline,
-        val shapeProvider: ShapeProvider,
-        val outlineRevision: Long,
+        val outline: Outline?,
+        // V288.119: geometry value, not the provider wrapper identity.
+        // Only known Kyant RoundedRectangle Generic outlines are eligible.
+        val recordedShape: androidx.compose.ui.graphics.Shape,
         val shadow: Shadow
     )
     private var lastRecordedShadow: RecordedShadowKey? = null
     fun invalidateRecorded288117() { lastRecordedShadow = null }
     fun hasRecordedCache288118(): Boolean = lastRecordedShadow != null
+    fun canRetainRecordedShape288119(candidate: androidx.compose.ui.graphics.Shape): Boolean {
+        val recorded = lastRecordedShadow?.recordedShape ?: return false
+        return recorded is RoundedRectangle && candidate is RoundedRectangle &&
+            recorded == candidate
+    }
 
     private val paint = Paint()
 
@@ -138,8 +157,9 @@ internal class ShadowNode(
                 outline is Outline.Rounded || knownGeneric288117
             val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
                 RecordedShadowKey(shadowSize, size, density.density, density.fontScale,
-                    layoutDirection, outline, shapeProvider,
-                    shapeProvider.outlineRevision288117, shadow)
+                    layoutDirection,
+                    if (knownGeneric288117) null else outline,
+                    shapeProvider.innerShape, shadow)
             } else null
             if (StaticLayerRecordReuse288116.enabled && key != null) {
                 if (lastRecordedShadow == null) {

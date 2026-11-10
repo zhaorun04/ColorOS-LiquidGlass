@@ -47,7 +47,20 @@ internal class HighlightElement(
                     StaticLayerRecordReuse288116.highlightProviderInvalidatedLive288118++
                 }
             }
-            node.invalidateRecorded288117()
+            // V288.119: do not discard a live layer just because a new
+            // ShapeProvider wrapper was allocated. Only retain a known,
+            // value-equal Kyant RoundedRectangle from the last *recorded* key.
+            // Unknown/mutable paths still invalidate exactly as before.
+            val retain = StaticLayerRecordReuse288116.enabled &&
+                node.canRetainRecordedShape288119(shapeProvider.innerShape)
+            if (retain) {
+                StaticLayerRecordReuse288116.highlightProviderRetained288119++
+            } else {
+                node.invalidateRecorded288117()
+                if (StaticLayerRecordReuse288116.enabled) {
+                    StaticLayerRecordReuse288116.highlightProviderInvalidated288119++
+                }
+            }
         }
         node.shapeProvider = shapeProvider
         node.highlight = highlight
@@ -91,14 +104,20 @@ internal class HighlightNode(
         val density: Float,
         val fontScale: Float,
         val direction: androidx.compose.ui.unit.LayoutDirection,
-        val outline: Outline,
-        val shapeProvider: ShapeProvider,
-        val outlineRevision: Long,
+        val outline: Outline?,
+        // V288.119: geometry value, not the provider wrapper identity.
+        // Only known Kyant RoundedRectangle Generic outlines are eligible.
+        val recordedShape: androidx.compose.ui.graphics.Shape,
         val highlight: Highlight
     )
     private var lastRecordedHighlight: RecordedHighlightKey? = null
     fun invalidateRecorded288117() { lastRecordedHighlight = null }
     fun hasRecordedCache288118(): Boolean = lastRecordedHighlight != null
+    fun canRetainRecordedShape288119(candidate: androidx.compose.ui.graphics.Shape): Boolean {
+        val recorded = lastRecordedHighlight?.recordedShape ?: return false
+        return recorded is RoundedRectangle && candidate is RoundedRectangle &&
+            recorded == candidate
+    }
 
     private val paint =
         Paint().apply {
@@ -163,8 +182,9 @@ internal class HighlightNode(
                 outline is Outline.Rounded || knownGeneric288117
             val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
                 RecordedHighlightKey(safeSize, size, density.density, density.fontScale,
-                    layoutDirection, outline, shapeProvider,
-                    shapeProvider.outlineRevision288117, highlight)
+                    layoutDirection,
+                    if (knownGeneric288117) null else outline,
+                    shapeProvider.innerShape, highlight)
             } else null
             if (StaticLayerRecordReuse288116.enabled && key != null) {
                 if (lastRecordedHighlight == null) {
