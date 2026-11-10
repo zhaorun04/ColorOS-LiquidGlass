@@ -1909,6 +1909,15 @@ object KyantLauncherLens270 {
         } catch (_: Throwable) { false }
         // V288.121: instrument the actual Kyant DrawModifierNode recording paths.
         // Shares V288.120 default-off flag, so old install/test commands still work.
+        // V288.127: independent, default-off layer topology probe. No rendering changes.
+        val passProbe288127 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_pass_topology_probe_288127", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.BackdropPassProbe127.enabled = passProbe288127
+        if (passProbe288127) android.util.Log.i("KyantPass288127",
+            "KYANT288127_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "scope=normal_nested_export_effect_topology_diagnostic_only")
         com.kyant.backdrop.internal.BackdropTrace121.enabled = perfettoTrace288120
         com.kyant.backdrop.internal.BackdropLifecycle122.enabled = perfettoTrace288120
         if (perfettoTrace288120) android.util.Log.i("KyantLayer288122",

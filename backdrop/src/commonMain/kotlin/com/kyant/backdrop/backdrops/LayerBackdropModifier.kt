@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.InspectorInfo
 import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
+import com.kyant.backdrop.internal.BackdropPassProbe127
 
 /** V288.126 diagnostic-only projection of the source visual key.
  *  No reference to Android APIs, no bypass of source record checks.
@@ -102,6 +103,7 @@ private class LayerBackdropNode(
     }
 
     override fun ContentDrawScope.draw() {
+        if (BackdropPassProbe127.enabled) BackdropPassProbe127.sourceRecords++
         if (BackdropLifecycle122.enabled) {
             BackdropLifecycle122.sourceRecords++
             BackdropLifecycle122.reportIfDue122("source", backdrop.graphicsLayer.hashCode(),

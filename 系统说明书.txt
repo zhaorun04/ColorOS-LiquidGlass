@@ -161,3 +161,13 @@ noPrevious：没有历史键；unavailableKey：当前键无效；knownKeyCompar
 KYANT288126_COORD：低频记录 screenPosition 与 drawPosition 的差异；仅供判断坐标路径，非缓存键改动。
 监测目标是 RenderThread/GPU 的多容器滑动卡顿，不将回弹同步单独当作性能根因。
 构建需 GitHub Actions 真正编译验证；UI/SP/Root/Launcher 既有光学配置不修改。
+
+
+V1.9.205.288.127 — RenderThread/GPU 多层拓扑诊断
+- 新增默认关闭的 Settings.Global 开关 liquidglass_kyant_pass_topology_probe_288127。
+- 低频统计 Source/Backdrop 的 record 和 draw 调用、导出图层及嵌套 Backdrop record、RenderEffect 是否启用。
+- normalAreaPx/nestedAreaPx/exportedAreaPx 仅表示名义像素处理规模（有重复/嵌套），不是实际 GPU 带宽、Pass 数或显存分配。
+- 不改变 Bitmap、渲染特效、坐标、GraphcisLayer 创建和缓存复用逻辑。
+- 测试命令：su -c 'settings put global liquidglass_kyant_pass_topology_probe_288127 1'；重启 Launcher。
+- 日志：su -c 'logcat -d -b all -v brief | grep -E "KYANT288127_HOST|KYANT288127_PASS_WINDOW" | tail -50'。
+- 测试完成设置为 0 并重启 Launcher。

@@ -35,6 +35,7 @@ import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
+import com.kyant.backdrop.internal.BackdropPassProbe127
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.InnerShadowElement
 import com.kyant.backdrop.shadow.Shadow
@@ -301,6 +302,22 @@ private class DrawBackdropNode(
                     size.width.toInt(), size.height.toInt(),
                     "padding=$padding coords=${layoutCoordinates != null}")
             }
+            // V288.127: count record calls separately from graphics layer allocation.
+            // Nested record calls can occur while building exportedBackdrop.
+            if (BackdropPassProbe127.enabled) {
+                val area127 = (size.width.toInt() + padding.toInt() * 2).coerceAtLeast(0).toLong() *
+                    (size.height.toInt() + padding.toInt() * 2).coerceAtLeast(0).toLong()
+                if (BackdropPassProbe127.insideExportRecord) {
+                    BackdropPassProbe127.nestedBackdropRecords++
+                    BackdropPassProbe127.nestedAreaPixels += area127
+                } else {
+                    BackdropPassProbe127.normalBackdropRecords++
+                    BackdropPassProbe127.normalAreaPixels += area127
+                }
+                if (effectScope.renderEffect != null) BackdropPassProbe127.effectEnabledRecords++
+                else BackdropPassProbe127.effectDisabledRecords++
+                BackdropPassProbe127.maybeReport()
+            }
             val trace121 = BackdropTrace121.enabled
             if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_RECORD")
             try {
@@ -319,6 +336,7 @@ private class DrawBackdropNode(
             layer.topLeft =
                 if (padding != 0f) IntOffset(-padding.toInt(), -padding.toInt())
                 else IntOffset.Zero
+            if (BackdropPassProbe127.enabled) BackdropPassProbe127.backdropLayerDraws++
             if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_DRAW")
             try {
                 drawLayer(layer)
@@ -339,6 +357,7 @@ private class DrawBackdropNode(
     }
 
     override fun ContentDrawScope.draw() {
+        if (BackdropPassProbe127.enabled) BackdropPassProbe127.drawNodeCalls++
         if (effectScope.update(this)) {
             updateEffects()
         }
@@ -350,6 +369,13 @@ private class DrawBackdropNode(
         onDrawFront?.invoke(this)
 
         exportedBackdrop?.graphicsLayer?.let { layer ->
+            if (BackdropPassProbe127.enabled) {
+                BackdropPassProbe127.exportedRecords++
+                BackdropPassProbe127.exportedAreaPixels +=
+                    size.width.toInt().coerceAtLeast(0).toLong() * size.height.toInt().coerceAtLeast(0).toLong()
+            }
+            val previousExport127 = BackdropPassProbe127.insideExportRecord
+            if (BackdropPassProbe127.enabled) BackdropPassProbe127.insideExportRecord = true
             val trace121 = BackdropTrace121.enabled
             if (trace121) BackdropTrace121.begin("LG121_EXPORTED_LAYER_RECORD")
             try {
@@ -360,6 +386,7 @@ private class DrawBackdropNode(
                     onDrawFront?.invoke(this)
                 }
             } finally {
+                if (BackdropPassProbe127.enabled) BackdropPassProbe127.insideExportRecord = previousExport127
                 if (trace121) BackdropTrace121.end()
             }
         }
