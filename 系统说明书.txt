@@ -78,3 +78,8 @@ V1.9.205.288.117：仅新增低频汇总的缓存未命中归因计数（hRect/h
 
 V1.9.205.288.117｜Generic 静态光学图层安全白名单实验
 仅当 Outline.Generic 来源于已知 com.kyant.shapes.RoundedRectangle、ShapeProvider 的轮廓缓存版本及几何参数稳定时，复用高光/阴影录制图层。其余 Generic Path 仍每次录制。运行开关仍是 Settings.Global: liquidglass_kyant_static_layer_cache_288116，默认关闭，修改后需重启 Launcher。日志 KYANT288116_LAYER_WINDOW 新增 hEligibleGeneric/sEligibleGeneric，并保留 Recorded/Reused/Cold/KeyChanged。实时壁纸背景、折射和模糊绘制不使用本缓存。此实验未验证真机画质和完整 Gradle 编译，请先在多文件夹场景检查高光、阴影是否随参数正常更新。
+
+
+V1.9.205.288.120｜Perfetto 绘制阶段归因诊断：
+新增默认关闭开关 settings global liquidglass_kyant_perfetto_sections_288120。开启并重启 Launcher 后，以 android.os.Trace 在每个 Host 的 Compose 参考帧 Canvas 绘制期间记录 LG120_SOURCE_<host>，在光学 drawBackdrop Modifier 外层记录 LG120_OPTICAL_<host>。此标记衡量 UI 线程的 Compose 绘制/录制调用区间，不能直接衡量 GPU shader 执行时间、也不能凭其位置断定 Texture upload 的真实归属。
+默认关闭，沿用 V288.119 光学与缓存逻辑；建议采集 A/B 各 20 秒 Perfetto 跟踪，同时做多轮 gfxinfo 帧统计，不要直接把 GPU 缓存用量差异判定为泄漏。

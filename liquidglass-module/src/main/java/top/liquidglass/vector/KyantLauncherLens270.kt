@@ -16,6 +16,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -1900,6 +1901,15 @@ object KyantLauncherLens270 {
         android.util.Log.i("KyantLayer288116", "KYANT288116_HOST host=$trace28815Host " +
             "enabled=$staticLayerReuse288116 gpu=$gpuReference288110 " +
             "scope=highlight_shadow_only")
+        // V288.120: opt-in Android Perfetto markers. Tags mark Compose CPU-side
+        // drawing/recording only; they do not attribute HWUI GPU uploads.
+        val perfettoTrace288120 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_perfetto_sections_288120", 0) == 1
+        } catch (_: Throwable) { false }
+        if (perfettoTrace288120) android.util.Log.i("KyantTrace288120",
+            "KYANT288120_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "staticLayer=$staticLayerReuse288116")
         val multiHostProbe288114 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_multi_host_probe_288114", 0) == 1
@@ -2788,7 +2798,8 @@ object KyantLauncherLens270 {
                     }
                 }, lifecycleProbe28864, drawProbe28865,
                 sourceDrawSerial28864, sourceDrawPosition28864,
-                { stage, pos, info -> releaseTrace28820(stage, pos, info) }) {
+                { stage, pos, info -> releaseTrace28820(stage, pos, info) },
+                perfettoTrace288120) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3714,6 +3725,7 @@ object KyantLauncherLens270 {
         sourceDrawSerial28864: AtomicLong,
         sourceDrawPosition28864: java.util.concurrent.atomic.AtomicReference<Offset?>,
         trace28820: (String, Offset?, String) -> Unit,
+        perfettoTrace288120: Boolean,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -3726,6 +3738,12 @@ object KyantLauncherLens270 {
         // Compose State. Capture on the first actual draw to avoid startup offset.
         val frozenSource = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicReference<Offset?>(null) }
         val sourceDrawCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
+        val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
+            "LG120_SOURCE_$traceHost28890"
+        }
+        val traceOpticalName288120 = androidx.compose.runtime.remember(traceHost28890) {
+            "LG120_OPTICAL_$traceHost28890"
+        }
         // Last reported drawing source (not a SurfaceFlinger frame id).
         val sourceTraceState28895 = androidx.compose.runtime.remember { longArrayOf(-1L, 0L) }
         val reboundLogState28890 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
@@ -3890,6 +3908,8 @@ object KyantLauncherLens270 {
                 Modifier.fillMaxSize().layerBackdrop(backdrop).graphicsLayer { alpha = sourceAlpha }
             }
             ComposeCanvas(sourceModifier) {
+                if (perfettoTrace288120) android.os.Trace.beginSection(traceSourceName288120)
+                try {
                 val sourceCpuStart288114 = if (multiHostProbe288114)
                     SystemClock.elapsedRealtimeNanos() else 0L
                 val composeDrawStart288109 = if (perfProfile288109)
@@ -4768,12 +4788,20 @@ object KyantLauncherLens270 {
                             "gpu=$gpuReference288110 cull=$offscreenCull288113")
                     }
                 }
+                } finally {
+                    if (perfettoTrace288120) android.os.Trace.endSection()
+                }
             }
             // Mode B: source Bitmap is displayed by Compose, but no Kyant backdrop
             // is captured or rendered. Mode C keeps the original optical pipeline.
             if (nodePipeline28881 < 0 && pipelineMode28819 < 0 &&
                 !pipelineSourceOnly28879 && !pipelineCaptureOnly28879 &&
-                (displayIsolationMode != 2 || nativeLayerMode in 2..3)) Box(Modifier.fillMaxSize().drawBackdrop(
+                (displayIsolationMode != 2 || nativeLayerMode in 2..3)) Box(Modifier.fillMaxSize()
+                .then(if (perfettoTrace288120) Modifier.drawWithContent {
+                    android.os.Trace.beginSection(traceOpticalName288120)
+                    try { drawContent() } finally { android.os.Trace.endSection() }
+                } else Modifier)
+                .drawBackdrop(
                 backdrop = backdrop,
                 // The OEM radius is in physical pixels. Convert to dp and clamp to avoid a circle.
                 shape = { RoundedRectangle(cornerDp) },
