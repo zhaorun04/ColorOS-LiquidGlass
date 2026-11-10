@@ -1909,6 +1909,10 @@ object KyantLauncherLens270 {
         // V288.121: instrument the actual Kyant DrawModifierNode recording paths.
         // Shares V288.120 default-off flag, so old install/test commands still work.
         com.kyant.backdrop.internal.BackdropTrace121.enabled = perfettoTrace288120
+        com.kyant.backdrop.internal.BackdropLifecycle122.enabled = perfettoTrace288120
+        if (perfettoTrace288120) android.util.Log.i("KyantLayer288122",
+            "KYANT288122_HOST host=$trace28815Host enabled=true " +
+            "scope=source_backdrop_layer_lifecycle_no_render_changes")
         if (perfettoTrace288120) android.util.Log.i("KyantTrace288121",
             "KYANT288121_HOST host=$trace28815Host enabled=true " +
             "markers=SOURCE_LAYER_RECORD,BACKDROP_LAYER_RECORD,BACKDROP_LAYER_DRAW," +
@@ -4217,6 +4221,18 @@ object KyantLauncherLens270 {
                                     "bridgeId=${System.identityHashCode(bridgeBitmap)} " +
                                     "bridgeGeneration=${bridgeBitmap.generationId} " +
                                     "bridgeSize=${bridgeBitmap.width}x${bridgeBitmap.height} " +
+                                    "target=${size.width}x${size.height}")
+                            }
+                            // V288.122: resource-source identity comparison. No Bitmap writes.
+                            if (perfettoTrace288120 && (num288110 == 0L || num288110 % 240L == 0L)) {
+                                val currentReference122 = referenceState28832.value
+                                android.util.Log.i("KyantLayer288122", "KYANT288122_BITMAP " +
+                                    "host=$traceHost28890 gpu=$gpuReference288110 hw=$hw " +
+                                    "refId=${System.identityHashCode(currentReference122)} " +
+                                    "refGen=${currentReference122.generationId} " +
+                                    "refSize=${currentReference122.width}x${currentReference122.height} " +
+                                    "bridgeId=${System.identityHashCode(bridgeBitmap)} " +
+                                    "bridgeGen=${bridgeBitmap.generationId} " +
                                     "target=${size.width}x${size.height}")
                             }
                             // V288.116: one process-wide low-frequency confirmation

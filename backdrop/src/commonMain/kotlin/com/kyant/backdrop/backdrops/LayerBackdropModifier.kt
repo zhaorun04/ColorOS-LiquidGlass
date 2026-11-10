@@ -10,6 +10,7 @@ import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.InspectorInfo
 import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
+import com.kyant.backdrop.internal.BackdropLifecycle122
 
 fun Modifier.layerBackdrop(backdrop: LayerBackdrop): Modifier =
     this then LayerBackdropElement(backdrop)
@@ -27,6 +28,7 @@ private class LayerBackdropElement(
             node.backdrop.layerCoordinates = null
             node.backdrop = backdrop
         }
+        if (BackdropLifecycle122.enabled) BackdropLifecycle122.sourceNodeUpdates++
         node.invalidateDraw()
     }
 
@@ -54,6 +56,11 @@ private class LayerBackdropNode(
 ) : DrawModifierNode, GlobalPositionAwareModifierNode, Modifier.Node() {
 
     override fun ContentDrawScope.draw() {
+        if (BackdropLifecycle122.enabled) {
+            BackdropLifecycle122.sourceRecords++
+            BackdropLifecycle122.reportIfDue122("source", backdrop.graphicsLayer.hashCode(),
+                size.width.toInt(), size.height.toInt(), "")
+        }
         drawContent()
         val trace121 = BackdropTrace121.enabled
         if (trace121) BackdropTrace121.begin("LG121_SOURCE_LAYER_RECORD")
@@ -70,7 +77,12 @@ private class LayerBackdropNode(
         }
     }
 
+    override fun onAttach() {
+        if (BackdropLifecycle122.enabled) BackdropLifecycle122.sourceNodeAttaches++
+    }
+
     override fun onDetach() {
+        if (BackdropLifecycle122.enabled) BackdropLifecycle122.sourceNodeDetaches++
         backdrop.layerCoordinates = null
     }
 }

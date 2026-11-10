@@ -94,3 +94,14 @@ V1.9.205.288.121｜真正的 DrawModifierNode 绘制阶段 Perfetto 归因诊断
 - 不改变任何实时背景、折射、模糊、Compose invalidation、GraphicsLayer 缓存及参数映射。
 - 建议 perfetto -a com.android.launcher -o /data/local/tmp/lg121.perfetto-trace -t 15s -b 128mb gfx view sched freq；采集前检查 KYANT288121_HOST。
 - 需要 CI 完整 Android 编译及真机画质/跟踪验证。
+
+
+V1.9.205.288.122｜GPU 纹理资源生命周期非侵入式归因诊断
+- 沿用 V288.120 Perfetto 诊断开关 liquidglass_kyant_perfetto_sections_288120=1（默认关闭），重启 Launcher 生效。
+- 日志 KYANT288122_HOST、KYANT288122_LAYER_WINDOW、KYANT288122_BITMAP。
+- SOURCE/BACKDROP 分别统计 draw record、Modifier 更新、Attach/Detach；BACKDROP 记录 GraphicsLayer create/release/replaced 与尺寸、坐标依赖状态。
+- 共享壁纸 Bitmap 记录 refId/refGen/尺寸与 Bridge refId/refGen，用于区分 Bitmap 变化和稳定 Bitmap 在 HWUI 中重复资源处理。
+- 不生成 GPU 字节计数，不声称 Texture upload 区间属于某一图层。请同时使用 V288.121 Perfetto Trace 对照分析。
+- 不变更壁纸实时绘制、采样、折射、模糊、高光、阴影、缓存策略、UI/SP/Root/Launcher 映射。
+- 测试：settings put global liquidglass_kyant_perfetto_sections_288120 1；重启 Launcher；logcat -d -b all -v brief | grep KYANT288122 | tail -60。
+- 完整 Android/Gradle 编译和真机验证仍需用户 CI。

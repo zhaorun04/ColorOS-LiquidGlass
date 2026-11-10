@@ -34,6 +34,7 @@ import com.kyant.backdrop.highlight.HighlightElement
 import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
+import com.kyant.backdrop.internal.BackdropLifecycle122
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.InnerShadowElement
 import com.kyant.backdrop.shadow.Shadow
@@ -173,6 +174,7 @@ private class DrawBackdropElement(
     }
 
     override fun update(node: DrawBackdropNode) {
+        if (BackdropLifecycle122.enabled) BackdropLifecycle122.backgroundNodeUpdates++
         node.backdrop = backdrop
         node.shapeProvider = shapeProvider
         node.effects = effects
@@ -251,6 +253,7 @@ private class DrawBackdropNode(
         }
 
     private var graphicsLayer: GraphicsLayer? = null
+    private var lastRecordedLayerId122: Int = 0
 
     private val layoutLayerBlock: GraphicsLayerScope.() -> Unit = {
         clip = true
@@ -288,6 +291,16 @@ private class DrawBackdropNode(
         if (layer != null) {
             val padding = padding
 
+            if (BackdropLifecycle122.enabled) {
+                BackdropLifecycle122.backgroundRecords++
+                val currentId122 = layer.hashCode()
+                if (lastRecordedLayerId122 != 0 && lastRecordedLayerId122 != currentId122)
+                    BackdropLifecycle122.backgroundLayerReplaced++
+                lastRecordedLayerId122 = currentId122
+                BackdropLifecycle122.reportIfDue122("backdrop", currentId122,
+                    size.width.toInt(), size.height.toInt(),
+                    "padding=$padding coords=${layoutCoordinates != null}")
+            }
             val trace121 = BackdropTrace121.enabled
             if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_RECORD")
             try {
@@ -388,16 +401,23 @@ private class DrawBackdropNode(
     override fun onAttach() {
         val graphicsContext = requireGraphicsContext()
         graphicsLayer = graphicsContext.createGraphicsLayer()
+        if (BackdropLifecycle122.enabled) {
+            BackdropLifecycle122.backgroundNodeAttaches++
+            BackdropLifecycle122.backgroundLayerCreated++
+        }
 
         observeEffects()
     }
 
     override fun onDetach() {
+        if (BackdropLifecycle122.enabled) BackdropLifecycle122.backgroundNodeDetaches++
         val graphicsContext = requireGraphicsContext()
         graphicsLayer?.let { layer ->
+            if (BackdropLifecycle122.enabled) BackdropLifecycle122.backgroundLayerReleased++
             graphicsContext.releaseGraphicsLayer(layer)
             graphicsLayer = null
         }
+        lastRecordedLayerId122 = 0
 
         effectScope.reset()
         layoutCoordinates = null
