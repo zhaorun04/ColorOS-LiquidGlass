@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.IntSize
 import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.internal.blur
 import com.kyant.backdrop.internal.StaticLayerRecordReuse288116
+import com.kyant.backdrop.internal.BackdropTrace121
 import kotlin.math.ceil
 
 internal class ShadowElement(
@@ -171,14 +172,20 @@ internal class ShadowNode(
             }
             if (key == null || key != lastRecordedShadow) {
                 configurePaint(shadow)
-                shadowLayer.record(shadowSize) {
-                    translate(radius * 2f + offsetX, radius * 2f + offsetY) {
-                        val canvas = drawContext.canvas
-                        canvas.drawOutline(outline, paint)
-                        canvas.translate(-offsetX, -offsetY)
-                        canvas.drawOutline(outline, ShadowMaskPaint)
-                        canvas.translate(offsetX, offsetY)
+                val trace121 = BackdropTrace121.enabled
+                if (trace121) BackdropTrace121.begin("LG121_SHADOW_RECORD")
+                try {
+                    shadowLayer.record(shadowSize) {
+                        translate(radius * 2f + offsetX, radius * 2f + offsetY) {
+                            val canvas = drawContext.canvas
+                            canvas.drawOutline(outline, paint)
+                            canvas.translate(-offsetX, -offsetY)
+                            canvas.drawOutline(outline, ShadowMaskPaint)
+                            canvas.translate(offsetX, offsetY)
+                        }
                     }
+                } finally {
+                    if (trace121) BackdropTrace121.end()
                 }
                 StaticLayerRecordReuse288116.shadowRecords++
                 lastRecordedShadow = key
@@ -186,8 +193,14 @@ internal class ShadowNode(
                 StaticLayerRecordReuse288116.shadowReuses++
             }
 
-            translate(-radius * 2f, -radius * 2f) {
-                drawLayer(shadowLayer)
+            val traceDraw121 = BackdropTrace121.enabled
+            if (traceDraw121) BackdropTrace121.begin("LG121_SHADOW_DRAW")
+            try {
+                translate(-radius * 2f, -radius * 2f) {
+                    drawLayer(shadowLayer)
+                }
+            } finally {
+                if (traceDraw121) BackdropTrace121.end()
             }
         }
 

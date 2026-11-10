@@ -26,6 +26,7 @@ import com.kyant.backdrop.internal.blur
 import com.kyant.backdrop.internal.clipOutline
 import com.kyant.backdrop.internal.setRuntimeShader
 import com.kyant.backdrop.internal.StaticLayerRecordReuse288116
+import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.isRuntimeShaderSupported
 import kotlin.math.ceil
 
@@ -196,14 +197,20 @@ internal class HighlightNode(
             }
             if (key == null || key != lastRecordedHighlight) {
                 configurePaint(highlight)
-                highlightLayer.record(safeSize) {
-                    translate(1f, 1f) {
-                        val canvas = drawContext.canvas
-                        canvas.save()
-                        canvas.clipOutline(outline, clipPath)
-                        canvas.drawOutline(outline, paint)
-                        canvas.restore()
+                val trace121 = BackdropTrace121.enabled
+                if (trace121) BackdropTrace121.begin("LG121_HIGHLIGHT_RECORD")
+                try {
+                    highlightLayer.record(safeSize) {
+                        translate(1f, 1f) {
+                            val canvas = drawContext.canvas
+                            canvas.save()
+                            canvas.clipOutline(outline, clipPath)
+                            canvas.drawOutline(outline, paint)
+                            canvas.restore()
+                        }
                     }
+                } finally {
+                    if (trace121) BackdropTrace121.end()
                 }
                 StaticLayerRecordReuse288116.highlightRecords++
                 lastRecordedHighlight = key
@@ -211,8 +218,14 @@ internal class HighlightNode(
                 StaticLayerRecordReuse288116.highlightReuses++
             }
 
-            translate(-1f, -1f) {
-                drawLayer(highlightLayer)
+            val traceDraw121 = BackdropTrace121.enabled
+            if (traceDraw121) BackdropTrace121.begin("LG121_HIGHLIGHT_DRAW")
+            try {
+                translate(-1f, -1f) {
+                    drawLayer(highlightLayer)
+                }
+            } finally {
+                if (traceDraw121) BackdropTrace121.end()
             }
         }
     }

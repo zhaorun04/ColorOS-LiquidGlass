@@ -83,3 +83,14 @@ V1.9.205.288.117｜Generic 静态光学图层安全白名单实验
 V1.9.205.288.120｜Perfetto 绘制阶段归因诊断：
 新增默认关闭开关 settings global liquidglass_kyant_perfetto_sections_288120。开启并重启 Launcher 后，以 android.os.Trace 在每个 Host 的 Compose 参考帧 Canvas 绘制期间记录 LG120_SOURCE_<host>，在光学 drawBackdrop Modifier 外层记录 LG120_OPTICAL_<host>。此标记衡量 UI 线程的 Compose 绘制/录制调用区间，不能直接衡量 GPU shader 执行时间、也不能凭其位置断定 Texture upload 的真实归属。
 默认关闭，沿用 V288.119 光学与缓存逻辑；建议采集 A/B 各 20 秒 Perfetto 跟踪，同时做多轮 gfxinfo 帧统计，不要直接把 GPU 缓存用量差异判定为泄漏。
+
+
+V1.9.205.288.121｜真正的 DrawModifierNode 绘制阶段 Perfetto 归因诊断
+- 沿用 Settings.Global: liquidglass_kyant_perfetto_sections_288120=1，默认关闭；修改开关后重启 Launcher。
+- 新增 LG121_SOURCE_LAYER_RECORD、LG121_BACKDROP_LAYER_RECORD、LG121_BACKDROP_LAYER_DRAW、LG121_EXPORTED_LAYER_RECORD、LG121_HIGHLIGHT_RECORD、LG121_HIGHLIGHT_DRAW、LG121_SHADOW_RECORD、LG121_SHADOW_DRAW。
+- 新增 KYANT288121_HOST enabled=true 日志。Android 以 android.os.Trace 标记，桌面/Web/iOS 平台使用无操作实现。
+- 移除旧 LG120_OPTICAL 的误导性一次性区间，保留 LG120_SOURCE 作为前一版本对照。
+- 所有新标记仅覆盖 CPU 侧绘制和命令录制；不等同 GPU Shader 运行时长和纹理实际上传字节量。
+- 不改变任何实时背景、折射、模糊、Compose invalidation、GraphicsLayer 缓存及参数映射。
+- 建议 perfetto -a com.android.launcher -o /data/local/tmp/lg121.perfetto-trace -t 15s -b 128mb gfx view sched freq；采集前检查 KYANT288121_HOST。
+- 需要 CI 完整 Android 编译及真机画质/跟踪验证。

@@ -16,7 +16,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -1907,6 +1906,13 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_perfetto_sections_288120", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.121: instrument the actual Kyant DrawModifierNode recording paths.
+        // Shares V288.120 default-off flag, so old install/test commands still work.
+        com.kyant.backdrop.internal.BackdropTrace121.enabled = perfettoTrace288120
+        if (perfettoTrace288120) android.util.Log.i("KyantTrace288121",
+            "KYANT288121_HOST host=$trace28815Host enabled=true " +
+            "markers=SOURCE_LAYER_RECORD,BACKDROP_LAYER_RECORD,BACKDROP_LAYER_DRAW," +
+            "EXPORTED_LAYER_RECORD,HIGHLIGHT_RECORD,HIGHLIGHT_DRAW,SHADOW_RECORD,SHADOW_DRAW")
         if (perfettoTrace288120) android.util.Log.i("KyantTrace288120",
             "KYANT288120_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
             "staticLayer=$staticLayerReuse288116")
@@ -3741,9 +3747,6 @@ object KyantLauncherLens270 {
         val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
             "LG120_SOURCE_$traceHost28890"
         }
-        val traceOpticalName288120 = androidx.compose.runtime.remember(traceHost28890) {
-            "LG120_OPTICAL_$traceHost28890"
-        }
         // Last reported drawing source (not a SurfaceFlinger frame id).
         val sourceTraceState28895 = androidx.compose.runtime.remember { longArrayOf(-1L, 0L) }
         val reboundLogState28890 = androidx.compose.runtime.remember { longArrayOf(0L, 0L, 0L) }
@@ -4797,10 +4800,6 @@ object KyantLauncherLens270 {
             if (nodePipeline28881 < 0 && pipelineMode28819 < 0 &&
                 !pipelineSourceOnly28879 && !pipelineCaptureOnly28879 &&
                 (displayIsolationMode != 2 || nativeLayerMode in 2..3)) Box(Modifier.fillMaxSize()
-                .then(if (perfettoTrace288120) Modifier.drawWithContent {
-                    android.os.Trace.beginSection(traceOpticalName288120)
-                    try { drawContent() } finally { android.os.Trace.endSection() }
-                } else Modifier)
                 .drawBackdrop(
                 backdrop = backdrop,
                 // The OEM radius is in physical pixels. Convert to dp and clamp to avoid a circle.

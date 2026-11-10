@@ -33,6 +33,7 @@ import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.highlight.HighlightElement
 import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.internal.recordLayer
+import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.InnerShadowElement
 import com.kyant.backdrop.shadow.Shadow
@@ -287,19 +288,30 @@ private class DrawBackdropNode(
         if (layer != null) {
             val padding = padding
 
-            recordLayer(
-                layer,
-                size = IntSize(
-                    size.width.toInt() + padding.toInt() * 2,
-                    size.height.toInt() + padding.toInt() * 2
-                ),
-                block = recordBackdropBlock
-            )
+            val trace121 = BackdropTrace121.enabled
+            if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_RECORD")
+            try {
+                recordLayer(
+                    layer,
+                    size = IntSize(
+                        size.width.toInt() + padding.toInt() * 2,
+                        size.height.toInt() + padding.toInt() * 2
+                    ),
+                    block = recordBackdropBlock
+                )
+            } finally {
+                if (trace121) BackdropTrace121.end()
+            }
 
             layer.topLeft =
                 if (padding != 0f) IntOffset(-padding.toInt(), -padding.toInt())
                 else IntOffset.Zero
-            drawLayer(layer)
+            if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_DRAW")
+            try {
+                drawLayer(layer)
+            } finally {
+                if (trace121) BackdropTrace121.end()
+            }
         }
     }
 
@@ -325,11 +337,17 @@ private class DrawBackdropNode(
         onDrawFront?.invoke(this)
 
         exportedBackdrop?.graphicsLayer?.let { layer ->
-            recordLayer(layer) {
-                onDrawBehind?.invoke(this)
-                drawBackdropLayer()
-                onDrawSurface?.invoke(this)
-                onDrawFront?.invoke(this)
+            val trace121 = BackdropTrace121.enabled
+            if (trace121) BackdropTrace121.begin("LG121_EXPORTED_LAYER_RECORD")
+            try {
+                recordLayer(layer) {
+                    onDrawBehind?.invoke(this)
+                    drawBackdropLayer()
+                    onDrawSurface?.invoke(this)
+                    onDrawFront?.invoke(this)
+                }
+            } finally {
+                if (trace121) BackdropTrace121.end()
             }
         }
     }

@@ -9,6 +9,7 @@ import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.node.invalidateDraw
 import androidx.compose.ui.platform.InspectorInfo
 import com.kyant.backdrop.internal.recordLayer
+import com.kyant.backdrop.internal.BackdropTrace121
 
 fun Modifier.layerBackdrop(backdrop: LayerBackdrop): Modifier =
     this then LayerBackdropElement(backdrop)
@@ -54,7 +55,13 @@ private class LayerBackdropNode(
 
     override fun ContentDrawScope.draw() {
         drawContent()
-        recordLayer(backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
+        val trace121 = BackdropTrace121.enabled
+        if (trace121) BackdropTrace121.begin("LG121_SOURCE_LAYER_RECORD")
+        try {
+            recordLayer(backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
+        } finally {
+            if (trace121) BackdropTrace121.end()
+        }
     }
 
     override fun onGloballyPositioned(coordinates: LayoutCoordinates) {
