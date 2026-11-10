@@ -1924,6 +1924,14 @@ object KyantLauncherLens270 {
         // This probe NEVER skips a draw or mutates a GraphicsLayer.
         // V288.124: observation only. Distinguishes logical notification from
         // monitored reference-frame visual inputs; never suppresses redraws.
+        // V288.125 opt-in. Default OFF; source only, no backdrop cache.
+        val sourceRecordReuse288125 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_source_record_reuse_288125", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.SourceReuseProbe125.enabled = sourceRecordReuse288125
+        if (sourceRecordReuse288125) android.util.Log.i("KyantSource288125",
+            "KYANT288125_HOST host=$trace28815Host enabled=true mode=source_record_only")
         val sourceVisualProbe288124 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_source_visual_probe_288124", 0) == 1
@@ -2826,7 +2834,8 @@ object KyantLauncherLens270 {
                 }, lifecycleProbe28864, drawProbe28865,
                 sourceDrawSerial28864, sourceDrawPosition28864,
                 { stage, pos, info -> releaseTrace28820(stage, pos, info) },
-                perfettoTrace288120, sourceInputProbe288123, sourceVisualProbe288124) {
+                perfettoTrace288120, sourceInputProbe288123, sourceVisualProbe288124,
+                sourceRecordReuse288125) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3685,6 +3694,17 @@ object KyantLauncherLens270 {
     }
 
     /** Real wallpaper pixels sampled from the existing Launcher Bitmap, without a CPU crop. */
+    // V288.125: immutable key; intentionally excludes bridgeVersion (a logical
+    // Compose notification, not a bitmap content generation).
+    private data class SourceVisualKey125(
+        val refId: Int, val refGeneration: Int,
+        val refWidth: Int, val refHeight: Int,
+        val previewW: Int, val previewH: Int,
+        val screenW: Int, val screenH: Int,
+        val x: Float, val y: Float,
+        val paintAlpha: Int, val gpuMode: Int
+    )
+
     @Composable private fun LensContent270(
         reference: Bitmap, previewWidth: Int, previewHeight: Int,
         rootWidth: Int, rootHeight: Int, screenPosition: androidx.compose.runtime.State<Offset>,
@@ -3755,11 +3775,34 @@ object KyantLauncherLens270 {
         perfettoTrace288120: Boolean,
         sourceInputProbe288123: Boolean,
         sourceVisualProbe288124: Boolean,
+        sourceRecordReuse288125: Boolean,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
         val optics28827 = KyantOptics28827.material
-        val backdrop = rememberLayerBackdrop()
+        // V288.125: the key is evaluated at SOURCE DRAW time, not during
+        // composition. Only the simple screenPosition-driven hardware GPU path
+        // is eligible; all special motion/native sampling paths fail open.
+        val sourceReuseGate125 = sourceRecordReuse288125 &&
+            gpuReference288110 && bridgeBitmap != null &&
+            motionAbMode == 0 && legacySyncAbMode != 1 && sourceMatrixAb28866 == 0 &&
+            nodePipeline28881 < 0 && pipelineMode28819 < 0 &&
+            bitmapPipeline28880 < 0 && rootPipeline28879 < 0 &&
+            nativeLayerMode != 2 && nativeLayerMode != 3 &&
+            !offscreenCull288113 && bridgeSyncMode != 1
+        val backdrop = rememberLayerBackdrop(sourceRecordKey125 = if (sourceReuseGate125) {
+            {
+                val pos125 = screenPosition.value
+                if (pos125.x.isFinite() && pos125.y.isFinite() && !reference.isRecycled) {
+                    SourceVisualKey125(
+                        System.identityHashCode(reference), reference.generationId,
+                        reference.width, reference.height, previewWidth, previewHeight,
+                        android.content.res.Resources.getSystem().displayMetrics.widthPixels,
+                        android.content.res.Resources.getSystem().displayMetrics.heightPixels,
+                        pos125.x, pos125.y, 255, 1)
+                } else null
+            }
+        } else null)
         val image = androidx.compose.runtime.remember(reference) { reference.asImageBitmap() }
         val bitmapPaint = androidx.compose.runtime.remember { Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) }
         val wholeDestination = androidx.compose.runtime.remember { RectF() }

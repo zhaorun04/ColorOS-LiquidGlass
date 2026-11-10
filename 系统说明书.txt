@@ -135,3 +135,14 @@ stableNoNotify：所测画面输入和 bridgeVersion 均未变；
 notifyWithoutBitmapMutation：bridgeVersion 改变但共享 Bitmap ID/Generation 未变。
 本诊断无法涵盖全部 Canvas/Compose/Backdrop 状态，也不能证明按此分类直接跳过 SOURCE 录制安全。
 不修改原有 UI/SP/Root/Launcher 光学参数映射；完整 Gradle 编译待 CI 验证。
+
+
+V1.9.205.288.125｜Source 受限 GraphicsLayer 录制复用 A/B
+独立 Settings.Global 开关（默认关闭）：liquidglass_kyant_source_record_reuse_288125。
+只在 GPU Shared Bitmap、原始无补偿 Source 坐标路径下，允许对已录制 Source GraphicsLayer 做相同绘制输入复用。
+任意关键输入变化、尺寸变化、图层变化、模式变化或无效 key 立即重新录制。
+始终执行 drawContent()；从不缓存动态 BACKDROP 折射、阴影或高光。
+纹理上传可能不改善；本实验需检查桌面滑动、释放回弹、壁纸替换及光学强度实时生效。
+日志：KYANT288125_HOST、KYANT288125_SOURCE_CACHE（draws/recorded/reused/fallback/invalidated/eligible）。
+如果画质/对位异常立即设置开关 0 并重启 Launcher。
+UI/SP/Root/Launcher 既有光学参数映射未改；完整 CI 编译待验证。

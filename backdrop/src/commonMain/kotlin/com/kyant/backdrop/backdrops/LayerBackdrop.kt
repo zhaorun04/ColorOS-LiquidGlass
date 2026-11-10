@@ -24,11 +24,16 @@ private val DefaultOnDraw: ContentDrawScope.() -> Unit = { drawContent() }
 @Composable
 fun rememberLayerBackdrop(
     graphicsLayer: GraphicsLayer = rememberGraphicsLayer(),
-    onDraw: ContentDrawScope.() -> Unit = DefaultOnDraw
+    onDraw: ContentDrawScope.() -> Unit = DefaultOnDraw,
+    // V288.125: optional per-draw key; null means unconditional original record.
+    // Never supply a key for unknown / dynamic source paths.
+    sourceRecordKey125: (() -> Any?)? = null
 ): LayerBackdrop {
-    return remember(graphicsLayer, onDraw) {
+    val result = remember(graphicsLayer, onDraw) {
         LayerBackdrop(graphicsLayer, onDraw)
     }
+    result.sourceRecordKey125 = sourceRecordKey125
+    return result
 }
 
 @Stable
@@ -39,6 +44,9 @@ class LayerBackdrop internal constructor(
 
     override val isCoordinatesDependent: Boolean = true
 
+    // Non-observable opt-in key provider. Draw-node checks it immediately before
+    // recording; the source layer is not reused without an explicitly eligible key.
+    internal var sourceRecordKey125: (() -> Any?)? = null
     internal var layerCoordinates: LayoutCoordinates? by mutableStateOf(null)
 
     private var inverseLayerScope: InverseLayerScope? = null

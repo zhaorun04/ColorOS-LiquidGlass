@@ -27,6 +27,7 @@ private class LayerBackdropElement(
         if (node.backdrop != backdrop) {
             node.backdrop.layerCoordinates = null
             node.backdrop = backdrop
+            node.clearSourceRecord125()
         }
         if (BackdropLifecycle122.enabled) BackdropLifecycle122.sourceNodeUpdates++
         node.invalidateDraw()
@@ -55,6 +56,28 @@ private class LayerBackdropNode(
     var backdrop: LayerBackdrop
 ) : DrawModifierNode, GlobalPositionAwareModifierNode, Modifier.Node() {
 
+    private var lastSourceRecordKey125: Any? = null
+    private var lastSourceLayer125: androidx.compose.ui.graphics.layer.GraphicsLayer? = null
+    private var lastSourceWidth125 = -1
+    private var lastSourceHeight125 = -1
+    private var lastSourceDensity125 = Float.NaN
+    private var lastSourceFontScale125 = Float.NaN
+    private var lastSourceLayout125: Any? = null
+    private var sourceRecords125 = 0L
+    private var sourceReused125 = 0L
+    private var sourceFallback125 = 0L
+    private var sourceInvalidated125 = 0L
+    private var sourceKeyEligible125 = 0L
+    private var sourceDraws125 = 0L
+
+    fun clearSourceRecord125() {
+        lastSourceRecordKey125 = null
+        lastSourceLayer125 = null
+        lastSourceWidth125 = -1
+        lastSourceHeight125 = -1
+        sourceInvalidated125++
+    }
+
     override fun ContentDrawScope.draw() {
         if (BackdropLifecycle122.enabled) {
             BackdropLifecycle122.sourceRecords++
@@ -62,12 +85,54 @@ private class LayerBackdropNode(
                 size.width.toInt(), size.height.toInt(), "")
         }
         drawContent()
-        val trace121 = BackdropTrace121.enabled
-        if (trace121) BackdropTrace121.begin("LG121_SOURCE_LAYER_RECORD")
-        try {
-            recordLayer(backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
-        } finally {
-            if (trace121) BackdropTrace121.end()
+        // V288.125: never skip drawContent(). Reuse only the already recorded
+        // SOURCE GraphicsLayer, after validating an explicit immutable visual key.
+        // If key provider is unavailable or throws, fail open to normal recording.
+        val key125 = try { backdrop.sourceRecordKey125?.invoke() } catch (_: Throwable) { null }
+        val layerId125 = backdrop.graphicsLayer.hashCode()
+        val w125 = size.width.toInt()
+        val h125 = size.height.toInt()
+        val density125 = density
+        val font125 = fontScale
+        val layout125 = layoutDirection
+        sourceDraws125++
+        if (key125 != null) sourceKeyEligible125++ else sourceFallback125++
+        val reuse125 = key125 != null && lastSourceRecordKey125 != null &&
+            key125 == lastSourceRecordKey125 && lastSourceLayer125 === backdrop.graphicsLayer &&
+            lastSourceWidth125 == w125 && lastSourceHeight125 == h125 &&
+            lastSourceDensity125 == density125 && lastSourceFontScale125 == font125 &&
+            lastSourceLayout125 == layout125
+        if (reuse125) {
+            sourceReused125++
+        } else {
+            if (lastSourceRecordKey125 != null) sourceInvalidated125++
+            // Do not publish a new cache key until recording finishes successfully.
+            lastSourceRecordKey125 = null
+            val trace121 = BackdropTrace121.enabled
+            if (trace121) BackdropTrace121.begin("LG121_SOURCE_LAYER_RECORD")
+            try {
+                recordLayer(backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
+                sourceRecords125++
+                if (key125 != null) {
+                    lastSourceRecordKey125 = key125
+                    lastSourceLayer125 = backdrop.graphicsLayer
+                    lastSourceWidth125 = w125
+                    lastSourceHeight125 = h125
+                    lastSourceDensity125 = density125
+                    lastSourceFontScale125 = font125
+                    lastSourceLayout125 = layout125
+                }
+            } finally {
+                if (trace121) BackdropTrace121.end()
+            }
+        }
+        if (sourceDraws125 == 1L || sourceDraws125 % 240L == 0L) {
+            com.kyant.backdrop.internal.SourceReuseProbe125.report(
+                "KYANT288125_SOURCE_CACHE layerId=$layerId125 draws=$sourceDraws125 " +
+                "recorded=$sourceRecords125 reused=$sourceReused125 " +
+                "fallback=$sourceFallback125 invalidated=$sourceInvalidated125 " +
+                "eligible=$sourceKeyEligible125 keyEligible=${key125 != null} " +
+                "size=${w125}x${h125} scope=source_layer_only")
         }
     }
 
@@ -82,6 +147,7 @@ private class LayerBackdropNode(
     }
 
     override fun onDetach() {
+        clearSourceRecord125()
         if (BackdropLifecycle122.enabled) BackdropLifecycle122.sourceNodeDetaches++
         backdrop.layerCoordinates = null
     }
