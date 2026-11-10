@@ -1,4 +1,4 @@
-V1.9.205.288.116.1 静态图层缓存未命中归因版
+V1.9.205.288.117 静态图层缓存未命中归因版
 实验默认关闭：settings put global liquidglass_kyant_static_layer_cache_288116 1；重启 Launcher 生效。
 仅在 Outline 为矩形或圆角矩形、尺寸/密度/方向/高光或阴影参数不变时，复用对应 GraphicsLayer 已录制内容。
 动态背景、壁纸采样、Kyant 折射、Dock 与文件夹坐标不变。
@@ -52,4 +52,8 @@ git commit -m "V1.9.205.288.115 版本"
 git push origin main
 
 
-V1.9.205.288.116.1：仅新增低频汇总的缓存未命中归因计数（hRect/hRounded/hGeneric/hCold/hKeyChanged/hNodeAttach；sRect/sRounded/sGeneric/sCold/sKeyChanged/sNodeAttach）。未扩大 Generic 路径缓存准入；不改变实时背景、Shader 或光学效果。计数是进程累计值；重启 Launcher 后归零。原实验开关 liquidglass_kyant_static_layer_cache_288116 不变，保持默认关闭。
+V1.9.205.288.117：仅新增低频汇总的缓存未命中归因计数（hRect/hRounded/hGeneric/hCold/hKeyChanged/hNodeAttach；sRect/sRounded/sGeneric/sCold/sKeyChanged/sNodeAttach）。未扩大 Generic 路径缓存准入；不改变实时背景、Shader 或光学效果。计数是进程累计值；重启 Launcher 后归零。原实验开关 liquidglass_kyant_static_layer_cache_288116 不变，保持默认关闭。
+
+
+V1.9.205.288.117｜Generic 静态光学图层安全白名单实验
+仅当 Outline.Generic 来源于已知 com.kyant.shapes.RoundedRectangle、ShapeProvider 的轮廓缓存版本及几何参数稳定时，复用高光/阴影录制图层。其余 Generic Path 仍每次录制。运行开关仍是 Settings.Global: liquidglass_kyant_static_layer_cache_288116，默认关闭，修改后需重启 Launcher。日志 KYANT288116_LAYER_WINDOW 新增 hEligibleGeneric/sEligibleGeneric，并保留 Recorded/Reused/Cold/KeyChanged。实时壁纸背景、折射和模糊绘制不使用本缓存。此实验未验证真机画质和完整 Gradle 编译，请先在多文件夹场景检查高光、阴影是否随参数正常更新。

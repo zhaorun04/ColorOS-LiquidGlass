@@ -3,6 +3,7 @@ package com.kyant.backdrop.shadow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Paint
+import com.kyant.shapes.RoundedRectangle
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
@@ -33,6 +34,7 @@ internal class ShadowElement(
     }
 
     override fun update(node: ShadowNode) {
+        if (node.shapeProvider !== shapeProvider) node.invalidateRecorded288117()
         node.shapeProvider = shapeProvider
         node.shadow = shadow
         node.invalidateDraw()
@@ -76,9 +78,12 @@ internal class ShadowNode(
         val fontScale: Float,
         val direction: androidx.compose.ui.unit.LayoutDirection,
         val outline: Outline,
+        val shapeProvider: ShapeProvider,
+        val outlineRevision: Long,
         val shadow: Shadow
     )
     private var lastRecordedShadow: RecordedShadowKey? = null
+    fun invalidateRecorded288117() { lastRecordedShadow = null }
 
     private val paint = Paint()
 
@@ -112,10 +117,19 @@ internal class ShadowNode(
                     else -> StaticLayerRecordReuse288116.shadowGeneric++
                 }
             }
-            val cacheable = outline is Outline.Rectangle || outline is Outline.Rounded
+            // Only the known Kyant RoundedRectangle is eligible among Generic
+            // paths. Unrecognized custom/mutable paths always re-record.
+            val knownGeneric288117 = outline is Outline.Generic &&
+                shapeProvider.innerShape is RoundedRectangle
+            if (StaticLayerRecordReuse288116.enabled && knownGeneric288117) {
+                StaticLayerRecordReuse288116.shadowKnownGeneric288117++
+            }
+            val cacheable = outline is Outline.Rectangle ||
+                outline is Outline.Rounded || knownGeneric288117
             val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
                 RecordedShadowKey(shadowSize, size, density.density, density.fontScale,
-                    layoutDirection, outline, shadow)
+                    layoutDirection, outline, shapeProvider,
+                    shapeProvider.outlineRevision288117, shadow)
             } else null
             if (StaticLayerRecordReuse288116.enabled && key != null) {
                 if (lastRecordedShadow == null) {

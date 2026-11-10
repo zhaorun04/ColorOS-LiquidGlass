@@ -29,4 +29,7 @@ object StaticLayerRecordReuse288116 {
     var shadowCold: Long = 0L
     var shadowKeyChanged: Long = 0L
     var shadowNodeAttached: Long = 0L
+    // V288.117: whitelist-eligible Outline.Generic candidates.
+    var highlightKnownGeneric288117: Long = 0L
+    var shadowKnownGeneric288117: Long = 0L
 }

@@ -1,6 +1,7 @@
 package com.kyant.backdrop.highlight
 
 import androidx.compose.ui.Modifier
+import com.kyant.shapes.RoundedRectangle
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.PaintingStyle
@@ -38,6 +39,7 @@ internal class HighlightElement(
     }
 
     override fun update(node: HighlightNode) {
+        if (node.shapeProvider !== shapeProvider) node.invalidateRecorded288117()
         node.shapeProvider = shapeProvider
         node.highlight = highlight
         node.invalidateDraw()
@@ -81,9 +83,12 @@ internal class HighlightNode(
         val fontScale: Float,
         val direction: androidx.compose.ui.unit.LayoutDirection,
         val outline: Outline,
+        val shapeProvider: ShapeProvider,
+        val outlineRevision: Long,
         val highlight: Highlight
     )
     private var lastRecordedHighlight: RecordedHighlightKey? = null
+    fun invalidateRecorded288117() { lastRecordedHighlight = null }
 
     private val paint =
         Paint().apply {
@@ -135,10 +140,21 @@ internal class HighlightNode(
                     else -> StaticLayerRecordReuse288116.highlightGeneric++
                 }
             }
-            val cacheable = outline is Outline.Rectangle || outline is Outline.Rounded
+            // The production Launcher shape is a value-stable Kyant RoundedRectangle
+            // that generates Outline.Generic. Other Generic paths remain excluded.
+            // The provider caches the outline and increments its revision when
+            // shape, size, direction or density causes an outline rebuild.
+            val knownGeneric288117 = outline is Outline.Generic &&
+                shapeProvider.innerShape is RoundedRectangle
+            if (StaticLayerRecordReuse288116.enabled && knownGeneric288117) {
+                StaticLayerRecordReuse288116.highlightKnownGeneric288117++
+            }
+            val cacheable = outline is Outline.Rectangle ||
+                outline is Outline.Rounded || knownGeneric288117
             val key = if (StaticLayerRecordReuse288116.enabled && cacheable) {
                 RecordedHighlightKey(safeSize, size, density.density, density.fontScale,
-                    layoutDirection, outline, highlight)
+                    layoutDirection, outline, shapeProvider,
+                    shapeProvider.outlineRevision288117, highlight)
             } else null
             if (StaticLayerRecordReuse288116.enabled && key != null) {
                 if (lastRecordedHighlight == null) {
