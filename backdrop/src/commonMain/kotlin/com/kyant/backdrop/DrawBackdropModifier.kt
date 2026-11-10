@@ -36,6 +36,7 @@ import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
 import com.kyant.backdrop.internal.BackdropPassProbe127
+import com.kyant.backdrop.internal.BackdropResourceProbe130
 import com.kyant.backdrop.internal.BackdropEffectProbe128
 import com.kyant.backdrop.internal.BackdropEffectIsolation129
 import com.kyant.backdrop.shadow.InnerShadow
@@ -258,6 +259,12 @@ private class DrawBackdropNode(
 
     private var graphicsLayer: GraphicsLayer? = null
     private var lastRecordedLayerId122: Int = 0
+    private var backdropRecords130 = 0L
+    private var backdropDraws130 = 0L
+    private var backdropResizes130 = 0L
+    private var backdropLastW130 = -1
+    private var backdropLastH130 = -1
+    private var backdropLastReport130 = 0L
 
     private val layoutLayerBlock: GraphicsLayerScope.() -> Unit = {
         clip = true
@@ -321,25 +328,61 @@ private class DrawBackdropNode(
                 else BackdropPassProbe127.effectDisabledRecords++
                 BackdropPassProbe127.maybeReport()
             }
+            val probe130 = BackdropResourceProbe130.enabled
+            val recordWidth130 = (size.width.toInt() + padding.toInt() * 2).coerceAtLeast(0)
+            val recordHeight130 = (size.height.toInt() + padding.toInt() * 2).coerceAtLeast(0)
+            val layerId130 = layer.hashCode()
+            if (probe130) {
+                backdropRecords130++
+                if (backdropLastW130 >= 0 &&
+                    (backdropLastW130 != recordWidth130 || backdropLastH130 != recordHeight130))
+                    backdropResizes130++
+                backdropLastW130 = recordWidth130
+                backdropLastH130 = recordHeight130
+                val now130 = com.kyant.backdrop.internal.platformElapsedTime122()
+                if (backdropLastReport130 == 0L || now130 - backdropLastReport130 >= 3000L) {
+                    backdropLastReport130 = now130
+                    BackdropResourceProbe130.log(
+                        "KYANT288130_BACKDROP layerId=$layerId130 size=${recordWidth130}x${recordHeight130} " +
+                        "records=$backdropRecords130 draws=$backdropDraws130 resizes=$backdropResizes130 " +
+                        "effect=${effectScope.renderEffect != null} padding=$padding " +
+                        "coords=${layoutCoordinates != null} " +
+                        "scope=app_graphicslayer_record_not_hwui_texture_id")
+                }
+            }
+            val trace130 = probe130 && BackdropTrace121.enabled
+            if (trace130) BackdropTrace121.begin("LG130_BKD_${recordWidth130}x${recordHeight130}_L${layerId130}")
             val trace121 = BackdropTrace121.enabled
             if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_RECORD")
             try {
-                recordLayer(
-                    layer,
-                    size = IntSize(
-                        size.width.toInt() + padding.toInt() * 2,
-                        size.height.toInt() + padding.toInt() * 2
-                    ),
-                    block = recordBackdropBlock
-                )
+                val trace131 = com.kyant.backdrop.internal.BackdropJointProbe131.enabled && trace121
+                if (trace131) BackdropTrace121.begin("LG131_BACKDROP_RECORD_${recordWidth130}x${recordHeight130}")
+                try {
+                    recordLayer(
+                        layer,
+                        size = IntSize(
+                            size.width.toInt() + padding.toInt() * 2,
+                            size.height.toInt() + padding.toInt() * 2
+                        ),
+                        block = recordBackdropBlock
+                    )
+                } finally {
+                    if (trace131) BackdropTrace121.end()
+                }
+                if (com.kyant.backdrop.internal.BackdropJointProbe131.enabled) {
+                    com.kyant.backdrop.internal.BackdropJointProbe131.backdropRecords++
+                    com.kyant.backdrop.internal.BackdropJointProbe131.reportIfDue()
+                }
             } finally {
                 if (trace121) BackdropTrace121.end()
+                if (trace130) BackdropTrace121.end()
             }
 
             layer.topLeft =
                 if (padding != 0f) IntOffset(-padding.toInt(), -padding.toInt())
                 else IntOffset.Zero
             if (BackdropPassProbe127.enabled) BackdropPassProbe127.backdropLayerDraws++
+            if (probe130) backdropDraws130++
             if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_DRAW")
             try {
                 drawLayer(layer)

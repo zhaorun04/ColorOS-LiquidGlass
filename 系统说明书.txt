@@ -1,3 +1,40 @@
+V1.9.205.288.131｜单文件夹采样与帧耗时联合诊断版
+
+本版承接 V288.130，新增默认关闭的联合诊断开关：liquidglass_kyant_joint_frame_probe_288131。
+开启：settings put global liquidglass_kyant_joint_frame_probe_288131 1
+关闭：settings put global liquidglass_kyant_joint_frame_probe_288131 0
+切换后重启 com.android.launcher；Perfetto 标记需另外开启 liquidglass_kyant_perfetto_sections_288120=1。
+建议保持 GPU 参考帧 288110=1，RenderEffect 隔离 288129=0，Source 复用 288125=0，静态图层缓存 288116=0。
+
+KYANT288131_HOST：确认 Host 读取了开关。
+KYANT288131_SOURCE：每 Host 的 Source 绘制回调累计数量、超过16.7/33.3ms 的相邻回调间隔、位置变化、与 native View 坐标间隔超过1px、参考 Bitmap generation 变化、bridgeVersion 变化，并携带 elapsedRealtimeNanos 时间戳。native position 只每4次回调读取一次；本统计不能代表最终上屏帧或证明掉帧根因。
+KYANT288131_LAYER：跨 Host 共享的 Source/Backdrop CPU 图层录制累计次数及毫秒时间戳；不能当成 GPU Pass 计数。
+Perfetto：LG131_SOURCE_BITMAP_H{host}、LG131_SOURCE_RECORD_{W}x{H}、LG131_BACKDROP_RECORD_{W}x{H}，均为 CPU 录制/命令提交区间；与 gfx/view/sched/freq 的 RenderThread、FrameTimeline 结合分析。应用层尚不能直接获取最终上屏帧的像素对应关系。
+
+测试 A：仅一文件夹的桌面页连续滑动15秒；测试 B：多文件夹页同样测试。两次分别采集 logcat、gfxinfo framestats 和 Perfetto；比较长帧、图层重复录制及 native/source 坐标误差的时间关系。不要直接根据纹理视觉错位认定是采样同步问题，也不要根据回调间隔直接推断帧提交时序。
+
+本版不改变 UI→SharedPreferences→Root 快照→Launcher 的光学参数传递关系，不修改 Bitmap、Shader、模糊、折射、文件夹/Dock 大小及背景采样位置；只有诊断开关和少量日志/Trace 负载。源码静态检查及 ZIP 完整性校验已完成；Android Gradle 编译、真机效果与性能尚未验证。
+
+—— 历史记录 ——
+V1.9.205.288.130｜HWUI 纹理标记与 GraphicsLayer 来源关联诊断版
+
+目标：在保持完整 Kyant 模糊、折射、GPU 参考 Bitmap、容器位移及既有 GraphicsLayer 绘制的前提下，为 Source 与 Backdrop 的每图层录制记录建立可在 Perfetto 中按尺寸和时间查找的标记。注意：应用层无法直接读取 HWUI Vulkan 内部的纹理资源 ID，尺寸、时间、Layer hash 仅用于辅助归因，不能证明与 Texture upload 中的 texture 编号一一对应。
+
+默认关闭：settings put global liquidglass_kyant_resource_probe_288130 0
+开启：settings put global liquidglass_kyant_resource_probe_288130 1
+Perfetto 轨迹（可选）：settings put global liquidglass_kyant_perfetto_sections_288120 1
+开关变更后执行：am force-stop com.android.launcher
+测试保持 liquidglass_kyant_gpu_reference_ab_288110=1；liquidglass_kyant_effect_isolation_ab_288129=0；liquidglass_kyant_source_record_reuse_288125=0；liquidglass_kyant_static_layer_cache_288116=0。
+
+日志：KYANT288130_HOST / KYANT288130_SOURCE / KYANT288130_BACKDROP。
+SOURCE：每个 Source 节点累计 draw/record/reuse，缓存键内位置变化、Bitmap ID 或 generation 变化、键详情缺失等。
+BACKDROP：每个 Backdrop 节点累计 record/draw、录制尺寸变化、RenderEffect 是否存在、padding 和布局坐标是否可用。
+日志只在首次及至少 3 秒后再次被绘制时输出；是累计计数而不是固定时窗差分。Source 记录数在日志输出当次可能少一次，因为先打印再执行当前录制。
+当 288120 与 288130 同时开启，Trace 额外包含 LG130_SRC_{W}x{H}_L{layerHash} 与 LG130_BKD_{W}x{H}_L{layerHash}。这些是 CPU 录制区间而不是 GPU 提交耗时；与 Texture upload 时间、尺寸结合分析时必须考虑跨线程延迟及渲染管线异步性。
+
+本版本不含直接跳过图层录制、缓存 Effect 或削弱玻璃质量的逻辑。原有 UI→SP→Root→Launcher 光学参数映射未修改；新增 Settings.Global 键仅用于诊断。已进行静态结构检查与 ZIP 完整性验证；完整 Android Gradle 构建、真机测试未验证。
+
+—— 历史记录 ——
 V1.9.205.288.129｜RenderEffect 实际成本隔离 A/B 诊断版
 
 目的：在同一个文件夹桌面页面、相同滑动节奏下，通过 0/1 两档隔离 Backdrop GraphicsLayer RenderEffect，量化 GPU RenderThread 绘制/纹理处理/掉帧差值。不能根据 RenderEffect 构建次数判断 GPU Pass。

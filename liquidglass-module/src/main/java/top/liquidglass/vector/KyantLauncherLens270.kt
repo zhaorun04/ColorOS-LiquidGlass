@@ -1940,6 +1940,26 @@ object KyantLauncherLens270 {
         if (passProbe288127) android.util.Log.i("KyantPass288127",
             "KYANT288127_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
             "scope=normal_nested_export_effect_topology_diagnostic_only")
+        // V288.130: diagnostic-only app-level GraphicsLayer provenance probe.
+        // No native HWUI texture ID access; never skip records or change pixel output.
+        val resourceProbe288130 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_resource_probe_288130", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.BackdropResourceProbe130.enabled = resourceProbe288130
+        if (resourceProbe288130) android.util.Log.i("KyantResource288130",
+            "KYANT288130_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "trace=$perfettoTrace288120 scope=source_backdrop_graphicslayer_provenance_not_hwui_texture_identity")
+        // V288.131: joint source-position/cadence vs backdrop recording timeline.
+        // A Global setting is read at host construction; no renderer inputs change.
+        val jointProbe288131 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_joint_frame_probe_288131", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.BackdropJointProbe131.enabled = jointProbe288131
+        if (jointProbe288131) android.util.Log.i("KyantJoint288131",
+            "KYANT288131_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "trace=$perfettoTrace288120 scope=source_draw_input_cadence_not_presented_frame")
         com.kyant.backdrop.internal.BackdropTrace121.enabled = perfettoTrace288120
         com.kyant.backdrop.internal.BackdropLifecycle122.enabled = perfettoTrace288120
         if (perfettoTrace288120) android.util.Log.i("KyantLayer288122",
@@ -2867,7 +2887,7 @@ object KyantLauncherLens270 {
                 sourceDrawSerial28864, sourceDrawPosition28864,
                 { stage, pos, info -> releaseTrace28820(stage, pos, info) },
                 perfettoTrace288120, sourceInputProbe288123, sourceVisualProbe288124,
-                sourceRecordReuse288125) {
+                sourceRecordReuse288125, jointProbe288131) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3821,6 +3841,7 @@ object KyantLauncherLens270 {
         sourceInputProbe288123: Boolean,
         sourceVisualProbe288124: Boolean,
         sourceRecordReuse288125: Boolean,
+        jointProbe288131: Boolean,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -3876,6 +3897,15 @@ object KyantLauncherLens270 {
         val sourceVisualInitialized288124 = androidx.compose.runtime.remember { booleanArrayOf(false) }
 
 
+        // 131: per-host, draw-only counters (no Compose writes).
+        // timestamps: last source draw / current window start / last log
+        val jointTimes131 = androidx.compose.runtime.remember { LongArray(3) }
+        // counts: draws / gaps>16.7ms / gaps>33.3ms / position changed /
+        // native difference >1px / bitmap generation changes / bridge tick changes
+        val jointCounts131 = androidx.compose.runtime.remember { LongArray(7) }
+        // previous x/y/native gap maximum and source position step maximum
+        val jointValues131 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN, 0f, 0f) }
+        val jointKeys131 = androidx.compose.runtime.remember { intArrayOf(-1, Int.MIN_VALUE) }
         val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
             "LG120_SOURCE_$traceHost28890"
         }
@@ -4078,6 +4108,59 @@ object KyantLauncherLens270 {
                     frozenSource.compareAndSet(null, selectedOrigin28866)
                 val drawPosition = if (motionAbMode == 1)
                     (frozenSource.get() ?: selectedOrigin28866) else selectedOrigin28866
+                // V288.131 diagnostic only: compares positions at ONE Source draw,
+                // records elapsedRealtimeNanos cadence; this is not a presented frame ID.
+                if (jointProbe288131) {
+                    val now131 = SystemClock.elapsedRealtimeNanos()
+                    if (jointTimes131[1] == 0L) jointTimes131[1] = now131
+                    val previousNs131 = jointTimes131[0]
+                    if (previousNs131 > 0L) {
+                        val interval131 = now131 - previousNs131
+                        if (interval131 > 16_700_000L) jointCounts131[1]++
+                        if (interval131 > 33_300_000L) jointCounts131[2]++
+                    }
+                    jointTimes131[0] = now131
+                    jointCounts131[0]++
+                    if (jointValues131[0].isFinite() && jointValues131[1].isFinite()) {
+                        val step131 = kotlin.math.max(
+                            kotlin.math.abs(drawPosition.x - jointValues131[0]),
+                            kotlin.math.abs(drawPosition.y - jointValues131[1]))
+                        if (step131 > 0f) jointCounts131[3]++
+                        jointValues131[3] = maxOf(jointValues131[3], step131)
+                    }
+                    jointValues131[0] = drawPosition.x
+                    jointValues131[1] = drawPosition.y
+                    // Limit native-View reads to one in four source draws to reduce probe overhead.
+                    if (jointCounts131[0] % 4L == 0L) {
+                        val native131 = try { currentNativePosition() } catch (_: Throwable) { null }
+                        if (native131 != null && native131.x.isFinite() && native131.y.isFinite()) {
+                            val gap131 = kotlin.math.max(
+                                kotlin.math.abs(native131.x - drawPosition.x),
+                                kotlin.math.abs(native131.y - drawPosition.y))
+                            if (gap131 > 1f) jointCounts131[4]++
+                            jointValues131[2] = maxOf(jointValues131[2], gap131)
+                        }
+                    }
+                    val bitmapGen131 = try { reference.generationId } catch (_: Throwable) { -1 }
+                    if (jointKeys131[0] != -1 && bitmapGen131 != jointKeys131[0]) jointCounts131[5]++
+                    jointKeys131[0] = bitmapGen131
+                    val bridgeTick131 = bridgeVersion.value
+                    if (jointKeys131[1] != Int.MIN_VALUE && bridgeTick131 != jointKeys131[1]) jointCounts131[6]++
+                    jointKeys131[1] = bridgeTick131
+                    if (jointTimes131[2] == 0L || now131 - jointTimes131[2] >= 2_000_000_000L) {
+                        jointTimes131[2] = now131
+                        android.util.Log.i("KyantJoint288131",
+                            "KYANT288131_SOURCE host=$traceHost28890 tNs=$now131 " +
+                            "draws=${jointCounts131[0]} over16=${jointCounts131[1]} " +
+                            "over33=${jointCounts131[2]} moved=${jointCounts131[3]} " +
+                            "nativeGapOver1=${jointCounts131[4]} maxNativeGapPx=${jointValues131[2]} " +
+                            "maxStepPx=${jointValues131[3]} refGen=$bitmapGen131 " +
+                            "refGenChanges=${jointCounts131[5]} bridgeTicks=${jointCounts131[6]} " +
+                            "bridgeVersion=$bridgeTick131 screenX=${committedPosition.x} " +
+                            "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
+                            "scope=source_draw_callbacks_not_display_presentations")
+                    }
+                }
                 // V288.126 observation only: the Source cache-key position is
                 // read from screenPosition, while drawPosition is the actual
                 // coordinate chosen by the renderer. No change to either path.
@@ -4455,8 +4538,14 @@ object KyantLauncherLens270 {
                         drawIntoCanvas { canvas ->
                             val hw = canvas.nativeCanvas.isHardwareAccelerated
                             if (hw && !reference.isRecycled) {
-                                canvas.nativeCanvas.drawBitmap(reference, null,
-                                    wholeDestination, bitmapPaint)
+                                val traceJoint131 = jointProbe288131 && perfettoTrace288120
+                                if (traceJoint131) android.os.Trace.beginSection("LG131_SOURCE_BITMAP_H${traceHost28890}")
+                                try {
+                                    canvas.nativeCanvas.drawBitmap(reference, null,
+                                        wholeDestination, bitmapPaint)
+                                } finally {
+                                    if (traceJoint131) android.os.Trace.endSection()
+                                }
                             } else {
                                 // Keep the original software fallback intact.
                                 bridgeResample(drawPosition)

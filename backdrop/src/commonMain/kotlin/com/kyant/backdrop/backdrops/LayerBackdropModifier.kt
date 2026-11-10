@@ -12,6 +12,7 @@ import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
 import com.kyant.backdrop.internal.BackdropPassProbe127
+import com.kyant.backdrop.internal.BackdropResourceProbe130
 
 /** V288.126 diagnostic-only projection of the source visual key.
  *  No reference to Android APIs, no bypass of source record checks.
@@ -92,6 +93,18 @@ private class LayerBackdropNode(
     private var noPrevious126 = 0L
     private var unavailableKey126 = 0L
     private var knownKey126 = 0L
+    // V288.130 source-path per-node counters; no changes to record/reuse behavior.
+    private var inputReports130 = 0L
+    private var positionDelta130 = 0L
+    private var stablePosition130 = 0L
+    private var bitmapDelta130 = 0L
+    private var missingDetails130 = 0L
+    private var previousX130 = Float.NaN
+    private var previousY130 = Float.NaN
+    private var previousBitmapId130 = 0
+    private var previousBitmapGen130 = 0
+    private var hasPrevious130 = false
+    private var lastReport130 = 0L
 
 
     fun clearSourceRecord125() {
@@ -120,6 +133,38 @@ private class LayerBackdropNode(
         val density125 = density
         val font125 = fontScale
         val layout125 = layoutDirection
+        val probe130 = BackdropResourceProbe130.enabled
+        if (probe130) {
+            inputReports130++
+            val info130 = key125 as? SourceKeyDetails126
+            if (info130 == null) missingDetails130++
+            else {
+                if (hasPrevious130) {
+                    if (info130.sourceX126 != previousX130 || info130.sourceY126 != previousY130)
+                        positionDelta130++
+                    else stablePosition130++
+                    if (info130.bitmapId126 != previousBitmapId130 ||
+                        info130.bitmapGeneration126 != previousBitmapGen130) bitmapDelta130++
+                }
+                previousX130 = info130.sourceX126
+                previousY130 = info130.sourceY126
+                previousBitmapId130 = info130.bitmapId126
+                previousBitmapGen130 = info130.bitmapGeneration126
+                hasPrevious130 = true
+            }
+            val now130 = com.kyant.backdrop.internal.platformElapsedTime122()
+            if (lastReport130 == 0L || now130 - lastReport130 >= 3000L) {
+                lastReport130 = now130
+                BackdropResourceProbe130.log(
+                    "KYANT288130_SOURCE layerId=$layerId125 size=${w125}x${h125} " +
+                    "draws=$inputReports130 recorded=$sourceRecords125 reused=$sourceReused125 " +
+                    "posChanged=$positionDelta130 posStable=$stablePosition130 " +
+                    "bitmapChanged=$bitmapDelta130 unavailable=$missingDetails130 " +
+                    "bitmapId=$previousBitmapId130 generation=$previousBitmapGen130 " +
+                    "x=$previousX130 y=$previousY130 " +
+                    "scope=app_graphicslayer_source_record_not_hwui_texture_id")
+            }
+        }
         sourceDraws125++
         if (key125 != null) sourceKeyEligible125++ else sourceFallback125++
         val reuse125 = key125 != null && lastSourceRecordKey125 != null &&
@@ -160,10 +205,22 @@ private class LayerBackdropNode(
             if (lastSourceRecordKey125 != null) sourceInvalidated125++
             // Do not publish a new cache key until recording finishes successfully.
             lastSourceRecordKey125 = null
+            val trace130 = probe130 && BackdropTrace121.enabled
+            if (trace130) BackdropTrace121.begin("LG130_SRC_${w125}x${h125}_L${layerId125}")
             val trace121 = BackdropTrace121.enabled
             if (trace121) BackdropTrace121.begin("LG121_SOURCE_LAYER_RECORD")
             try {
-                recordLayer(backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
+                val trace131 = com.kyant.backdrop.internal.BackdropJointProbe131.enabled && trace121
+                if (trace131) BackdropTrace121.begin("LG131_SOURCE_RECORD_${w125}x${h125}")
+                try {
+                    recordLayer(backdrop.graphicsLayer) { backdrop.onDraw(this@draw) }
+                } finally {
+                    if (trace131) BackdropTrace121.end()
+                }
+                if (com.kyant.backdrop.internal.BackdropJointProbe131.enabled) {
+                    com.kyant.backdrop.internal.BackdropJointProbe131.sourceRecords++
+                    com.kyant.backdrop.internal.BackdropJointProbe131.reportIfDue()
+                }
                 sourceRecords125++
                 if (key125 != null) {
                     lastSourceRecordKey125 = key125
@@ -176,6 +233,7 @@ private class LayerBackdropNode(
                 }
             } finally {
                 if (trace121) BackdropTrace121.end()
+                if (trace130) BackdropTrace121.end()
             }
         }
         if (sourceDraws125 == 1L || sourceDraws125 % 240L == 0L) {
