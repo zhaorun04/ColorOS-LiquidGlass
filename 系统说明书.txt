@@ -1,3 +1,31 @@
+V1.9.205.288.134｜Bridge 通知必要性保守 A/B 实验版
+
+目标：验证稳定位置和参考 Bitmap 下的短间隔 Bridge 通知是否造成冗余渲染工作。
+本版是可恢复诊断实验，不是正式的性能优化。保留原有 GPU Source、Backdrop、模糊、折射、高光、Dock 绘制。
+
+设置键（Settings.Global，需重启 Launcher；默认 0）：
+ liquidglass_kyant_bridge_notify_ab_288134
+ 0：A 档，原始通知机制，完全不做抑制。
+ 1：B 档，仅 gpuReference 有效、原生 carrier=1、frameSync=0 时，对位置和 Bitmap 身份/generationId 未变的 native onDraw，最多连续抑制 1 次通知，且距最近放行通知不超过 24ms；其余立即放行。
+
+重要安全边界：该判定仅覆盖位置和 Bitmap 身份/版本，并未形式化证明 Shader 等全部光学状态相等。其他状态更新应依赖现有独立 Compose 状态通知；若出现玻璃冻结、壁纸错位、动态光学参数不生效，立即恢复 A 档。禁止日常长期使用 B 档，必须经真机 A/B 确认画质无回退。
+当已有 post 通知待处理时保持原合并机制；本版不停止 native View 绘制，也不跳过 Compose GraphicsLayer 录制。
+
+日志：
+ KYANT288134_HOST：B 档 Host 初始化与条件。
+ KYANT288134_WINDOW：每 Host 累计 eligible / passed / suppressedStable / passedMotion / passedReference / passedHeartbeat / passedInitial / passedUnsupported / bridgeVersion，约 2 秒输出。
+ 这些是应用层通知计数，不是 Compose 失效数量、GPU Pass 或最终上屏帧。nativeDraws 只有启用 288133 来源探针时才有非零值。
+
+建议 A/B 测试每档均重启 Launcher，测试相同页面，采集 Perfetto、dumpsys gfxinfo framestats 和 Logcat。
+共同配置：GPU 参考帧 288110=1；关闭 source_record_reuse_288125、static_layer_cache_288116、effect_isolation_ab_288129、visibility_ab_288132。
+A 档：settings put global liquidglass_kyant_bridge_notify_ab_288134 0
+B 档：settings put global liquidglass_kyant_bridge_notify_ab_288134 1
+抓取：su -c 'logcat -d -b all -v brief | grep -E "KYANT288134_HOST|KYANT288134_WINDOW" | tail -80'
+恢复：su -c 'settings put global liquidglass_kyant_bridge_notify_ab_288134 0; am force-stop com.android.launcher'
+
+其他说明沿用此前 V288.133 源码及诊断，原有 UI→SP→Root 快照→Launcher→Shader 光学参数映射不改动。
+
+原 V288.133 摘要：
 V1.9.205.288.133｜Bridge 通知来源与 Source 消费链诊断版
 
 目标：量化 native bridgeView.onDraw -> post 通知 -> bridgeVersion -> Source 绘制回调的链路。

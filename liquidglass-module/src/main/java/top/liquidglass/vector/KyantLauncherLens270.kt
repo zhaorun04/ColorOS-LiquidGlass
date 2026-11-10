@@ -1402,6 +1402,23 @@ object KyantLauncherLens270 {
                 "liquidglass_kyant_bridge_origin_probe_288133", 0) == 1
         } catch (_: Throwable) { false }
         val bridgeProducer133 = java.util.concurrent.atomic.AtomicLongArray(6)
+        // V288.134: conservative notification-cadence A/B. B never suppresses
+        // reference/position changes, and sends a heartbeat after 24 ms.
+        // It is an experimental source-invalidation gate, NOT a visual-key proof:
+        // shader/dynamic inputs might invalidate independently.
+        val bridgeNotifyAb288134 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_notify_ab_288134", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        // 0=nativeEligible, 1=passed, 2=suppressedStable,
+        // 3=passedMotion, 4=passedReference, 5=passedHeartbeat,
+        // 6=passedInitial, 7=passedUnsupported
+        val bridgeNotifyCounts134 = java.util.concurrent.atomic.AtomicLongArray(8)
+        var lastQueuedPosition134: Offset? = null
+        var lastQueuedBitmapIdentity134 = 0
+        var lastQueuedBitmapGen134 = Int.MIN_VALUE
+        var lastQueuedAtNs134 = 0L
+        var stableSkippedSinceQueue134 = 0
         val bridgeNotifyPending = java.util.concurrent.atomic.AtomicBoolean(false)
         var traceBudget28821 = 0
         var traceSeenSeq28821 = 0L
@@ -1860,6 +1877,10 @@ object KyantLauncherLens270 {
             (reboundFrameAb28891 != 1 || pipelineMode28819 != 2) &&
             frameSync28822 == 0 && v230NativeMode28887 == 0 &&
             nativeLayerMode !in 2..3 && displayIsolationMode != 2
+        if (bridgeNotifyAb288134 == 1) android.util.Log.i("KyantBridge288134",
+            "KYANT288134_HOST host=$trace28815Host mode=1 gpu=$gpuReference288110 " +
+            "carrier=$nativeCarrierAb28869 frameSync=$frameSync28822 " +
+            "scope=conservative_native_bridge_notifications_only")
         if (bridgeProbe133) android.util.Log.i("KyantBridge288133",
             "KYANT288133_HOST host=$trace28815Host probe=true gpu=$gpuReference288110 " +
             "frameSync=$frameSync28822 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
@@ -2301,7 +2322,54 @@ object KyantLauncherLens270 {
                 }
                 val notifyEligible133 = (frameSync28822 != 1 || nativeCarrierAb28869 == 1) &&
                     pipelineMode28819 != 3
-                if (notifyEligible133 && bridgeNotifyPending.compareAndSet(false, true)) {
+                // V288.134: short, bounded notification coalescing for eligible
+                // native draws whose position and reference pixels are unchanged.
+                // No changes to View.invalidate, Source draw or GraphicsLayer paths.
+                var suppressStable134 = false
+                if (notifyEligible133) {
+                    bridgeNotifyCounts134.incrementAndGet(0)
+                    val eligible134 = bridgeNotifyAb288134 == 1 && gpuReference288110 &&
+                        nativeCarrierAb28869 == 1 && frameSync28822 == 0 &&
+                        pos.x.isFinite() && pos.y.isFinite()
+                    if (eligible134) {
+                        val now134 = SystemClock.elapsedRealtimeNanos()
+                        val ref134 = referenceState28832.value
+                        val refId134 = if (ref134 == null || ref134.isRecycled) 0
+                            else System.identityHashCode(ref134)
+                        val refGen134 = if (ref134 == null || ref134.isRecycled) Int.MIN_VALUE
+                            else ref134.generationId
+                        val lastPos134 = lastQueuedPosition134
+                        val positionChanged134 = lastPos134 == null ||
+                            lastPos134.x != pos.x || lastPos134.y != pos.y
+                        val bitmapChanged134 = refId134 != lastQueuedBitmapIdentity134 ||
+                            refGen134 != lastQueuedBitmapGen134
+                        val heartbeat134 = lastQueuedAtNs134 == 0L ||
+                            now134 - lastQueuedAtNs134 >= 24_000_000L
+                        // At most one suppression between actual notifications;
+                        // do not starve a continuously redrawn native bridge.
+                        suppressStable134 = !positionChanged134 && !bitmapChanged134 &&
+                            !heartbeat134 && stableSkippedSinceQueue134 < 1
+                        if (suppressStable134) {
+                            stableSkippedSinceQueue134++
+                            bridgeNotifyCounts134.incrementAndGet(2)
+                        } else {
+                            if (lastPos134 == null) bridgeNotifyCounts134.incrementAndGet(6)
+                            else if (positionChanged134) bridgeNotifyCounts134.incrementAndGet(3)
+                            else if (bitmapChanged134) bridgeNotifyCounts134.incrementAndGet(4)
+                            else if (heartbeat134) bridgeNotifyCounts134.incrementAndGet(5)
+                            lastQueuedPosition134 = pos
+                            lastQueuedBitmapIdentity134 = refId134
+                            lastQueuedBitmapGen134 = refGen134
+                            lastQueuedAtNs134 = now134
+                            stableSkippedSinceQueue134 = 0
+                        }
+                    } else if (bridgeNotifyAb288134 == 1) {
+                        bridgeNotifyCounts134.incrementAndGet(7)
+                    }
+                }
+                if (notifyEligible133 && !suppressStable134 &&
+                    bridgeNotifyPending.compareAndSet(false, true)) {
+                    bridgeNotifyCounts134.incrementAndGet(1)
                     if (bridgeProbe133) bridgeProducer133.incrementAndGet(1)
                     post {
                         bridgeNotifyPending.set(false)
@@ -2313,8 +2381,22 @@ object KyantLauncherLens270 {
                         }
                     }
                 } else if (bridgeProbe133) {
-                    if (notifyEligible133) bridgeProducer133.incrementAndGet(3)
-                    else bridgeProducer133.incrementAndGet(5)
+                    if (notifyEligible133 && !suppressStable134) bridgeProducer133.incrementAndGet(3)
+                    else if (!notifyEligible133) bridgeProducer133.incrementAndGet(5)
+                }
+                if (bridgeNotifyAb288134 == 1 && count % 240L == 0L) {
+                    android.util.Log.i("KyantBridge288134",
+                        "KYANT288134_WINDOW host=$trace28815Host mode=$bridgeNotifyAb288134 " +
+                        "eligible=${bridgeNotifyCounts134.get(0)} " +
+                        "passed=${bridgeNotifyCounts134.get(1)} " +
+                        "suppressedStable=${bridgeNotifyCounts134.get(2)} " +
+                        "passedMotion=${bridgeNotifyCounts134.get(3)} " +
+                        "passedReference=${bridgeNotifyCounts134.get(4)} " +
+                        "passedHeartbeat=${bridgeNotifyCounts134.get(5)} " +
+                        "passedInitial=${bridgeNotifyCounts134.get(6)} " +
+                        "passedUnsupported=${bridgeNotifyCounts134.get(7)} " +
+                        "bridgeVersion=${bridgeVersion.intValue} " +
+                        "scope=native_notification_gate_not_gpu_or_presented_frames")
                 }
                 if (count % 60L == 1L && pipelineMode28819 >= 0) XposedBridge.log(
                     "KYANT28819_NATIVE_BRIDGE host=$trace28815Host mode=$pipelineMode28819 " +
