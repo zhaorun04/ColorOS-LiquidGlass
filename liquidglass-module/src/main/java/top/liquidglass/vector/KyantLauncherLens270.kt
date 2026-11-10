@@ -1393,6 +1393,15 @@ object KyantLauncherLens270 {
         // Native View and Compose draw run on the Launcher UI thread. This single
         // reusable Bitmap is updated atomically relative to those draw callbacks.
         // A pending notification is coalesced to avoid unbounded post() backlog.
+        // V288.133: producer-side counters only. No altered invalidation,
+        // no Compose State and no CPU bitmap mutation.
+        // 0=nativeDraw, 1=notifyQueued, 2=notifyDelivered,
+        // 3=notifyCoalesced, 4=cpuBridgeSamples, 5=drawsWithoutNotifyGate
+        val bridgeProbe133 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_origin_probe_288133", 0) == 1
+        } catch (_: Throwable) { false }
+        val bridgeProducer133 = java.util.concurrent.atomic.AtomicLongArray(6)
         val bridgeNotifyPending = java.util.concurrent.atomic.AtomicBoolean(false)
         var traceBudget28821 = 0
         var traceSeenSeq28821 = 0L
@@ -1851,6 +1860,10 @@ object KyantLauncherLens270 {
             (reboundFrameAb28891 != 1 || pipelineMode28819 != 2) &&
             frameSync28822 == 0 && v230NativeMode28887 == 0 &&
             nativeLayerMode !in 2..3 && displayIsolationMode != 2
+        if (bridgeProbe133) android.util.Log.i("KyantBridge288133",
+            "KYANT288133_HOST host=$trace28815Host probe=true gpu=$gpuReference288110 " +
+            "frameSync=$frameSync28822 carrier=$nativeCarrierAb28869 pipeline=$pipelineMode28819 " +
+            "scope=producer_consumer_callbacks_not_gpu_frames")
         // Emit once for EACH Host regardless of the requested switch value.
         // This separates stale Host initialization from experimental gate failures.
         val gpuBlockers288111 = ArrayList<String>(14)
@@ -2249,6 +2262,7 @@ object KyantLauncherLens270 {
             override fun onDraw(canvas: Canvas) {
                 super.onDraw(canvas)
                 if (disposed || width <= 0 || height <= 0) return
+                if (bridgeProbe133) bridgeProducer133.incrementAndGet(0)
                 val nativeDrawStart288109 = if (perfProfile288109)
                     SystemClock.elapsedRealtimeNanos() else 0L
                 val oldPos = try { glassScreenPosition(lastBounds) } catch (_: Throwable) { return }
@@ -2259,6 +2273,7 @@ object KyantLauncherLens270 {
                 if (!gpuReference288110 &&
                     (frameSync28822 != 1 || nativeCarrierAb28869 == 1)) {
                     sampleBridgeAt(pos, this)
+                    if (bridgeProbe133) bridgeProducer133.incrementAndGet(4)
                 } else if (gpuReference288110 && perfProfile288109) {
                     KyantPerf288109.skipNativeBridge288110()
                 }
@@ -2284,16 +2299,22 @@ object KyantLauncherLens270 {
                         "cpuBridgeSamples=${bridgeDrawCount.get()} " +
                         "posX=${pos.x} posY=${pos.y}")
                 }
-                if ((frameSync28822 != 1 || nativeCarrierAb28869 == 1) &&
-                    pipelineMode28819 != 3 && bridgeNotifyPending.compareAndSet(false, true)) {
+                val notifyEligible133 = (frameSync28822 != 1 || nativeCarrierAb28869 == 1) &&
+                    pipelineMode28819 != 3
+                if (notifyEligible133 && bridgeNotifyPending.compareAndSet(false, true)) {
+                    if (bridgeProbe133) bridgeProducer133.incrementAndGet(1)
                     post {
                         bridgeNotifyPending.set(false)
                         if (!disposed) {
+                            if (bridgeProbe133) bridgeProducer133.incrementAndGet(2)
                             bridgeVersion.intValue++
                             if (perfProfile288109) KyantPerf288109.notifyCompose()
                             releaseTrace28820("COMPOSE_NOTIFY", bridgePublishedPosition.get(), "pending=false")
                         }
                     }
+                } else if (bridgeProbe133) {
+                    if (notifyEligible133) bridgeProducer133.incrementAndGet(3)
+                    else bridgeProducer133.incrementAndGet(5)
                 }
                 if (count % 60L == 1L && pipelineMode28819 >= 0) XposedBridge.log(
                     "KYANT28819_NATIVE_BRIDGE host=$trace28815Host mode=$pipelineMode28819 " +
@@ -2904,7 +2925,7 @@ object KyantLauncherLens270 {
                 { stage, pos, info -> releaseTrace28820(stage, pos, info) },
                 perfettoTrace288120, sourceInputProbe288123, sourceVisualProbe288124,
                 sourceRecordReuse288125, jointProbe288131,
-                visibilityMode288132) {
+                visibilityMode288132, bridgeProbe133, bridgeProducer133) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3860,6 +3881,8 @@ object KyantLauncherLens270 {
         sourceRecordReuse288125: Boolean,
         jointProbe288131: Boolean,
         visibilityMode288132: Int,
+        bridgeProbe133: Boolean,
+        bridgeProducer133: java.util.concurrent.atomic.AtomicLongArray,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -3932,6 +3955,18 @@ object KyantLauncherLens270 {
         // previous bridge version / last log elapsedRealtimeNanos.
         val visibilityVersion132 = androidx.compose.runtime.remember { intArrayOf(Int.MIN_VALUE) }
         val visibilityLastLogNs132 = androidx.compose.runtime.remember { longArrayOf(0L) }
+        // V288.133: counts Source consumer activity without changing the producer.
+        // draws / version advanced / stable position with version advanced /
+        // moving position with version advanced / stable without version advance /
+        // moving without version advance / reference generation changes
+        val bridgeConsumerCounts133 = androidx.compose.runtime.remember { LongArray(7) }
+        val bridgeConsumerPosition133 = androidx.compose.runtime.remember {
+            floatArrayOf(Float.NaN, Float.NaN)
+        }
+        val bridgeConsumerVersion133 = androidx.compose.runtime.remember {
+            intArrayOf(Int.MIN_VALUE, Int.MIN_VALUE)
+        }
+        val bridgeConsumerLogNs133 = androidx.compose.runtime.remember { longArrayOf(0L) }
         val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
             "LG120_SOURCE_$traceHost28890"
         }
@@ -4178,6 +4213,59 @@ object KyantLauncherLens270 {
                             "cullEnabled=$offscreenCull288113 x=${drawPosition.x} y=${drawPosition.y} " +
                             "size=${previewWidth}x$previewHeight " +
                             "scope=source_draw_callbacks_not_gpu_work_or_presented_frames")
+                    }
+                }
+                // V288.133: sample producer and consumer without triggering new
+                // Compose reads beyond the existing bridge-version dependency.
+                // A stable position with an advanced version is NOT proof of
+                // redundant GPU work (effects/other source inputs may change).
+                if (bridgeProbe133) {
+                    val version133 = bridgeVersion.value
+                    val lastVersion133 = bridgeConsumerVersion133[0]
+                    val lastGen133 = bridgeConsumerVersion133[1]
+                    val positionKnown133 = bridgeConsumerPosition133[0].isFinite() &&
+                        bridgeConsumerPosition133[1].isFinite()
+                    val moving133 = positionKnown133 &&
+                        (bridgeConsumerPosition133[0] != drawPosition.x ||
+                         bridgeConsumerPosition133[1] != drawPosition.y)
+                    val advanced133 = lastVersion133 != Int.MIN_VALUE &&
+                        version133 != lastVersion133
+                    bridgeConsumerCounts133[0]++
+                    if (advanced133) bridgeConsumerCounts133[1]++
+                    if (positionKnown133) {
+                        if (advanced133 && !moving133) bridgeConsumerCounts133[2]++
+                        if (advanced133 && moving133) bridgeConsumerCounts133[3]++
+                        if (!advanced133 && !moving133) bridgeConsumerCounts133[4]++
+                        if (!advanced133 && moving133) bridgeConsumerCounts133[5]++
+                    }
+                    val refGen133 = reference.generationId
+                    if (lastGen133 != Int.MIN_VALUE && lastGen133 != refGen133)
+                        bridgeConsumerCounts133[6]++
+                    bridgeConsumerPosition133[0] = drawPosition.x
+                    bridgeConsumerPosition133[1] = drawPosition.y
+                    bridgeConsumerVersion133[0] = version133
+                    bridgeConsumerVersion133[1] = refGen133
+                    val now133 = SystemClock.elapsedRealtimeNanos()
+                    if (bridgeConsumerLogNs133[0] == 0L ||
+                        now133 - bridgeConsumerLogNs133[0] >= 2_000_000_000L) {
+                        bridgeConsumerLogNs133[0] = now133
+                        android.util.Log.i("KyantBridge288133",
+                            "KYANT288133_WINDOW host=$traceHost28890 gpu=$gpuReference288110 " +
+                            "sourceDraws=${bridgeConsumerCounts133[0]} " +
+                            "consumerVersionAdvances=${bridgeConsumerCounts133[1]} " +
+                            "stableWithNotify=${bridgeConsumerCounts133[2]} " +
+                            "movedWithNotify=${bridgeConsumerCounts133[3]} " +
+                            "stableNoNotify=${bridgeConsumerCounts133[4]} " +
+                            "movedNoNotify=${bridgeConsumerCounts133[5]} " +
+                            "bitmapGenChanges=${bridgeConsumerCounts133[6]} " +
+                            "nativeDraws=${bridgeProducer133.get(0)} " +
+                            "notifyQueued=${bridgeProducer133.get(1)} " +
+                            "notifyDelivered=${bridgeProducer133.get(2)} " +
+                            "notifyCoalesced=${bridgeProducer133.get(3)} " +
+                            "cpuBridgeSamples=${bridgeProducer133.get(4)} " +
+                            "notifyGateOff=${bridgeProducer133.get(5)} " +
+                            "bridgeVersion=$version133 posX=${drawPosition.x} posY=${drawPosition.y} " +
+                            "scope=app_callbacks_not_compose_invalidations_or_gpu_frames")
                     }
                 }
                 // V288.131 diagnostic only: compares positions at ONE Source draw,

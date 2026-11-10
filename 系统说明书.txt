@@ -1,3 +1,38 @@
+V1.9.205.288.133｜Bridge 通知来源与 Source 消费链诊断版
+
+目标：量化 native bridgeView.onDraw -> post 通知 -> bridgeVersion -> Source 绘制回调的链路。
+
+新增诊断开关（默认关闭）：
+  settings put global liquidglass_kyant_bridge_origin_probe_288133 1
+  am force-stop com.android.launcher
+
+日志：
+  KYANT288133_HOST：Host 初始化、GPU 模式与通知条件
+  KYANT288133_WINDOW：每 Host 累计 producer/consumer 计数，每约 2 秒输出
+  nativeDraws：原生桥接 View 的 onDraw 次数
+  notifyQueued：成功排队的 Bridge 通知
+  notifyDelivered：主线程实际递增 bridgeVersion 的次数
+  notifyCoalesced：通知已在排队时被合并的次数
+  notifyGateOff：通知条件不满足的 native onDraw 次数
+  cpuBridgeSamples：原生 View 实际调用 CPU sampleBridgeAt 次数
+  sourceDraws：Source 绘制回调次数
+  consumerVersionAdvances：相邻 Source 回调之间 Bridge 版本变化的次数
+  stableWithNotify：Source 坐标不变而版本变化的次数
+  movedWithNotify：Source 坐标变化且版本变化的次数
+  stableNoNotify / movedNoNotify：无版本变化的 Source 位置分类
+  bitmapGenChanges：Source 所用 Bitmap generationId 变化次数
+
+注意：这些是应用层绘制回调与版本读取统计，不是独立的 GPU 工作或最终上屏帧；
+稳定坐标且 Bridge 版本变化并不直接证明可以跳过通知；还可能存在动态光学参数、其他绘制输入变化。
+本版不屏蔽通知，不跳过 Source/Backdrop 绘制，不改变 GPU 参考壁纸、折射、模糊、高光与 Dock。
+现有 V288.132 观测与裁剪实验开关仍保留；建议将其设为 -1，并关闭其他历史诊断后测试。
+
+抓取：
+  su -c 'logcat -d -b all -v brief | grep -E "KYANT288133_HOST|KYANT288133_WINDOW" | tail -60'
+关闭：
+  su -c 'settings put global liquidglass_kyant_bridge_origin_probe_288133 0; am force-stop com.android.launcher'
+
+原版说明摘要：
 V1.9.205.288.132｜单 Host 可见区域与 Bridge 通知 A/B 归因版
 
 承接 V288.131 与单/多文件夹 Perfetto 结果。保持原有光学渲染、GPU 参考帧、动态坐标、模糊、折射和高光不变。
