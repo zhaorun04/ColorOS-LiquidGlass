@@ -146,3 +146,18 @@ V1.9.205.288.125｜Source 受限 GraphicsLayer 录制复用 A/B
 日志：KYANT288125_HOST、KYANT288125_SOURCE_CACHE（draws/recorded/reused/fallback/invalidated/eligible）。
 如果画质/对位异常立即设置开关 0 并重启 Launcher。
 UI/SP/Root/Launcher 既有光学参数映射未改；完整 CI 编译待验证。
+
+
+V1.9.205.288.126｜Source 复用未命中原因细分诊断
+继承 V288.125 Source 复用独立开关：liquidglass_kyant_source_record_reuse_288125（默认关闭）。
+只增加诊断；不放宽缓存准入、不跳过额外的 recordLayer、不修改折射和壁纸采样。
+每 240 次 Source 节点绘制输出 KYANT288126_SOURCE_MISS：
+positionKeyChanged：缓存键的 X/Y 改变；bitmapKeyChanged：共享 Bitmap 身份/Generation 改变；
+geometryKeyChanged：预览/壁纸/屏幕尺寸及绘制模式变化的诊断指纹（极小概率哈希碰撞）；
+layerChanged：图层对象引用变化；scopeChanged：尺寸、密度、字体缩放或布局方向变化；
+keyEqualButMiss：缓存键相同而其他准入条件阻止复用；otherKeyChanged：已分类字段不变而完整键仍变化；
+noPrevious：没有历史键；unavailableKey：当前键无效；knownKeyCompared：新旧键都可分类的未命中次数。
+各项原因可重叠，不能直接加总。
+KYANT288126_COORD：低频记录 screenPosition 与 drawPosition 的差异；仅供判断坐标路径，非缓存键改动。
+监测目标是 RenderThread/GPU 的多容器滑动卡顿，不将回弹同步单独当作性能根因。
+构建需 GitHub Actions 真正编译验证；UI/SP/Root/Launcher 既有光学配置不修改。

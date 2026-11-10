@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.kyant.backdrop.backdrops.SourceKeyDetails126
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import com.kyant.backdrop.drawBackdrop
@@ -3703,7 +3704,20 @@ object KyantLauncherLens270 {
         val screenW: Int, val screenH: Int,
         val x: Float, val y: Float,
         val paintAlpha: Int, val gpuMode: Int
-    )
+    ) : SourceKeyDetails126 {
+        override val sourceX126: Float get() = x
+        override val sourceY126: Float get() = y
+        override val bitmapId126: Int get() = refId
+        override val bitmapGeneration126: Int get() = refGeneration
+        override val geometryStamp126: Int get() {
+            var v = 17
+            v = 31 * v + refWidth; v = 31 * v + refHeight
+            v = 31 * v + previewW; v = 31 * v + previewH
+            v = 31 * v + screenW; v = 31 * v + screenH
+            v = 31 * v + paintAlpha; v = 31 * v + gpuMode
+            return v
+        }
+    }
 
     @Composable private fun LensContent270(
         reference: Bitmap, previewWidth: Int, previewHeight: Int,
@@ -4033,6 +4047,22 @@ object KyantLauncherLens270 {
                     frozenSource.compareAndSet(null, selectedOrigin28866)
                 val drawPosition = if (motionAbMode == 1)
                     (frozenSource.get() ?: selectedOrigin28866) else selectedOrigin28866
+                // V288.126 observation only: the Source cache-key position is
+                // read from screenPosition, while drawPosition is the actual
+                // coordinate chosen by the renderer. No change to either path.
+                if (sourceRecordReuse288125) {
+                    val checkDraw126 = sourceDrawCount.get()
+                    if (checkDraw126 % 240L == 0L) {
+                        android.util.Log.i("KyantSource288126",
+                            "KYANT288126_COORD host=$traceHost28890 " +
+                            "screenX=${committedPosition.x} screenY=${committedPosition.y} " +
+                            "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
+                            "gapX=${drawPosition.x - committedPosition.x} " +
+                            "gapY=${drawPosition.y - committedPosition.y} " +
+                            "motionAb=$motionAbMode legacySync=$legacySyncAbMode " +
+                            "sourceMatrix=$sourceMatrixAb28866")
+                    }
+                }
                 if (drawProbe28865) {
                     sourceDrawPosition28864.set(drawPosition)
                     sourceDrawSerial28864.incrementAndGet()

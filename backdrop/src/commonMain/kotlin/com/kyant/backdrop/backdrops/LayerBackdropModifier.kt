@@ -12,6 +12,17 @@ import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
 
+/** V288.126 diagnostic-only projection of the source visual key.
+ *  No reference to Android APIs, no bypass of source record checks.
+ */
+interface SourceKeyDetails126 {
+    val sourceX126: Float
+    val sourceY126: Float
+    val bitmapId126: Int
+    val bitmapGeneration126: Int
+    val geometryStamp126: Int
+}
+
 fun Modifier.layerBackdrop(backdrop: LayerBackdrop): Modifier =
     this then LayerBackdropElement(backdrop)
 
@@ -69,6 +80,18 @@ private class LayerBackdropNode(
     private var sourceInvalidated125 = 0L
     private var sourceKeyEligible125 = 0L
     private var sourceDraws125 = 0L
+    // V288.126 diagnostic totals, only sampled when source experiment is enabled.
+    private var positionChanged126 = 0L
+    private var bitmapChanged126 = 0L
+    private var geometryChanged126 = 0L
+    private var layerChanged126 = 0L
+    private var scopeChanged126 = 0L
+    private var equalKeyMiss126 = 0L
+    private var otherKeyChanged126 = 0L
+    private var noPrevious126 = 0L
+    private var unavailableKey126 = 0L
+    private var knownKey126 = 0L
+
 
     fun clearSourceRecord125() {
         lastSourceRecordKey125 = null
@@ -105,6 +128,33 @@ private class LayerBackdropNode(
         if (reuse125) {
             sourceReused125++
         } else {
+            // Record each mismatch independently; multiple reasons can coexist.
+            // The reason counters should NOT be summed as mutually exclusive misses.
+            val current126 = key125 as? SourceKeyDetails126
+            val previous126 = lastSourceRecordKey125 as? SourceKeyDetails126
+            if (key125 == null) unavailableKey126++
+            if (lastSourceRecordKey125 == null) noPrevious126++
+            if (current126 != null && previous126 != null) {
+                knownKey126++
+                if (current126.sourceX126 != previous126.sourceX126 ||
+                    current126.sourceY126 != previous126.sourceY126) positionChanged126++
+                if (current126.bitmapId126 != previous126.bitmapId126 ||
+                    current126.bitmapGeneration126 != previous126.bitmapGeneration126) bitmapChanged126++
+                if (current126.geometryStamp126 != previous126.geometryStamp126) geometryChanged126++
+                if (key125 != lastSourceRecordKey125 &&
+                    current126.sourceX126 == previous126.sourceX126 &&
+                    current126.sourceY126 == previous126.sourceY126 &&
+                    current126.bitmapId126 == previous126.bitmapId126 &&
+                    current126.bitmapGeneration126 == previous126.bitmapGeneration126 &&
+                    current126.geometryStamp126 == previous126.geometryStamp126) otherKeyChanged126++
+            }
+            if (lastSourceLayer125 != null && lastSourceLayer125 !== backdrop.graphicsLayer) layerChanged126++
+            if (lastSourceRecordKey125 != null && (
+                lastSourceWidth125 != w125 || lastSourceHeight125 != h125 ||
+                lastSourceDensity125 != density125 || lastSourceFontScale125 != font125 ||
+                lastSourceLayout125 != layout125)) scopeChanged126++
+            if (key125 != null && lastSourceRecordKey125 != null && key125 == lastSourceRecordKey125)
+                equalKeyMiss126++
             if (lastSourceRecordKey125 != null) sourceInvalidated125++
             // Do not publish a new cache key until recording finishes successfully.
             lastSourceRecordKey125 = null
@@ -133,6 +183,15 @@ private class LayerBackdropNode(
                 "fallback=$sourceFallback125 invalidated=$sourceInvalidated125 " +
                 "eligible=$sourceKeyEligible125 keyEligible=${key125 != null} " +
                 "size=${w125}x${h125} scope=source_layer_only")
+            com.kyant.backdrop.internal.SourceReuseProbe125.report(
+                "KYANT288126_SOURCE_MISS layerId=$layerId125 draws=$sourceDraws125 " +
+                "positionKeyChanged=$positionChanged126 bitmapKeyChanged=$bitmapChanged126 " +
+                "geometryKeyChanged=$geometryChanged126 layerChanged=$layerChanged126 " +
+                "scopeChanged=$scopeChanged126 keyEqualButMiss=$equalKeyMiss126 " +
+                "otherKeyChanged=$otherKeyChanged126 noPrevious=$noPrevious126 " +
+                "unavailableKey=$unavailableKey126 knownKeyCompared=$knownKey126 " +
+                "recorded=$sourceRecords125 reused=$sourceReused125 " +
+                "scope=source_key_classification_only")
         }
     }
 
