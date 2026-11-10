@@ -121,3 +121,17 @@ V1.9.205.288.123｜Source 参考输入稳定性验证（诊断版）
 以上仅观察部分输入，不能据此直接断言 Source 录制可安全跳过：如 Canvas 其他状态、alpha、显示坐标映射、图层内容等仍需另外验证。
 不修改原有 UI、SharedPreferences、Root 快照、Launcher 光学参数映射。诊断暂由 Settings.Global 独立开关控制。
 无完整 Android Gradle 编译验证，需 GitHub Actions 真机验收。
+
+
+V1.9.205.288.124｜Source 视觉输入与调度通知分离（诊断版）
+仅新增 per-Host SOURCE CPU 观察计数，不改变 recordLayer、Shader、Bitmap 写入或壁纸同步。
+开关（默认 0）：su -c 'settings put global liquidglass_kyant_source_visual_probe_288124 1'，重启 Launcher。
+建议关闭上一版探针：su -c 'settings put global liquidglass_kyant_source_input_probe_288123 0'。
+日志标签 KYANT288124_HOST 与 KYANT288124_VISUAL_NOTIFY，每 Host 每 240 次 SOURCE 绘制一次。
+visualStable：所测画面输入未变（位置、Bitmap ID/Generation、屏幕/容器/预览几何、Paint alpha、GPU/cull 模式）；
+notifyOnlyChanged：仅通知 bridgeVersion 改变，所测画面输入未变；
+positionChangedWithNotify：位置和 bridgeVersion 同时改变；
+stableNoNotify：所测画面输入和 bridgeVersion 均未变；
+notifyWithoutBitmapMutation：bridgeVersion 改变但共享 Bitmap ID/Generation 未变。
+本诊断无法涵盖全部 Canvas/Compose/Backdrop 状态，也不能证明按此分类直接跳过 SOURCE 录制安全。
+不修改原有 UI/SP/Root/Launcher 光学参数映射；完整 Gradle 编译待 CI 验证。

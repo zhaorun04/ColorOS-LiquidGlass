@@ -1922,6 +1922,14 @@ object KyantLauncherLens270 {
             "staticLayer=$staticLayerReuse288116")
         // V288.123: independently gated SOURCE input-stability analysis.
         // This probe NEVER skips a draw or mutates a GraphicsLayer.
+        // V288.124: observation only. Distinguishes logical notification from
+        // monitored reference-frame visual inputs; never suppresses redraws.
+        val sourceVisualProbe288124 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_source_visual_probe_288124", 0) == 1
+        } catch (_: Throwable) { false }
+        if (sourceVisualProbe288124) android.util.Log.i("KyantSource288124",
+            "KYANT288124_HOST host=$trace28815Host enabled=true mode=observation_only")
         val sourceInputProbe288123 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_source_input_probe_288123", 0) == 1
@@ -2818,7 +2826,7 @@ object KyantLauncherLens270 {
                 }, lifecycleProbe28864, drawProbe28865,
                 sourceDrawSerial28864, sourceDrawPosition28864,
                 { stage, pos, info -> releaseTrace28820(stage, pos, info) },
-                perfettoTrace288120, sourceInputProbe288123) {
+                perfettoTrace288120, sourceInputProbe288123, sourceVisualProbe288124) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3746,6 +3754,7 @@ object KyantLauncherLens270 {
         trace28820: (String, Offset?, String) -> Unit,
         perfettoTrace288120: Boolean,
         sourceInputProbe288123: Boolean,
+        sourceVisualProbe288124: Boolean,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -3766,6 +3775,18 @@ object KyantLauncherLens270 {
         // [refIdentity, refGeneration, width, height, bridgeVersion, gpuFlag]
         val sourceInputKey288123 = androidx.compose.runtime.remember { IntArray(6) }
         val sourceInputInitialized288123 = androidx.compose.runtime.remember { booleanArrayOf(false) }
+        // V288.124 per-host visual/notification classification. Counts layout:
+        // [draws, visualStable, visualChanged, notificationOnly,
+        //  positionWithNotify, visualStableNoNotify, notifyWithoutBitmapMutation,
+        //  positionChanged, bitmapChanged, geometryOrPaintChanged,
+        //  bridgeNotifyChanged, gpuDraws]
+        val sourceVisualCounts288124 = androidx.compose.runtime.remember { LongArray(12) }
+        val sourceVisualPosition288124 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN, Float.NaN, Float.NaN) }
+        // [ref identity, generation, reference W/H, preview W/H,
+        //  screen W/H, bridge logical version, paint alpha, gpu mode, cull mode]
+        val sourceVisualKey288124 = androidx.compose.runtime.remember { IntArray(12) }
+        val sourceVisualInitialized288124 = androidx.compose.runtime.remember { booleanArrayOf(false) }
+
 
         val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
             "LG120_SOURCE_$traceHost28890"
@@ -4046,6 +4067,72 @@ object KyantLauncherLens270 {
                             "opticsStrength=${optics28827.strength} blur=${optics28827.blur} " +
                             "highlight=${optics28827.highlight} " +
                             "backdropPath=${rootPipeline28879 < 0 && nodePipeline28881 < 0}")
+                    }
+                }
+                // V288.124: GPU reference-frame visual INPUTS vs logical Bridge
+                // notification. This is an observation; these inputs do not
+                // constitute a full proof that caching / draw skipping is safe.
+                if (sourceVisualProbe288124) {
+                    val c124 = sourceVisualCounts288124
+                    val k124 = sourceVisualKey288124
+                    val p124 = sourceVisualPosition288124
+                    val initial124 = !sourceVisualInitialized288124[0]
+                    val refId124 = System.identityHashCode(reference)
+                    val refGen124 = reference.generationId
+                    val notify124 = bridgeVersion.value
+                    val gpu124 = if (gpuReference288110) 1 else 0
+                    val cull124 = if (offscreenCull288113) 1 else 0
+                    val positionChanged124 = !initial124 &&
+                        (p124[0] != drawPosition.x || p124[1] != drawPosition.y)
+                    val bitmapChanged124 = !initial124 &&
+                        (k124[0] != refId124 || k124[1] != refGen124)
+                    val geometryChanged124 = !initial124 && (
+                        k124[2] != reference.width || k124[3] != reference.height ||
+                        k124[4] != previewWidth || k124[5] != previewHeight ||
+                        k124[6] != screenW || k124[7] != screenH ||
+                        k124[9] != bitmapPaint.alpha || k124[10] != gpu124 ||
+                        k124[11] != cull124 ||
+                        p124[2] != size.width || p124[3] != size.height)
+                    val notifyChanged124 = !initial124 && k124[8] != notify124
+                    val visualChanged124 = positionChanged124 || bitmapChanged124 || geometryChanged124
+                    c124[0]++
+                    if (!initial124) {
+                        if (visualChanged124) c124[2]++ else c124[1]++
+                        if (notifyChanged124 && !visualChanged124) c124[3]++
+                        if (notifyChanged124 && positionChanged124) c124[4]++
+                        if (!notifyChanged124 && !visualChanged124) c124[5]++
+                        if (notifyChanged124 && !bitmapChanged124) c124[6]++
+                        if (positionChanged124) c124[7]++
+                        if (bitmapChanged124) c124[8]++
+                        if (geometryChanged124) c124[9]++
+                        if (notifyChanged124) c124[10]++
+                    }
+                    if (gpuReference288110) c124[11]++
+                    p124[0] = drawPosition.x; p124[1] = drawPosition.y
+                    p124[2] = size.width; p124[3] = size.height
+                    k124[0] = refId124; k124[1] = refGen124
+                    k124[2] = reference.width; k124[3] = reference.height
+                    k124[4] = previewWidth; k124[5] = previewHeight
+                    k124[6] = screenW; k124[7] = screenH
+                    k124[8] = notify124; k124[9] = bitmapPaint.alpha
+                    k124[10] = gpu124; k124[11] = cull124
+                    sourceVisualInitialized288124[0] = true
+                    if (c124[0] == 1L || c124[0] % 240L == 0L) {
+                        android.util.Log.i("KyantSource288124", "KYANT288124_VISUAL_NOTIFY " +
+                            "host=$traceHost28890 draws=${c124[0]} " +
+                            "visualStable=${c124[1]} visualChanged=${c124[2]} " +
+                            "notifyOnlyChanged=${c124[3]} " +
+                            "positionChangedWithNotify=${c124[4]} " +
+                            "stableNoNotify=${c124[5]} " +
+                            "notifyWithoutBitmapMutation=${c124[6]} " +
+                            "positionChanged=${c124[7]} bitmapChanged=${c124[8]} " +
+                            "geometryPaintChanged=${c124[9]} notifyChanged=${c124[10]} " +
+                            "gpuDraws=${c124[11]} " +
+                            "refId=$refId124 refGen=$refGen124 " +
+                            "posX=${drawPosition.x} posY=${drawPosition.y} " +
+                            "target=${previewWidth}x${previewHeight} " +
+                            "bridgeVersion=$notify124 " +
+                            "scope=observed_visual_inputs_only_no_draw_skip")
                     }
                 }
                 // V288.123: compare observable SOURCE inputs, never reuse pixels
