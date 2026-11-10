@@ -4225,7 +4225,7 @@ object KyantLauncherLens270 {
                             }
                             // V288.122: resource-source identity comparison. No Bitmap writes.
                             if (perfettoTrace288120 && (num288110 == 0L || num288110 % 240L == 0L)) {
-                                val currentReference122 = referenceState28832.value
+                                val currentReference122 = reference
                                 android.util.Log.i("KyantLayer288122", "KYANT288122_BITMAP " +
                                     "host=$traceHost28890 gpu=$gpuReference288110 hw=$hw " +
                                     "refId=${System.identityHashCode(currentReference122)} " +

@@ -105,3 +105,8 @@ V1.9.205.288.122｜GPU 纹理资源生命周期非侵入式归因诊断
 - 不变更壁纸实时绘制、采样、折射、模糊、高光、阴影、缓存策略、UI/SP/Root/Launcher 映射。
 - 测试：settings put global liquidglass_kyant_perfetto_sections_288120 1；重启 Launcher；logcat -d -b all -v brief | grep KYANT288122 | tail -60。
 - 完整 Android/Gradle 编译和真机验证仍需用户 CI。
+
+V1.9.205.288.122.1｜编译修正版
+- 修复 KyantLauncherLens270.kt V288.122 Bitmap 低频诊断中 referenceState28832 作用域外引用导致的 unresolved reference；改为读取 LensContent270 已有 reference 参数，保持 Bitmap 身份及 Generation ID 诊断语义不变。
+- 不调整绘制、GPU 参考帧、图层生命周期、现有实验开关、UI/SP/Root/Launcher 映射。
+- 完整 Android/Kotlin 编译仍以 GitHub Actions 为准。
