@@ -36,6 +36,7 @@ import com.kyant.backdrop.internal.recordLayer
 import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
 import com.kyant.backdrop.internal.BackdropPassProbe127
+import com.kyant.backdrop.internal.BackdropEffectProbe128
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.InnerShadowElement
 import com.kyant.backdrop.shadow.Shadow
@@ -176,6 +177,7 @@ private class DrawBackdropElement(
 
     override fun update(node: DrawBackdropNode) {
         if (BackdropLifecycle122.enabled) BackdropLifecycle122.backgroundNodeUpdates++
+        if (BackdropEffectProbe128.enabled) BackdropEffectProbe128.nodeUpdates++
         node.backdrop = backdrop
         node.shapeProvider = shapeProvider
         node.effects = effects
@@ -358,9 +360,12 @@ private class DrawBackdropNode(
 
     override fun ContentDrawScope.draw() {
         if (BackdropPassProbe127.enabled) BackdropPassProbe127.drawNodeCalls++
+        if (BackdropEffectProbe128.enabled) BackdropEffectProbe128.drawCalls++
         if (effectScope.update(this)) {
-            updateEffects()
+            if (BackdropEffectProbe128.enabled) BackdropEffectProbe128.drawRebuilt++
+            updateEffects(fromDraw128 = true)
         }
+        if (BackdropEffectProbe128.enabled) BackdropEffectProbe128.reportIfDue()
 
         onDrawBehind?.invoke(this)
         drawBackdropLayer()
@@ -414,14 +419,39 @@ private class DrawBackdropNode(
     }
 
     private fun observeEffects() {
-        observeReads { updateEffects() }
+        observeReads { updateEffects(fromDraw128 = false) }
     }
 
-    private fun updateEffects() {
+    private fun updateEffects(fromDraw128: Boolean = false) {
         if (!isRenderEffectSupported()) return
-
-        effectScope.apply(effects)
-        graphicsLayer?.renderEffect = effectScope.renderEffect
+        val trace128 = BackdropTrace121.enabled
+        val probe128 = BackdropEffectProbe128.enabled
+        val previous128 = if (probe128) effectScope.renderEffect else null
+        if (probe128) {
+            BackdropEffectProbe128.effectsRebuilt++
+            if (fromDraw128) BackdropEffectProbe128.effectsFromDraw++
+            else BackdropEffectProbe128.effectsFromObserve++
+        }
+        if (trace128) BackdropTrace121.begin("LG128_EFFECT_BUILD")
+        try {
+            effectScope.apply(effects)
+        } finally {
+            if (trace128) BackdropTrace121.end()
+        }
+        if (probe128) {
+            val current128 = effectScope.renderEffect
+            if (previous128 !== current128) BackdropEffectProbe128.effectReferenceChanged++
+            else BackdropEffectProbe128.effectReferenceSame++
+            if (current128 != null) BackdropEffectProbe128.effectPresent++
+            else BackdropEffectProbe128.effectAbsent++
+        }
+        if (trace128) BackdropTrace121.begin("LG128_EFFECT_ASSIGN")
+        try {
+            graphicsLayer?.renderEffect = effectScope.renderEffect
+        } finally {
+            if (trace128) BackdropTrace121.end()
+        }
+        if (probe128) BackdropEffectProbe128.assignCount++
         padding = effectScope.padding
     }
 

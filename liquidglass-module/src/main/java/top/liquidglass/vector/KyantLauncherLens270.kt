@@ -1914,6 +1914,16 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_pass_topology_probe_288127", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.128: independently gated, counts RenderEffect builds and assignments.
+        // Perfetto spans use the existing 288120 flag; no shader/effect is disabled.
+        val effectProbe288128 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_effect_lifecycle_probe_288128", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.BackdropEffectProbe128.enabled = effectProbe288128
+        if (effectProbe288128) android.util.Log.i("KyantEffect288128",
+            "KYANT288128_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "scope=effect_build_assignment_cpu_diagnostic_only")
         com.kyant.backdrop.internal.BackdropPassProbe127.enabled = passProbe288127
         if (passProbe288127) android.util.Log.i("KyantPass288127",
             "KYANT288127_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +

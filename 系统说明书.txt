@@ -1,3 +1,10 @@
+V1.9.205.288.128｜RenderEffect 构建及属性赋值归因诊断版
+本版基于 V288.127.1，保留 GPU 参考帧、Source/Backdrop 正常录制、原生二维折射与高光、阴影、模糊的全部渲染行为。
+新增独立默认关闭开关 liquidglass_kyant_effect_lifecycle_probe_288128（1启用，0关闭；重启 Launcher）。
+日志 KYANT288128_HOST 和 KYANT288128_EFFECT_WINDOW：记录 DrawBackdrop 节点更新、draw 调用、更新 effectScope 的来源、RenderEffect 结果对象是否变更，以及 GraphicsLayer.renderEffect 属性赋值次数。
+设置 liquidglass_kyant_perfetto_sections_288120=1 并使用 perfetto -a com.android.launcher 可记录 LG128_EFFECT_BUILD 与 LG128_EFFECT_ASSIGN CPU 时间区间；这些不是 GPU RenderEffect 执行时间，不可据此推断 GPU Pass 数量。
+诊断建议关闭旧 Source 缓存和静态图层缓存实验，不要关闭 GPU 参考帧。源码静态检查及 ZIP 完整性验证完成；完整 Android Gradle 编译和真机 A/B 尚未验证。
+
 V1.9.205.288.119｜Provider 语义复用实验版
 
 依据 V288.118 真机日志：h/sProviderReplace=59、h/sProviderInvalidatedLive=49、h/sNodeDetach=0、h/sCold=59。证据支持 Provider 引用更换是静态图层反复失效的主因。
