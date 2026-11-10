@@ -1,3 +1,12 @@
+V1.9.205.288.118｜Cold 缓存失效原因审查版（仅诊断）
+基于 V288.117 实际真机日志：61 次录制、2 次复用、60 次 Cold、0 次 KeyChanged、9 次 NodeAttach。排查发现 drawBackdrop() 构建 ShapeProvider，而 HighlightElement.update/ShadowElement.update 在 Provider 引用改变时会将对应缓存键清空，这不必伴随节点重建。
+本版不删除失效保护，不改变 Geometry、GraphicsLayer 的录制路径、Shader、壁纸采样或实时光学参数。默认关闭原缓存实验，继续使用 Settings.Global 开关 liquidglass_kyant_static_layer_cache_288116（1 启用诊断与实验，0 关闭；变更后重启 Launcher）。
+日志 KYANT288116_LAYER_WINDOW 新增：hProviderReplace/sProviderReplace (Provider 引用更换), hProviderInvalidatedLive/sProviderInvalidatedLive (替换时原缓存非空), hNodeDetach/sNodeDetach (节点脱离), hDetachLive/sDetachLive (脱离时缓存非空), hColdRevGt1/sColdRevGt1 (Cold 时轮廓版本大于1)。所有数据均为进程累计值，不是 GPU 帧时。仅当这些字段与 Cold 同步增长才可归因；不能由本日志直接推断 Texture upload 的来源。
+实验配置：su -c 'settings put global liquidglass_kyant_static_layer_cache_288116 1'，重启 Launcher，滑动多个文件夹桌面页。
+采集：su -c 'logcat -d -b all -v brief | grep KYANT288116_LAYER_WINDOW | tail -20'
+建议验证期间继续使用已生效的 GPU 参考帧模式 liquidglass_kyant_gpu_reference_ab_288110=1。画质异常时关掉缓存实验并重启 Launcher。
+验证状态：源码静态检查、压缩包完整性已检查；Android Gradle 编译和真机 A/B 未验证。
+
 V1.9.205.288.117 静态图层缓存未命中归因版
 实验默认关闭：settings put global liquidglass_kyant_static_layer_cache_288116 1；重启 Launcher 生效。
 仅在 Outline 为矩形或圆角矩形、尺寸/密度/方向/高光或阴影参数不变时，复用对应 GraphicsLayer 已录制内容。

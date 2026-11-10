@@ -39,7 +39,16 @@ internal class HighlightElement(
     }
 
     override fun update(node: HighlightNode) {
-        if (node.shapeProvider !== shapeProvider) node.invalidateRecorded288117()
+        if (node.shapeProvider !== shapeProvider) {
+            // V288.118: distinguish provider replacement from node attachment.
+            if (StaticLayerRecordReuse288116.enabled) {
+                StaticLayerRecordReuse288116.highlightProviderReplaced288118++
+                if (node.hasRecordedCache288118()) {
+                    StaticLayerRecordReuse288116.highlightProviderInvalidatedLive288118++
+                }
+            }
+            node.invalidateRecorded288117()
+        }
         node.shapeProvider = shapeProvider
         node.highlight = highlight
         node.invalidateDraw()
@@ -89,6 +98,7 @@ internal class HighlightNode(
     )
     private var lastRecordedHighlight: RecordedHighlightKey? = null
     fun invalidateRecorded288117() { lastRecordedHighlight = null }
+    fun hasRecordedCache288118(): Boolean = lastRecordedHighlight != null
 
     private val paint =
         Paint().apply {
@@ -159,6 +169,7 @@ internal class HighlightNode(
             if (StaticLayerRecordReuse288116.enabled && key != null) {
                 if (lastRecordedHighlight == null) {
                     StaticLayerRecordReuse288116.highlightCold++
+                    if (shapeProvider.outlineRevision288117 > 1L) StaticLayerRecordReuse288116.highlightColdProviderRevisionGt1_288118++
                 } else if (key != lastRecordedHighlight) {
                     StaticLayerRecordReuse288116.highlightKeyChanged++
                 }
@@ -193,6 +204,10 @@ internal class HighlightNode(
     }
 
     override fun onDetach() {
+        if (StaticLayerRecordReuse288116.enabled) {
+            StaticLayerRecordReuse288116.highlightNodeDetached288118++
+            if (hasRecordedCache288118()) StaticLayerRecordReuse288116.highlightDetachedLive288118++
+        }
         val graphicsContext = requireGraphicsContext()
         highlightLayer?.let { layer ->
             graphicsContext.releaseGraphicsLayer(layer)

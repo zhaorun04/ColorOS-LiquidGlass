@@ -29,6 +29,17 @@ object StaticLayerRecordReuse288116 {
     var shadowCold: Long = 0L
     var shadowKeyChanged: Long = 0L
     var shadowNodeAttached: Long = 0L
+    // V288.118: explicit causes for unexpected Cold misses.
+    var highlightProviderReplaced288118: Long = 0L
+    var shadowProviderReplaced288118: Long = 0L
+    var highlightProviderInvalidatedLive288118: Long = 0L
+    var shadowProviderInvalidatedLive288118: Long = 0L
+    var highlightNodeDetached288118: Long = 0L
+    var shadowNodeDetached288118: Long = 0L
+    var highlightDetachedLive288118: Long = 0L
+    var shadowDetachedLive288118: Long = 0L
+    var highlightColdProviderRevisionGt1_288118: Long = 0L
+    var shadowColdProviderRevisionGt1_288118: Long = 0L
     // V288.117: whitelist-eligible Outline.Generic candidates.
     var highlightKnownGeneric288117: Long = 0L
     var shadowKnownGeneric288117: Long = 0L

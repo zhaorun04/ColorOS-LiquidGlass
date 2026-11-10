@@ -34,7 +34,16 @@ internal class ShadowElement(
     }
 
     override fun update(node: ShadowNode) {
-        if (node.shapeProvider !== shapeProvider) node.invalidateRecorded288117()
+        if (node.shapeProvider !== shapeProvider) {
+            // V288.118: distinguish provider replacement from node attachment.
+            if (StaticLayerRecordReuse288116.enabled) {
+                StaticLayerRecordReuse288116.shadowProviderReplaced288118++
+                if (node.hasRecordedCache288118()) {
+                    StaticLayerRecordReuse288116.shadowProviderInvalidatedLive288118++
+                }
+            }
+            node.invalidateRecorded288117()
+        }
         node.shapeProvider = shapeProvider
         node.shadow = shadow
         node.invalidateDraw()
@@ -84,6 +93,7 @@ internal class ShadowNode(
     )
     private var lastRecordedShadow: RecordedShadowKey? = null
     fun invalidateRecorded288117() { lastRecordedShadow = null }
+    fun hasRecordedCache288118(): Boolean = lastRecordedShadow != null
 
     private val paint = Paint()
 
@@ -134,6 +144,7 @@ internal class ShadowNode(
             if (StaticLayerRecordReuse288116.enabled && key != null) {
                 if (lastRecordedShadow == null) {
                     StaticLayerRecordReuse288116.shadowCold++
+                    if (shapeProvider.outlineRevision288117 > 1L) StaticLayerRecordReuse288116.shadowColdProviderRevisionGt1_288118++
                 } else if (key != lastRecordedShadow) {
                     StaticLayerRecordReuse288116.shadowKeyChanged++
                 }
@@ -173,6 +184,10 @@ internal class ShadowNode(
     }
 
     override fun onDetach() {
+        if (StaticLayerRecordReuse288116.enabled) {
+            StaticLayerRecordReuse288116.shadowNodeDetached288118++
+            if (hasRecordedCache288118()) StaticLayerRecordReuse288116.shadowDetachedLive288118++
+        }
         val graphicsContext = requireGraphicsContext()
         shadowLayer?.let { layer ->
             graphicsContext.releaseGraphicsLayer(layer)

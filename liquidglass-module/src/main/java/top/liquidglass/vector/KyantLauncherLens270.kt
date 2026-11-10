@@ -4211,7 +4211,17 @@ object KyantLauncherLens270 {
                                         "hKeyChanged=${cache116.highlightKeyChanged} hNodeAttach=${cache116.highlightNodeAttached} " +
                                         "sRect=${cache116.shadowRectangle} sRounded=${cache116.shadowRounded} " +
                                         "sGeneric=${cache116.shadowGeneric} sEligibleGeneric=${cache116.shadowKnownGeneric288117} sCold=${cache116.shadowCold} " +
-                                        "sKeyChanged=${cache116.shadowKeyChanged} sNodeAttach=${cache116.shadowNodeAttached}")
+                                        "sKeyChanged=${cache116.shadowKeyChanged} sNodeAttach=${cache116.shadowNodeAttached} " +
+                                        "hProviderReplace=${cache116.highlightProviderReplaced288118} " +
+                                        "sProviderReplace=${cache116.shadowProviderReplaced288118} " +
+                                        "hProviderInvalidatedLive=${cache116.highlightProviderInvalidatedLive288118} " +
+                                        "sProviderInvalidatedLive=${cache116.shadowProviderInvalidatedLive288118} " +
+                                        "hNodeDetach=${cache116.highlightNodeDetached288118} " +
+                                        "sNodeDetach=${cache116.shadowNodeDetached288118} " +
+                                        "hDetachLive=${cache116.highlightDetachedLive288118} " +
+                                        "sDetachLive=${cache116.shadowDetachedLive288118} " +
+                                        "hColdRevGt1=${cache116.highlightColdProviderRevisionGt1_288118} " +
+                                        "sColdRevGt1=${cache116.shadowColdProviderRevisionGt1_288118}")
                                 }
                             }
                             if (num288110 == 0L || num288110 % 240L == 0L) {
