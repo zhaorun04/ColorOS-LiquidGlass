@@ -110,3 +110,14 @@ V1.9.205.288.122.1｜编译修正版
 - 修复 KyantLauncherLens270.kt V288.122 Bitmap 低频诊断中 referenceState28832 作用域外引用导致的 unresolved reference；改为读取 LensContent270 已有 reference 参数，保持 Bitmap 身份及 Generation ID 诊断语义不变。
 - 不调整绘制、GPU 参考帧、图层生命周期、现有实验开关、UI/SP/Root/Launcher 映射。
 - 完整 Android/Kotlin 编译仍以 GitHub Actions 为准。
+
+
+V1.9.205.288.123｜Source 参考输入稳定性验证（诊断版）
+本版仅增加 SOURCE Draw 回调输入变化分类，保持原有 LayerBackdrop.recordLayer 每次执行。
+开关：su -c 'settings put global liquidglass_kyant_source_input_probe_288123 1'
+需重启 com.android.launcher；默认关闭。关闭设 0。
+日志标签：KYANT288123_HOST、KYANT288123_SOURCE_INPUT。
+计数：moved（绘制位置改变）、stationary（位置未变）、refChanged（Bitmap ID 或 Generation ID 改变）、geometryChanged（预览大小或 GPU 模式改变）、bridgeVersionChanged（桥接更新版本变化）、stableAllInputs（上述指标均不变）、gpuDraws。
+以上仅观察部分输入，不能据此直接断言 Source 录制可安全跳过：如 Canvas 其他状态、alpha、显示坐标映射、图层内容等仍需另外验证。
+不修改原有 UI、SharedPreferences、Root 快照、Launcher 光学参数映射。诊断暂由 Settings.Global 独立开关控制。
+无完整 Android Gradle 编译验证，需 GitHub Actions 真机验收。

@@ -1920,6 +1920,15 @@ object KyantLauncherLens270 {
         if (perfettoTrace288120) android.util.Log.i("KyantTrace288120",
             "KYANT288120_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
             "staticLayer=$staticLayerReuse288116")
+        // V288.123: independently gated SOURCE input-stability analysis.
+        // This probe NEVER skips a draw or mutates a GraphicsLayer.
+        val sourceInputProbe288123 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_source_input_probe_288123", 0) == 1
+        } catch (_: Throwable) { false }
+        if (sourceInputProbe288123) android.util.Log.i("KyantSource288123",
+            "KYANT288123_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "mode=observe_only_no_record_skip")
         val multiHostProbe288114 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_multi_host_probe_288114", 0) == 1
@@ -2809,7 +2818,7 @@ object KyantLauncherLens270 {
                 }, lifecycleProbe28864, drawProbe28865,
                 sourceDrawSerial28864, sourceDrawPosition28864,
                 { stage, pos, info -> releaseTrace28820(stage, pos, info) },
-                perfettoTrace288120) {
+                perfettoTrace288120, sourceInputProbe288123) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3736,6 +3745,7 @@ object KyantLauncherLens270 {
         sourceDrawPosition28864: java.util.concurrent.atomic.AtomicReference<Offset?>,
         trace28820: (String, Offset?, String) -> Unit,
         perfettoTrace288120: Boolean,
+        sourceInputProbe288123: Boolean,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -3748,6 +3758,15 @@ object KyantLauncherLens270 {
         // Compose State. Capture on the first actual draw to avoid startup offset.
         val frozenSource = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicReference<Offset?>(null) }
         val sourceDrawCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
+        // V288.123: all values are per-Host Compose-remembered, draw-thread-local.
+        // [all, moved, stationary, wallpaperChanged, geometryChanged,
+        //  bridgeVersionChanged, stableInputs, sourceDrawsWithGpu]
+        val sourceInputCounts288123 = androidx.compose.runtime.remember { LongArray(8) }
+        val sourceInputPos288123 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
+        // [refIdentity, refGeneration, width, height, bridgeVersion, gpuFlag]
+        val sourceInputKey288123 = androidx.compose.runtime.remember { IntArray(6) }
+        val sourceInputInitialized288123 = androidx.compose.runtime.remember { booleanArrayOf(false) }
+
         val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
             "LG120_SOURCE_$traceHost28890"
         }
@@ -4027,6 +4046,53 @@ object KyantLauncherLens270 {
                             "opticsStrength=${optics28827.strength} blur=${optics28827.blur} " +
                             "highlight=${optics28827.highlight} " +
                             "backdropPath=${rootPipeline28879 < 0 && nodePipeline28881 < 0}")
+                    }
+                }
+                // V288.123: compare observable SOURCE inputs, never reuse pixels
+                // based on Bitmap identity alone. Coordinate and bridge-version
+                // changes are counted separately, because even a stable wallpaper
+                // must be resampled as the desktop moves. Do not skip recordLayer.
+                if (sourceInputProbe288123) {
+                    val counts123 = sourceInputCounts288123
+                    val old123 = sourceInputKey288123
+                    val pos123 = sourceInputPos288123
+                    val refId123 = System.identityHashCode(reference)
+                    val refGen123 = reference.generationId
+                    val bridgeVer123 = bridgeVersion.value
+                    val gpu123 = if (gpuReference288110) 1 else 0
+                    val initial123 = !sourceInputInitialized288123[0]
+                    val moved123 = !initial123 &&
+                        (pos123[0] != drawPosition.x || pos123[1] != drawPosition.y)
+                    val wallpaperChanged123 = !initial123 &&
+                        (old123[0] != refId123 || old123[1] != refGen123)
+                    val geometryChanged123 = !initial123 &&
+                        (old123[2] != previewWidth || old123[3] != previewHeight ||
+                         old123[5] != gpu123)
+                    val bridgeChanged123 = !initial123 && old123[4] != bridgeVer123
+                    counts123[0]++
+                    if (moved123) counts123[1]++ else if (!initial123) counts123[2]++
+                    if (wallpaperChanged123) counts123[3]++
+                    if (geometryChanged123) counts123[4]++
+                    if (bridgeChanged123) counts123[5]++
+                    if (!initial123 && !moved123 && !wallpaperChanged123 &&
+                        !geometryChanged123 && !bridgeChanged123) counts123[6]++
+                    if (gpuReference288110) counts123[7]++
+                    pos123[0] = drawPosition.x; pos123[1] = drawPosition.y
+                    old123[0] = refId123; old123[1] = refGen123
+                    old123[2] = previewWidth; old123[3] = previewHeight
+                    old123[4] = bridgeVer123; old123[5] = gpu123
+                    sourceInputInitialized288123[0] = true
+                    if (counts123[0] == 1L || counts123[0] % 120L == 0L) {
+                        android.util.Log.i("KyantSource288123", "KYANT288123_SOURCE_INPUT " +
+                            "host=$traceHost28890 draws=${counts123[0]} " +
+                            "moved=${counts123[1]} stationary=${counts123[2]} " +
+                            "refChanged=${counts123[3]} geometryChanged=${counts123[4]} " +
+                            "bridgeVersionChanged=${counts123[5]} " +
+                            "stableAllInputs=${counts123[6]} gpuDraws=${counts123[7]} " +
+                            "refId=$refId123 refGen=$refGen123 " +
+                            "posX=${drawPosition.x} posY=${drawPosition.y} " +
+                            "target=${previewWidth}x${previewHeight} bridgeVersion=$bridgeVer123 " +
+                            "scope=reference_position_bridge_version_observation_only")
                     }
                 }
                 val rootScreenX = drawPosition.x
