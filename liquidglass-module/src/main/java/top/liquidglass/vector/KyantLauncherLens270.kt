@@ -1879,10 +1879,26 @@ object KyantLauncherLens270 {
         // V288.113 opt-in conservative offscreen reference draw culling.
         // This affects ONLY the GPU-reference branch and keeps every Host's
         // position/invalidation pipeline running for immediate re-entry.
-        val offscreenCull288113 = try {
+        // V288.132 A/B: -1 preserves the existing behavior; 0 observes without
+        // offscreen culling, 1 opts into the pre-existing GPU bitmap-only cull.
+        // This is deliberately NOT a Source/Backdrop record skip and does not
+        // suppress Compose reads, bridge notifications, or on-screen sampling.
+        val visibilityMode288132 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_visibility_ab_288132", -1)
+        } catch (_: Throwable) { -1 }
+        val legacyCull288113 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_offscreen_cull_288113", 0) == 1
         } catch (_: Throwable) { false }
+        val offscreenCull288113 = when (visibilityMode288132) {
+            0 -> false
+            1 -> true
+            else -> legacyCull288113
+        }
+        android.util.Log.i("KyantVisibility288132", "KYANT288132_HOST host=$trace28815Host " +
+            "mode=$visibilityMode288132 cull=$offscreenCull288113 gpu=$gpuReference288110 " +
+            "scope=gpu_reference_bitmap_draw_only")
         val offscreenDraws288113 = java.util.concurrent.atomic.AtomicLong(0L)
         val onscreenDraws288113 = java.util.concurrent.atomic.AtomicLong(0L)
         android.util.Log.i("KyantCull288113", "KYANT288113_HOST host=$trace28815Host " +
@@ -2887,7 +2903,8 @@ object KyantLauncherLens270 {
                 sourceDrawSerial28864, sourceDrawPosition28864,
                 { stage, pos, info -> releaseTrace28820(stage, pos, info) },
                 perfettoTrace288120, sourceInputProbe288123, sourceVisualProbe288124,
-                sourceRecordReuse288125, jointProbe288131) {
+                sourceRecordReuse288125, jointProbe288131,
+                visibilityMode288132) {
                 if (compositionSeen.compareAndSet(false, true)) {
                     XposedBridge.log("KYANT2885_COMPOSITION_CONFIRMED elapsedMs=" +
                         (SystemClock.uptimeMillis() - startedAt))
@@ -3842,6 +3859,7 @@ object KyantLauncherLens270 {
         sourceVisualProbe288124: Boolean,
         sourceRecordReuse288125: Boolean,
         jointProbe288131: Boolean,
+        visibilityMode288132: Int,
         onComposed: () -> Unit
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -3906,6 +3924,14 @@ object KyantLauncherLens270 {
         // previous x/y/native gap maximum and source position step maximum
         val jointValues131 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN, 0f, 0f) }
         val jointKeys131 = androidx.compose.runtime.remember { intArrayOf(-1, Int.MIN_VALUE) }
+        // V288.132: per-Host plain arrays; do not trigger Compose invalidations.
+        // draws/offscreen/onscreen/moved/stable/bridgeChanged/bridgeOnly/offscreenBridgeOnly
+        val visibilityCounts132 = androidx.compose.runtime.remember { LongArray(8) }
+        // previous X, previous Y; first sample is NaN.
+        val visibilityLastXY132 = androidx.compose.runtime.remember { floatArrayOf(Float.NaN, Float.NaN) }
+        // previous bridge version / last log elapsedRealtimeNanos.
+        val visibilityVersion132 = androidx.compose.runtime.remember { intArrayOf(Int.MIN_VALUE) }
+        val visibilityLastLogNs132 = androidx.compose.runtime.remember { longArrayOf(0L) }
         val traceSourceName288120 = androidx.compose.runtime.remember(traceHost28890) {
             "LG120_SOURCE_$traceHost28890"
         }
@@ -4108,6 +4134,52 @@ object KyantLauncherLens270 {
                     frozenSource.compareAndSet(null, selectedOrigin28866)
                 val drawPosition = if (motionAbMode == 1)
                     (frozenSource.get() ?: selectedOrigin28866) else selectedOrigin28866
+                // V288.132 visibility and notification attribution. A/B switch
+                // changes only the already existing 128px guarded GPU Bitmap draw
+                // cull; these counters do not change draw scheduling or caching.
+                if (visibilityMode288132 in 0..1) {
+                    val off132 = drawPosition.x.isFinite() && drawPosition.y.isFinite() &&
+                        (drawPosition.x + previewWidth.toFloat() < -128f ||
+                         drawPosition.x > screenW.toFloat() + 128f ||
+                         drawPosition.y + previewHeight.toFloat() < -128f ||
+                         drawPosition.y > screenH.toFloat() + 128f)
+                    val previousX132 = visibilityLastXY132[0]
+                    val previousY132 = visibilityLastXY132[1]
+                    val moved132 = previousX132.isFinite() && previousY132.isFinite() &&
+                        (drawPosition.x != previousX132 || drawPosition.y != previousY132)
+                    val stable132 = previousX132.isFinite() && previousY132.isFinite() && !moved132
+                    val version132 = bridgeVersion.value
+                    val changed132 = visibilityVersion132[0] != Int.MIN_VALUE &&
+                        version132 != visibilityVersion132[0]
+                    visibilityCounts132[0]++
+                    if (off132) visibilityCounts132[1]++ else visibilityCounts132[2]++
+                    if (moved132) visibilityCounts132[3]++
+                    if (stable132) visibilityCounts132[4]++
+                    if (changed132) visibilityCounts132[5]++
+                    if (changed132 && stable132) {
+                        visibilityCounts132[6]++
+                        if (off132) visibilityCounts132[7]++
+                    }
+                    visibilityLastXY132[0] = drawPosition.x
+                    visibilityLastXY132[1] = drawPosition.y
+                    visibilityVersion132[0] = version132
+                    val now132 = SystemClock.elapsedRealtimeNanos()
+                    if (visibilityLastLogNs132[0] == 0L ||
+                        now132 - visibilityLastLogNs132[0] >= 2_000_000_000L) {
+                        visibilityLastLogNs132[0] = now132
+                        android.util.Log.i("KyantVisibility288132",
+                            "KYANT288132_WINDOW host=$traceHost28890 mode=$visibilityMode288132 " +
+                            "gpu=$gpuReference288110 draws=${visibilityCounts132[0]} " +
+                            "offscreen=${visibilityCounts132[1]} onscreen=${visibilityCounts132[2]} " +
+                            "moved=${visibilityCounts132[3]} stable=${visibilityCounts132[4]} " +
+                            "bridgeChanged=${visibilityCounts132[5]} " +
+                            "bridgeOnly=${visibilityCounts132[6]} " +
+                            "offscreenBridgeOnly=${visibilityCounts132[7]} " +
+                            "cullEnabled=$offscreenCull288113 x=${drawPosition.x} y=${drawPosition.y} " +
+                            "size=${previewWidth}x$previewHeight " +
+                            "scope=source_draw_callbacks_not_gpu_work_or_presented_frames")
+                    }
+                }
                 // V288.131 diagnostic only: compares positions at ONE Source draw,
                 // records elapsedRealtimeNanos cadence; this is not a presented frame ID.
                 if (jointProbe288131) {
