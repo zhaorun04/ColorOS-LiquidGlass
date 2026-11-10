@@ -37,6 +37,7 @@ import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
 import com.kyant.backdrop.internal.BackdropPassProbe127
 import com.kyant.backdrop.internal.BackdropEffectProbe128
+import com.kyant.backdrop.internal.BackdropEffectIsolation129
 import com.kyant.backdrop.shadow.InnerShadow
 import com.kyant.backdrop.shadow.InnerShadowElement
 import com.kyant.backdrop.shadow.Shadow
@@ -361,6 +362,7 @@ private class DrawBackdropNode(
     override fun ContentDrawScope.draw() {
         if (BackdropPassProbe127.enabled) BackdropPassProbe127.drawNodeCalls++
         if (BackdropEffectProbe128.enabled) BackdropEffectProbe128.drawCalls++
+        BackdropEffectIsolation129.onDraw()
         if (effectScope.update(this)) {
             if (BackdropEffectProbe128.enabled) BackdropEffectProbe128.drawRebuilt++
             updateEffects(fromDraw128 = true)
@@ -447,7 +449,14 @@ private class DrawBackdropNode(
         }
         if (trace128) BackdropTrace121.begin("LG128_EFFECT_ASSIGN")
         try {
-            graphicsLayer?.renderEffect = effectScope.renderEffect
+            // V288.129 A/B: original (0) or isolate Backdrop render effect (1).
+            // Keep effectScope.apply(), padding and recording path unchanged.
+            // DO NOT replace this diagnostic bypass with an unconditional optimization.
+            val effect129 = if (BackdropEffectIsolation129.mode == 1) null else effectScope.renderEffect
+            graphicsLayer?.renderEffect = effect129
+            if (BackdropEffectIsolation129.mode == 1)
+                BackdropEffectIsolation129.bypassAssignments++
+            else BackdropEffectIsolation129.effectAssignments++
         } finally {
             if (trace128) BackdropTrace121.end()
         }

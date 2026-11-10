@@ -1,3 +1,16 @@
+V1.9.205.288.129｜RenderEffect 实际成本隔离 A/B 诊断版
+
+目的：在同一个文件夹桌面页面、相同滑动节奏下，通过 0/1 两档隔离 Backdrop GraphicsLayer RenderEffect，量化 GPU RenderThread 绘制/纹理处理/掉帧差值。不能根据 RenderEffect 构建次数判断 GPU Pass。
+
+设置：settings put global liquidglass_kyant_effect_isolation_ab_288129 0 (A，原始视觉渲染，默认)；1 (B，仅用于短时诊断；Backdrop 的 RenderEffect 被跳过，玻璃光学会改变)。每次设置后 am force-stop com.android.launcher，并重新进入桌面。务必完成测试后恢复 0。
+A、B 都保留 Source GPU 参考 Bitmap、几何位置、Source/Backdrop 录制、effectScope 计算、padding、以及高光和阴影的原有路径；B 只隔离 Backdrop graphicsLayer.renderEffect 属性赋值结果。B 的画面变化是预期行为，绝不是正式画质优化。
+
+日志：KYANT288129_HOST mode=0/1 和 KYANT288129_WINDOW 统计 draws/effectAssignments/bypassAssignments。A/B 均可采集 Perfetto -a com.android.launcher -t 15s -b 128mb -o /data/local/tmp/lg129_A.perfetto-trace gfx view sched freq，以及 gfxinfo framestats。推荐使用相同测试页、相同滑动时长和次数，两档各重复至少两次。RenderThread 纹理上传 Trace 标记不是实际 GPU 传输字节数。
+
+原有 UI/SharedPreferences/Root 快照/Launcher 光学参数的字段与映射均未改动；新增仅诊断 Settings.Global 键，Host 启动时读取。
+源码静态检查和 ZIP 完整性检查完成；未完成 Android Gradle 构建与真机验证。
+
+—— 历史记录 ——
 V1.9.205.288.128｜RenderEffect 构建及属性赋值归因诊断版
 本版基于 V288.127.1，保留 GPU 参考帧、Source/Backdrop 正常录制、原生二维折射与高光、阴影、模糊的全部渲染行为。
 新增独立默认关闭开关 liquidglass_kyant_effect_lifecycle_probe_288128（1启用，0关闭；重启 Launcher）。

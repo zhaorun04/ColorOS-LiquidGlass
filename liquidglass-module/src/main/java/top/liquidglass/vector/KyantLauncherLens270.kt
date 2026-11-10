@@ -1914,6 +1914,18 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_pass_topology_probe_288127", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.129: opt-in causality experiment. Mode 0 is the exact original visual path;
+        // mode 1 suppresses Backdrop GraphicsLayer RenderEffect ONLY (visuals will differ).
+        // Read at host creation; force-stop Launcher between each A/B mode.
+        val effectIsolationMode288129 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_effect_isolation_ab_288129", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        com.kyant.backdrop.internal.BackdropEffectIsolation129.mode = effectIsolationMode288129
+        android.util.Log.i("KyantEffect288129",
+            "KYANT288129_HOST host=$trace28815Host mode=$effectIsolationMode288129 " +
+            "gpu=$gpuReference288110 scope=backdrop_layer_rendereffect_isolation_only " +
+            "warning=mode1_intentionally_changes_visuals")
         // V288.128: independently gated, counts RenderEffect builds and assignments.
         // Perfetto spans use the existing 288120 flag; no shader/effect is disabled.
         val effectProbe288128 = try {
