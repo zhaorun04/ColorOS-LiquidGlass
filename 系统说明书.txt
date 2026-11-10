@@ -171,3 +171,7 @@ V1.9.205.288.127 — RenderThread/GPU 多层拓扑诊断
 - 测试命令：su -c 'settings put global liquidglass_kyant_pass_topology_probe_288127 1'；重启 Launcher。
 - 日志：su -c 'logcat -d -b all -v brief | grep -E "KYANT288127_HOST|KYANT288127_PASS_WINDOW" | tail -50'。
 - 测试完成设置为 0 并重启 Launcher。
+
+
+V1.9.205.288.127.1｜渲染通道日志触发修正版
+移除 PASS_WINDOW 每 256 次录制的整除条件，改为开启诊断后首次实际 Backdrop 录制立即输出，随后每三秒内最多输出一次。保持原有计数项、日志标签 KYANT288127_PASS_WINDOW、设置键 liquidglass_kyant_pass_topology_probe_288127、全部 GPU 与光学渲染路径不变。HOST 仍仅在已开启诊断的 Host 初始化时输出。

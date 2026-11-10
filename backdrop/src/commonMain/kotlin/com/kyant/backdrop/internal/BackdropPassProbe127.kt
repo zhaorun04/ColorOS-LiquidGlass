@@ -22,10 +22,11 @@ object BackdropPassProbe127 {
 
     fun maybeReport() {
         if (!enabled) return
-        // Avoid system clock and string construction on most draw callbacks.
-        if ((normalBackdropRecords + nestedBackdropRecords) % 256L != 0L) return
+        // V288.127.1: first actual backdrop record logs immediately, then at most once
+        // every 3 seconds while this draw path is active. The old modulo-256 gate
+        // could miss the time window and leave otherwise active hosts silent.
         val now = platformElapsedTime122()
-        if (now - lastLogMs < 3000L) return
+        if (lastLogMs != 0L && now - lastLogMs < 3000L) return
         lastLogMs = now
         platformLifecycleLog122(
             "KYANT288127_PASS_WINDOW sourceRecords=$sourceRecords drawNodeCalls=$drawNodeCalls " +
