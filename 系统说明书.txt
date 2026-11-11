@@ -1,40 +1,41 @@
-ColorOS-LiquidGlass V1.9.205.288.138｜Launcher 回弹整帧卡顿定位版
+ColorOS-LiquidGlass V1.9.205.288.139｜回弹整帧与壁纸采样回调关联诊断版
 
-一、目标
-用户已明确指出，滑动不翻页并松手回弹时，整个 Launcher 桌面、图标和文件夹同时出现不连贯，玻璃内部纹理抖动可能是整帧掉帧放大后的视觉表现。本版先研究整体帧呈现，并不更换光学 Shader、壁纸 Bitmap/坐标、模糊或高光算法。
+一、问题与目的
+用户观察：不翻页向右滑动松手回弹时，桌面图标和文件夹会同时出现轻微卡顿；玻璃壁纸纹理相对外部壁纸的贴合可把卡顿或不同步显著放大。两类原因可叠加：1）Launcher 整帧延迟；2）Kyant Source 绘制采用的采样位置与当前文件夹的位置更新不一致。V139 仅关联记录这些回调输入，不修改折射、模糊、高光、壁纸 Bitmap、Shader 或 Host 创建逻辑。默认关闭诊断。
 
-二、技术修改
-1. 新增 Settings.Global：liquidglass_kyant_rebound_host_ab_288138
-   0（默认）：完全沿用 V288.137 原 Kyant 文件夹 Host 初始化路径，渲染效果不变。
-   1（仅测试）：在 KyantLauncherLens270.run() 入口跳过创建文件夹 Kyant 光学 Host，保留 OEM FolderIcon / Workspace 原有图标和动画，并继续安装轻量 TouchRelease 时间标记 Hook。该实验仅隔离通过此入口创建的 Kyant 文件夹 Host；Dock、其他旧路径/模块渲染不保证全部关闭，因此不可称为“全模块玻璃关闭”。
-2. 松手 ACTION_UP/CANCEL 标记：KYANT288138_RELEASE + Trace.beginSection("LG138_RELEASE_UP")，用于和系统 gfx/RenderThread 跟踪尝试按单调时钟对齐。Touch Hook 本身有少量开销，A/B 路径均保留。
-3. 将模块 versionName 更新为 1.9.205.288.138，versionCode 更新为 1920529144。
-4. 更新 lg_test.sh。只修改本次实验所需的两个 Global Settings，首次修改前保存它们的原始值；restore 根据备份恢复原值，原本未设置则删除键，不再重置其它 GPU/渲染/Shader 相关配置。脚本采集 15 秒 Perfetto、gfxinfo、CPU 频率、ThermalService、Logcat 和实际档位。
+二、改动（V138 稳定完整玻璃 A 档基础）
+1. 新增独立开关 Settings.Global：liquidglass_kyant_same_frame_probe_288139，0 默认关闭，1 开启诊断。
+2. KYANT288139_RELEASE：松手（ACTION_UP 或 CANCEL）事件的单调时间戳和序号。Perfetto 附加瞬间标记 LG139_RELEASE_UP/CANCEL（依赖设备 Trace 类别是否启用）。
+3. KYANT288139_PREDRAW：回弹后的 UI PreDraw 原生位置（nativeX/Y）、当时已提交 Compose 状态（committedX/Y）、pendingGapPx、回调间隔和序号。
+4. KYANT288139_SOURCE：相同松手序号下，Compose Source Draw 的 drawX/Y、committedX/Y、最近一次 PreDraw 的位置/序号/年龄、实时原生位置、reference generation 和 GPU 参考帧选项。
+5. 单个 Host、单次松手窗口 650ms；PreDraw 和 Source 各不超过 9 条日志且至少间隔 45ms。只在已选 Host 记录，非每帧持续打印。仅日志观察仍会有小额开销，先按相同设置复测。
+6. versionName=1.9.205.288.139、versionCode=1920529145。
+7. 更新 lg_test.sh：仅备份并调整 V139 探针开关与 V138 Host 隔离开关。测试强制 Host 隔离=0（完整 Kyant），结束按原备份恢复。其它光学、GPU、壁纸、调试设置不改动。保存 Perfetto、gfxinfo、Logcat、CPU 频率和 ThermalService 前后快照。
 
-三、严格测试要求
-先确认 Vector 作用域已启用 com.android.launcher，V288.138 安装成功且 A 档玻璃外观正常；固定屏幕刷新率/壁纸/桌面页面，做多次“不翻页回弹”操作。
-运行：
+三、关键解释限制
+- 同一个 release 序号加回调时刻，不意味着记录均属于同一 SurfaceFlinger 最终呈现帧；PreDraw/Source 也不具有相同的系统 FrameTimeline token。
+- 两坐标要先判断坐标系/矩阵一致才能将差值解释为壁纸视觉贴合误差。pendingGapPx/nativeDrawGapPx 仅是回调观察的像素差，不是经像素识别验证的纹理错位。
+- Perfetto 命令录制 gfx/view/sched/freq；若设备没有 FrameTimeline datasource，不能宣称已记录或完成 GPU 呈现级归因。
+- gfxinfo reset 与 Perfetto 启停是近似窗口，不保证完全同一时段；结合 release 标记和真实 trace 范围解释。
+- 诊断 key 需要重新启动 Launcher 才能生效。要确保 Vector 已勾选 com.android.launcher 作用域。
+
+四、完整玻璃真机测试
+安装已编译 V139 APK，确认 Vector 作用域及文件夹玻璃与 Dock 均可正常显示。
  cd ~/ColorOS-LiquidGlass-V1.0-Source
- sh lg_test.sh a single a1
- sh lg_test.sh b single b1
- sh lg_test.sh a single a2
+ sh lg_test.sh single a1
+ sh lg_test.sh single a2
+ sh lg_test.sh multi m1
  sh lg_test.sh pack
-结果：/sdcard/Download/LG138_TestResults.tar.gz
-完成后：sh lg_test.sh restore
+结果：/sdcard/Download/LG139_TestResults.tar.gz
+每轮在准备倒计时后，重复短距离右滑不翻页、松手回弹动作约 15 秒；A1/A2 尽量保持相同页面/壁纸/刷新率/操作节奏。绝不以关闭玻璃后看不见抖动作为性能成功证据。
+恢复：sh lg_test.sh restore
+原值备份：LG139_TestResults/original_settings.tsv。第一次采集前备份，仅这两项被脚本写入。若之前的 V138 B 档为 1，restore 会忠实恢复为 1；日常使用应确保 liquidglass_kyant_rebound_host_ab_288138=0。
 
-四、如何解释结果
-单次采集内按 LG138_RELEASE_UP 标记前后约 300～500ms 对齐分析异常帧（若系统 Perfetto 配置包含必要 FrameTimeline 则进一步结合；不能假定缺失的 FrameTimeline 已采集）。比对 A1、B、A2 的 gfxinfo、RenderThread Drawing、CPU/调频状态和画面主观反馈。B 档文件夹玻璃会消失，这是实验设计，不是最终用户体验；如果 B 档变快，仅证明该 Kyant Host 及其连带开销可能参与了问题，不能单凭 A/B 认定具体瓶颈。
-脚本的 gfxinfo reset 和 Perfetto 启停不保证纳秒级严格相同，应以可验证的独立时间线对齐为准。Perfetto 中 Trace 标记能否实际显示，取决于设备上的 tracing 配置与相关应用 trace 标签。
+五、开发验证状态
+已进行修改点与变量传递静态检查、Shell 语法及 ZIP CRC 校验；本环境无 Gradle SDK 完整编译结果，需 GitHub Actions 的 :liquidglass-module:assembleDebug 实际确认；真机数据尚未收集。
 
-五、风险与还原
-不要清除 Launcher 数据。B 档仅用于短时诊断，测试结束必须运行 restore。原始 Settings 备份位于 LG138_TestResults/original_settings.tsv，恢复后重命名为 .restored.*.tsv 以供审计。切换实验档时需要重启 Launcher，因此需要重新确认 Vector 注入及文件夹页面。
-若出现 B 档没有 HOST_DISABLED、两档玻璃均不见、或者松手标记完全缺失，停止采集并排查，而不是据此判定优化有效。
-
-六、开发验证状态
-已实施源码与脚本修改，需用户 GitHub Actions 实际 Gradle 编译与设备真机测试；不宣称已在 Android 设备测试通过。
-
-七、Termux 更新源码后 Git
+六、Termux Git
  cd ~/ColorOS-LiquidGlass-V1.0-Source
  git add .
- git commit -m "V1.9.205.288.138 版本"
+ git commit -m "V1.9.205.288.139 版本"
  git push origin main

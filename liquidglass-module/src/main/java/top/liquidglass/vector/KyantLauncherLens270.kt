@@ -254,6 +254,12 @@ object KyantLauncherLens270 {
             } catch (_: Throwable) { }
             XposedBridge.log("KYANT288138_RELEASE seq=$serial action=$releaseAction28820 " +
                 "timeNs=${releaseNs28820.get()} dx=$dx via=$method")
+            try {
+                android.os.Trace.beginSection("LG139_RELEASE_${releaseAction28820}")
+                android.os.Trace.endSection()
+            } catch (_: Throwable) { }
+            android.util.Log.i("KyantSync288139", "KYANT288139_RELEASE seq=$serial action=$releaseAction28820 " +
+                "tNs=${releaseNs28820.get()} dx=$dx via=$method")
             XposedBridge.log("KYANT28821_TOUCH_RELEASE seq=$serial action=$releaseAction28820 " +
                 "dx=$dx dy=$dy rawX=${event.rawX} rawY=${event.rawY} eventMs=${event.eventTime} via=$method")
             releaseSnapshot28821("BEFORE", serial, method)
@@ -801,7 +807,12 @@ object KyantLauncherLens270 {
         val releaseTrace28820 = try {
             Settings.Global.getInt(anchor.context.contentResolver, RELEASE_TRACE_28821_KEY, 0) == 1
         } catch (_: Throwable) { false }
-        if (releaseTrace28820) {
+        // 139 also requires release markers, but does not force verbose 28821 tracing.
+        val releaseProbe139 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_same_frame_probe_288139", 0) == 1
+        } catch (_: Throwable) { false }
+        if (releaseTrace28820 || releaseProbe139) {
             installTouchHooks28820(anchor)
             XposedBridge.log("KYANT28821_TRACE_ARMED host=${System.identityHashCode(anchor)} pipeline=$pipelineMode28819")
         }
@@ -1401,6 +1412,15 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_rebound_trace_28890", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.139: observational, release-window-only correlation; no optical path change.
+        val sameFrameProbe288139 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_same_frame_probe_288139", 0) == 1
+        } catch (_: Throwable) { false }
+        val predrawProbeCounts288139 = LongArray(4) // release, number, last time, last predraw time
+        if (sameFrameProbe288139) android.util.Log.i("KyantSync288139",
+            "KYANT288139_HOST host=$trace28815Host enabled=true " +
+            "scope=ui_callbacks_not_surfaceflinger_presentation")
         val predrawSample28890 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
         val bridgeSample28890 = java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>(null)
         var predrawSerial28890 = 0L
@@ -3131,6 +3151,7 @@ object KyantLauncherLens270 {
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
                 reboundTrace28890, trace28815Host, perfProfile288109,
+                sameFrameProbe288139,
                 predrawSample28890, bridgeSample28890,
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
@@ -3781,6 +3802,40 @@ object KyantLauncherLens270 {
                     else frame.left == b.left && frame.top == b.top) &&
                         frame.width == b.width() && frame.height == b.height()
                     val currentSample = largeFrameSample28829 ?: glassScreenPosition(b)
+                    // V288.139: capture a bounded UI PreDraw observation around release.
+                    // Both positions are derived from the SAME native coordinate path.
+                    // This is not a verified GPU/presented-frame location.
+                    if (sameFrameProbe288139) {
+                        val now139 = SystemClock.elapsedRealtimeNanos()
+                        val release139 = releaseSeq28820.get()
+                        val age139 = now139 - releaseNs28820.get()
+                        if (release139 > 0L && age139 in 0L..650_000_000L &&
+                            trace28815Host in selectedHostIds28821) {
+                            if (predrawProbeCounts288139[0] != release139) {
+                                predrawProbeCounts288139[0] = release139
+                                predrawProbeCounts288139[1] = 0L
+                                predrawProbeCounts288139[2] = 0L
+                                predrawProbeCounts288139[3] = 0L
+                            }
+                            val previous139 = predrawProbeCounts288139[3]
+                            val gap139 = if (previous139 > 0L) (now139 - previous139) / 1_000_000f else -1f
+                            predrawProbeCounts288139[3] = now139
+                            if (predrawProbeCounts288139[1] < 9L &&
+                                now139 - predrawProbeCounts288139[2] >= 45_000_000L) {
+                                predrawProbeCounts288139[1]++
+                                predrawProbeCounts288139[2] = now139
+                                val commit139 = samplePosition.value
+                                android.util.Log.i("KyantSync288139",
+                                    "KYANT288139_PREDRAW host=$trace28815Host release=$release139 " +
+                                    "tNs=$now139 releaseAgeMs=${age139 / 1_000_000f} " +
+                                    "nativeX=${currentSample.x} nativeY=${currentSample.y} " +
+                                    "committedX=${commit139.x} committedY=${commit139.y} " +
+                                    "pendingGapPx=${kotlin.math.max(kotlin.math.abs(currentSample.x - commit139.x), kotlin.math.abs(currentSample.y - commit139.y))} " +
+                                    "callbackGapMs=$gap139 preSeqBeforeUpdate=${predrawSerial28890} " +
+                                    "scope=ui_predraw_not_presented")
+                            }
+                        }
+                    }
                     // Geometry may have changed since the initial pre-draw read.
                     nativePredrawPosition28824 = currentSample
                     // The existing moved/geometry gate may skip committing the
@@ -3909,7 +3964,7 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
-                    if (reboundTrace28890 || timelineTrace28893) {
+                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139) {
                         val now90 = SystemClock.elapsedRealtimeNanos()
                         val releaseSeq90 = releaseSeq28820.get()
                         predrawSerial28890++
@@ -4081,6 +4136,7 @@ object KyantLauncherLens270 {
         predrawMatrixSnapshot: java.util.concurrent.atomic.AtomicReference<Pair<Offset, Long>>,
         reboundTrace28890: Boolean, traceHost28890: Int,
         perfProfile288109: Boolean,
+        sameFrameProbe288139: Boolean,
         predrawSample28890: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
         bridgeSample28890: java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>,
         currentNativePosition: () -> Offset,
@@ -4138,6 +4194,8 @@ object KyantLauncherLens270 {
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current.density
         val optics28827 = KyantOptics28827.material
+        // Plain arrays retained in Compose across redraws: no snapshot invalidations.
+        val sourceProbeCounters288139 = androidx.compose.runtime.remember(traceHost28890) { LongArray(3) }
         // V288.125: the key is evaluated at SOURCE DRAW time, not during
         // composition. Only the simple screenPosition-driven hardware GPU path
         // is eligible; all special motion/native sampling paths fail open.
@@ -4420,6 +4478,48 @@ object KyantLauncherLens270 {
                     frozenSource.compareAndSet(null, selectedOrigin28866)
                 val drawPosition = if (motionAbMode == 1)
                     (frozenSource.get() ?: selectedOrigin28866) else selectedOrigin28866
+                // V288.139: compare Source-draw inputs to the most recent UI PreDraw.
+                // Read a fresh native View position ONLY for <=9 bounded samples per
+                // selected host per gesture. All values are callback observations,
+                // not a SurfaceFlinger frame ID or evidence of presented-frame match.
+                if (sameFrameProbe288139) {
+                    val now139 = SystemClock.elapsedRealtimeNanos()
+                    val release139 = releaseSeq28820.get()
+                    val age139 = now139 - releaseNs28820.get()
+                    if (release139 > 0L && age139 in 0L..650_000_000L &&
+                        traceHost28890 in selectedHostIds28821) {
+                        if (sourceProbeCounters288139[0] != release139) {
+                            sourceProbeCounters288139[0] = release139
+                            sourceProbeCounters288139[1] = 0L
+                            sourceProbeCounters288139[2] = 0L
+                        }
+                        if (sourceProbeCounters288139[1] < 9L &&
+                            now139 - sourceProbeCounters288139[2] >= 45_000_000L) {
+                            sourceProbeCounters288139[1]++
+                            sourceProbeCounters288139[2] = now139
+                            val pre139 = predrawSample28890.get()
+                            val preAge139 = if (pre139 != null) (now139 - pre139.atNs) / 1_000_000f else -1f
+                            val native139 = try { currentNativePosition() } catch (_: Throwable) { null }
+                            val nativeGap139 = if (native139 != null &&
+                                native139.x.isFinite() && native139.y.isFinite())
+                                kotlin.math.max(kotlin.math.abs(native139.x - drawPosition.x),
+                                    kotlin.math.abs(native139.y - drawPosition.y)) else Float.NaN
+                            android.util.Log.i("KyantSync288139",
+                                "KYANT288139_SOURCE host=$traceHost28890 release=$release139 " +
+                                "tNs=$now139 releaseAgeMs=${age139 / 1_000_000f} " +
+                                "preSeq=${pre139?.serial ?: -1L} preRelease=${pre139?.releaseSeq ?: -1L} " +
+                                "preAgeMs=$preAge139 preX=${pre139?.pos?.x} preY=${pre139?.pos?.y} " +
+                                "committedX=${committedPosition.x} committedY=${committedPosition.y} " +
+                                "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
+                                "nativeX=${native139?.x} nativeY=${native139?.y} " +
+                                "nativeDrawGapPx=$nativeGap139 " +
+                                "bridgeVersion=${bridgeVersion.value} reference=${System.identityHashCode(reference)} " +
+                                "referenceGen=${reference.generationId} gpuReference=$gpuReference288110 " +
+                                "coordinatePath=$sourceMatrixAb28866 legacySync=$legacySyncAbMode " +
+                                "scope=source_draw_callback_not_presented")
+                        }
+                    }
+                }
                 // V288.132 visibility and notification attribution. A/B switch
                 // changes only the already existing 128px guarded GPU Bitmap draw
                 // cull; these counters do not change draw scheduling or caching.
