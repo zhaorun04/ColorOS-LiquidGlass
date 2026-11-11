@@ -2041,6 +2041,16 @@ object KyantLauncherLens270 {
         if (resourceProbe288130) android.util.Log.i("KyantResource288130",
             "KYANT288130_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
             "trace=$perfettoTrace288120 scope=source_backdrop_graphicslayer_provenance_not_hwui_texture_identity")
+        // V288.137: inner layer clip/offscreen configuration inventory only.
+        val clipProbe288137 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_clip_provenance_probe_288137", 0) == 1
+        } catch (_: Throwable) { false }
+        com.kyant.backdrop.internal.BackdropClipProbe137.enabled = clipProbe288137
+        if (clipProbe288137) android.util.Log.i("KyantClip288137",
+            "KYANT288137_HOST host=$trace28815Host enabled=true gpu=$gpuReference288110 " +
+            "outerClipIsolated=$outerClipIsolate288136 " +
+            "scope=inner_compose_shape_clip_and_offscreen_layer_configuration")
         // V288.131: joint source-position/cadence vs backdrop recording timeline.
         // A Global setting is read at host construction; no renderer inputs change.
         val jointProbe288131 = try {

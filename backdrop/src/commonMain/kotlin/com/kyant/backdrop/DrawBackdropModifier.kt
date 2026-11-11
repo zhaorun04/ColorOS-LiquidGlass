@@ -37,6 +37,7 @@ import com.kyant.backdrop.internal.BackdropTrace121
 import com.kyant.backdrop.internal.BackdropLifecycle122
 import com.kyant.backdrop.internal.BackdropPassProbe127
 import com.kyant.backdrop.internal.BackdropResourceProbe130
+import com.kyant.backdrop.internal.BackdropClipProbe137
 import com.kyant.backdrop.internal.BackdropEffectProbe128
 import com.kyant.backdrop.internal.BackdropEffectIsolation129
 import com.kyant.backdrop.shadow.InnerShadow
@@ -265,6 +266,14 @@ private class DrawBackdropNode(
     private var backdropLastW130 = -1
     private var backdropLastH130 = -1
     private var backdropLastReport130 = 0L
+    // V288.137: inner shape/offscreen topology counts; never change layer flags.
+    private var clipRecords137 = 0L
+    private var clipDraws137 = 0L
+    private var clipLastReport137 = 0L
+    private var clipLastShape137 = 0L
+    private var clipShapeChanges137 = 0L
+    private var clipLastSize137 = ""
+    private var clipSizeChanges137 = 0L
 
     private val layoutLayerBlock: GraphicsLayerScope.() -> Unit = {
         clip = true
@@ -328,6 +337,25 @@ private class DrawBackdropNode(
                 else BackdropPassProbe127.effectDisabledRecords++
                 BackdropPassProbe127.maybeReport()
             }
+            if (BackdropClipProbe137.enabled) {
+                clipRecords137++
+                val outlineRevision137 = shapeProvider.outlineRevision288117
+                val size137 = "${(size.width.toInt() + padding.toInt() * 2).coerceAtLeast(0)}x${(size.height.toInt() + padding.toInt() * 2).coerceAtLeast(0)}"
+                if (clipLastShape137 != 0L && clipLastShape137 != outlineRevision137) clipShapeChanges137++
+                if (clipLastSize137.isNotEmpty() && clipLastSize137 != size137) clipSizeChanges137++
+                clipLastShape137 = outlineRevision137
+                clipLastSize137 = size137
+                val now137 = com.kyant.backdrop.internal.platformElapsedTime122()
+                if (clipLastReport137 == 0L || now137 - clipLastReport137 >= 3000L) {
+                    clipLastReport137 = now137
+                    BackdropClipProbe137.log("KYANT288137_CLIP layerId=${layer.hashCode()} " +
+                        "size=$size137 records=$clipRecords137 layerDraws=$clipDraws137 " +
+                        "shapeChanges=$clipShapeChanges137 sizeChanges=$clipSizeChanges137 " +
+                        "outlineRevision=$outlineRevision137 padding=$padding effect=${effectScope.renderEffect != null} " +
+                        "innerClip=true offscreenCompositing=true " +
+                        "scope=compose_layer_configuration_not_hwui_clip_mask_pass")
+                }
+            }
             val probe130 = BackdropResourceProbe130.enabled
             val recordWidth130 = (size.width.toInt() + padding.toInt() * 2).coerceAtLeast(0)
             val recordHeight130 = (size.height.toInt() + padding.toInt() * 2).coerceAtLeast(0)
@@ -383,6 +411,7 @@ private class DrawBackdropNode(
                 else IntOffset.Zero
             if (BackdropPassProbe127.enabled) BackdropPassProbe127.backdropLayerDraws++
             if (probe130) backdropDraws130++
+            if (BackdropClipProbe137.enabled) clipDraws137++
             if (trace121) BackdropTrace121.begin("LG121_BACKDROP_LAYER_DRAW")
             try {
                 drawLayer(layer)
