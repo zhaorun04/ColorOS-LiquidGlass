@@ -1,85 +1,38 @@
-V1.9.205.288.134｜Bridge 通知必要性保守 A/B 实验版
+ColorOS-LiquidGlass V1.9.205.288.135｜Bridge 通知状态机一致性与三档 A/B/C 测试
 
-目标：验证稳定位置和参考 Bitmap 下的短间隔 Bridge 通知是否造成冗余渲染工作。
-本版是可恢复诊断实验，不是正式的性能优化。保留原有 GPU Source、Backdrop、模糊、折射、高光、Dock 绘制。
+一、目标与边界
+- 保留 V288.112 GPU 参考帧、二维折射、模糊、高光、文件夹/Dock 渲染路径。此版本为可恢复实验，默认设置不改变原始通知行为。
+- 0 = 原始通知；1 = V288.134 保守抑制（历史对照）；2 = V288.135 状态机修正后的保守抑制。
+- 新设置键：liquidglass_kyant_bridge_notify_mode_288135。设置值未配置时，兼容旧键 liquidglass_kyant_bridge_notify_ab_288134。
 
-设置键（Settings.Global，需重启 Launcher；默认 0）：
- liquidglass_kyant_bridge_notify_ab_288134
- 0：A 档，原始通知机制，完全不做抑制。
- 1：B 档，仅 gpuReference 有效、原生 carrier=1、frameSync=0 时，对位置和 Bitmap 身份/generationId 未变的 native onDraw，最多连续抑制 1 次通知，且距最近放行通知不超过 24ms；其余立即放行。
+二、状态机设计（Mode 2）
+- latest pending 与 last delivered 分开维护：只有成功排队，才记录待发送状态；Pending 合并会更新为最新候选；在 post runnable 执行时才更新已送达状态。
+- 位置或 Bitmap 身份/代次变化放行；稳定状态最多跳过一次，且 24ms 送达心跳后放行。
+- GPU 路径不符合安全条件时采用原始通知。
+- 本优化不比较所有动态 Shader 输入，因此 Mode 2 仅用于短时 A/B，验证画面贴合、解锁/回弹、调节参数后再考虑生产使用。
 
-重要安全边界：该判定仅覆盖位置和 Bitmap 身份/版本，并未形式化证明 Shader 等全部光学状态相等。其他状态更新应依赖现有独立 Compose 状态通知；若出现玻璃冻结、壁纸错位、动态光学参数不生效，立即恢复 A 档。禁止日常长期使用 B 档，必须经真机 A/B 确认画质无回退。
-当已有 post 通知待处理时保持原合并机制；本版不停止 native View 绘制，也不跳过 Compose GraphicsLayer 录制。
+三、日志与统计口径
+KYANT288135_HOST：显示 mode、gpu、carrier、frameSync。
+KYANT288135_WINDOW（仅 Mode 2）：eligible、queued、merged、suppressed、unsupported、delivered、gateOff、passMoved、passReference、passHeartbeat、passInitial、partition、pending、bridgeVersion。
+- 每个 eligible 回调的决策恰好属于 queued/merged/suppressed 中一个，partition 是三者之和，用于自检（不包含 gateOff）。
+- passMoved/passReference/passHeartbeat/passInitial 是互斥的候选放行理由；不等于成功排队次数。delivered 是另行发生的 post 回调计数。
+- 所有计数是应用层通知事件，不代表 GPU Pass/实际显示帧。
 
-日志：
- KYANT288134_HOST：B 档 Host 初始化与条件。
- KYANT288134_WINDOW：每 Host 累计 eligible / passed / suppressedStable / passedMotion / passedReference / passedHeartbeat / passedInitial / passedUnsupported / bridgeVersion，约 2 秒输出。
- 这些是应用层通知计数，不是 Compose 失效数量、GPU Pass 或最终上屏帧。nativeDraws 只有启用 288133 来源探针时才有非零值。
+四、Termux 一键测试
+在包含 lg_test.sh 的目录运行：
+sh lg_test.sh baseline single
+sh lg_test.sh optimized single
+sh lg_test.sh baseline single
+sh lg_test.sh conservative single
+也可将 single 改为 multi。脚本设置 GPU 参考帧，关闭历史缓存和裁剪实验，重启 Launcher，重置 gfxinfo，录制 15 秒 Perfetto 并保存日志/设备状态/帧统计。
+结果保存于 /sdcard/Download/LG135_TestResults/。录制期间请人工按照相同方式滑动。
+关键：优先对比 A→C→A，保持页面与热状态尽可能相同；对比纹理标记密度、RenderThread Drawing 分位和 gfxinfo Janky Frames。异常画质立即停止 B/C。
 
-建议 A/B 测试每档均重启 Launcher，测试相同页面，采集 Perfetto、dumpsys gfxinfo framestats 和 Logcat。
-共同配置：GPU 参考帧 288110=1；关闭 source_record_reuse_288125、static_layer_cache_288116、effect_isolation_ab_288129、visibility_ab_288132。
-A 档：settings put global liquidglass_kyant_bridge_notify_ab_288134 0
-B 档：settings put global liquidglass_kyant_bridge_notify_ab_288134 1
-抓取：su -c 'logcat -d -b all -v brief | grep -E "KYANT288134_HOST|KYANT288134_WINDOW" | tail -80'
-恢复：su -c 'settings put global liquidglass_kyant_bridge_notify_ab_288134 0; am force-stop com.android.launcher'
+五、恢复安全配置
+su -c 'settings put global liquidglass_kyant_bridge_notify_mode_288135 0; settings put global liquidglass_kyant_bridge_notify_ab_288134 0; am force-stop com.android.launcher'
 
-其他说明沿用此前 V288.133 源码及诊断，原有 UI→SP→Root 快照→Launcher→Shader 光学参数映射不改动。
+六、映射一致性
+本版仅新增 Settings.Global 实验开关及日志/脚本；原有 UI→SharedPreferences→Root 快照→Launcher 变量→折射/模糊/高光渲染参数映射未重排。修改范围没有触及 UI/SP/Root 既有键。
 
-原 V288.133 摘要：
-V1.9.205.288.133｜Bridge 通知来源与 Source 消费链诊断版
-
-目标：量化 native bridgeView.onDraw -> post 通知 -> bridgeVersion -> Source 绘制回调的链路。
-
-新增诊断开关（默认关闭）：
-  settings put global liquidglass_kyant_bridge_origin_probe_288133 1
-  am force-stop com.android.launcher
-
-日志：
-  KYANT288133_HOST：Host 初始化、GPU 模式与通知条件
-  KYANT288133_WINDOW：每 Host 累计 producer/consumer 计数，每约 2 秒输出
-  nativeDraws：原生桥接 View 的 onDraw 次数
-  notifyQueued：成功排队的 Bridge 通知
-  notifyDelivered：主线程实际递增 bridgeVersion 的次数
-  notifyCoalesced：通知已在排队时被合并的次数
-  notifyGateOff：通知条件不满足的 native onDraw 次数
-  cpuBridgeSamples：原生 View 实际调用 CPU sampleBridgeAt 次数
-  sourceDraws：Source 绘制回调次数
-  consumerVersionAdvances：相邻 Source 回调之间 Bridge 版本变化的次数
-  stableWithNotify：Source 坐标不变而版本变化的次数
-  movedWithNotify：Source 坐标变化且版本变化的次数
-  stableNoNotify / movedNoNotify：无版本变化的 Source 位置分类
-  bitmapGenChanges：Source 所用 Bitmap generationId 变化次数
-
-注意：这些是应用层绘制回调与版本读取统计，不是独立的 GPU 工作或最终上屏帧；
-稳定坐标且 Bridge 版本变化并不直接证明可以跳过通知；还可能存在动态光学参数、其他绘制输入变化。
-本版不屏蔽通知，不跳过 Source/Backdrop 绘制，不改变 GPU 参考壁纸、折射、模糊、高光与 Dock。
-现有 V288.132 观测与裁剪实验开关仍保留；建议将其设为 -1，并关闭其他历史诊断后测试。
-
-抓取：
-  su -c 'logcat -d -b all -v brief | grep -E "KYANT288133_HOST|KYANT288133_WINDOW" | tail -60'
-关闭：
-  su -c 'settings put global liquidglass_kyant_bridge_origin_probe_288133 0; am force-stop com.android.launcher'
-
-原版说明摘要：
-V1.9.205.288.132｜单 Host 可见区域与 Bridge 通知 A/B 归因版
-
-承接 V288.131 与单/多文件夹 Perfetto 结果。保持原有光学渲染、GPU 参考帧、动态坐标、模糊、折射和高光不变。
-
-实验键：liquidglass_kyant_visibility_ab_288132（Settings.Global，重启 Launcher 生效）
--1：默认；保留原有 liquidglass_kyant_offscreen_cull_288113 开关行为。
-0：A 档，禁用仅针对屏幕外 GPU Bitmap draw 的实验裁剪，开启同样的观察统计。
-1：B 档，启用此前 V288.113 的 128px 守护边界屏幕外 GPU Bitmap draw 裁剪，开启相同观察统计。
-B 档仅跳过完全屏幕外 Host 的共享参考 Bitmap draw；不跳过 drawContent、Compose 状态读取、Source/Backdrop 录制，不跳过进入视口的预渲染余量。GPU 参考帧未生效的 Host 无 A/B 绘制差异。
-
-日志：
-KYANT288132_HOST：每 Host 的开关模式、GPU 参考帧是否生效、实际裁剪设置。
-KYANT288132_WINDOW：每 Host 累计 Source 回调数、带 128px 守护区的屏幕外/内次数、位置移动/稳定次数、Bridge 版本变化、位置稳定时 Bridge 变化次数以及屏幕外且位置稳定时 Bridge 变化次数。数值是 CPU Source 回调统计，不是 GPU Pass、上屏帧或确定的冗余事件。
-KYANT288113_CULL：仅 B 档命中已有屏幕外 GPU Bitmap 绘制跳过时出现。
-
-建议先确保 Settings.Global liquidglass_kyant_gpu_reference_ab_288110=1，并关闭其它复用、Effect 隔离实验。
-A 档：settings put global liquidglass_kyant_visibility_ab_288132 0
-B 档：settings put global liquidglass_kyant_visibility_ab_288132 1
-每档重启 Launcher，在相同页面进行单文件夹、多文件夹滑动，结合 Perfetto 与 gfxinfo framestats，对比 RenderThread Drawing、Texture upload、Clip Mask 与实际 Janky Frames。
-恢复默认：settings put global liquidglass_kyant_visibility_ab_288132 -1；必要时把旧 offscreen_cull_288113 设为 0。
-
-诊断局限：屏幕外判定仅基于 drawPosition 与显示尺寸，不能等同真实遮挡或 SurfaceFlinger 可见性。BridgeOnly 只表示位置稳定但 Bridge 逻辑版本改变，不证明其它输入稳定，也不代表这次 GPU 工作一定多余。本版不修改 UI→SharedPreferences→Root 快照→Launcher 的既有参数映射，仅增加独立 Settings.Global 实验键。
+七、构建状态
+源码完成静态检查和 ZIP 完整性校验；尚未在 Android SDK 环境执行完整 Gradle/Kotlin 编译，也未完成真机测试。

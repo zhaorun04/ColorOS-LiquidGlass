@@ -1406,10 +1406,16 @@ object KyantLauncherLens270 {
         // reference/position changes, and sends a heartbeat after 24 ms.
         // It is an experimental source-invalidation gate, NOT a visual-key proof:
         // shader/dynamic inputs might invalidate independently.
-        val bridgeNotifyAb288134 = try {
-            Settings.Global.getInt(anchor.context.contentResolver,
+        // V288.135: three-mode A/B/C. When the new key is unset (-1), keep
+        // compatibility with V288.134's existing mode switch.
+        val bridgeNotifyMode135 = try {
+            val configured = Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_bridge_notify_mode_288135", -1)
+            if (configured in 0..2) configured else Settings.Global.getInt(
+                anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_notify_ab_288134", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
+        val bridgeNotifyAb288134 = bridgeNotifyMode135
         // 0=nativeEligible, 1=passed, 2=suppressedStable,
         // 3=passedMotion, 4=passedReference, 5=passedHeartbeat,
         // 6=passedInitial, 7=passedUnsupported
@@ -1419,6 +1425,20 @@ object KyantLauncherLens270 {
         var lastQueuedBitmapGen134 = Int.MIN_VALUE
         var lastQueuedAtNs134 = 0L
         var stableSkippedSinceQueue134 = 0
+        // V288.135 C mode: the newest pending state is kept separately from the
+        // last *delivered* state. The Pending queue is never treated as delivered.
+        data class BridgeVisualState135(
+            val x: Float, val y: Float, val bitmapId: Int, val bitmapGen: Int
+        )
+        var deliveredState135: BridgeVisualState135? = null
+        var pendingState135: BridgeVisualState135? = null
+        var deliveredAtNs135 = 0L
+        var skippedSinceDelivery135 = 0
+        // mutually exclusive eligible-event decisions: queued, merged, suppressed,
+        // unsupported. Separate delivery and gate-off counters.
+        // indices: eligible, queued, merged, suppressed, unsupported,
+        // delivered, gateOff, passMoved, passReference, passHeartbeat, passInitial
+        val bridgeNotifyCounts135 = java.util.concurrent.atomic.AtomicLongArray(11)
         val bridgeNotifyPending = java.util.concurrent.atomic.AtomicBoolean(false)
         var traceBudget28821 = 0
         var traceSeenSeq28821 = 0L
@@ -1877,6 +1897,10 @@ object KyantLauncherLens270 {
             (reboundFrameAb28891 != 1 || pipelineMode28819 != 2) &&
             frameSync28822 == 0 && v230NativeMode28887 == 0 &&
             nativeLayerMode !in 2..3 && displayIsolationMode != 2
+        if (bridgeNotifyMode135 in 0..2) android.util.Log.i("KyantBridge288135",
+            "KYANT288135_HOST host=$trace28815Host mode=$bridgeNotifyMode135 " +
+            "gpu=$gpuReference288110 carrier=$nativeCarrierAb28869 " +
+            "frameSync=$frameSync28822 scope=notification_state_machine_not_gpu_frames")
         if (bridgeNotifyAb288134 == 1) android.util.Log.i("KyantBridge288134",
             "KYANT288134_HOST host=$trace28815Host mode=1 gpu=$gpuReference288110 " +
             "carrier=$nativeCarrierAb28869 frameSync=$frameSync28822 " +
@@ -2367,22 +2391,115 @@ object KyantLauncherLens270 {
                         bridgeNotifyCounts134.incrementAndGet(7)
                     }
                 }
-                if (notifyEligible133 && !suppressStable134 &&
-                    bridgeNotifyPending.compareAndSet(false, true)) {
-                    bridgeNotifyCounts134.incrementAndGet(1)
-                    if (bridgeProbe133) bridgeProducer133.incrementAndGet(1)
-                    post {
-                        bridgeNotifyPending.set(false)
-                        if (!disposed) {
-                            if (bridgeProbe133) bridgeProducer133.incrementAndGet(2)
-                            bridgeVersion.intValue++
-                            if (perfProfile288109) KyantPerf288109.notifyCompose()
-                            releaseTrace28820("COMPOSE_NOTIFY", bridgePublishedPosition.get(), "pending=false")
+                // V288.135: the original A/B code is preserved verbatim for modes
+                // 0 and 1. Mode 2 uses a separate delivery-aware state machine.
+                if (bridgeNotifyMode135 == 2) {
+                    if (!notifyEligible133) {
+                        bridgeNotifyCounts135.incrementAndGet(6)
+                        if (bridgeProbe133) bridgeProducer133.incrementAndGet(5)
+                    } else {
+                        bridgeNotifyCounts135.incrementAndGet(0)
+                        val supported135 = gpuReference288110 &&
+                            nativeCarrierAb28869 == 1 && frameSync28822 == 0 &&
+                            pos.x.isFinite() && pos.y.isFinite()
+                        val ref135 = referenceState28832.value
+                        val refId135 = if (ref135 == null || ref135.isRecycled) 0
+                            else System.identityHashCode(ref135)
+                        val refGen135 = if (ref135 == null || ref135.isRecycled)
+                            Int.MIN_VALUE else ref135.generationId
+                        val current135 = BridgeVisualState135(pos.x, pos.y, refId135, refGen135)
+                        val base135 = pendingState135 ?: deliveredState135
+                        val posChanged135 = base135 == null ||
+                            base135.x != current135.x || base135.y != current135.y
+                        val refChanged135 = base135 == null ||
+                            base135.bitmapId != current135.bitmapId ||
+                            base135.bitmapGen != current135.bitmapGen
+                        val now135 = SystemClock.elapsedRealtimeNanos()
+                        val heartbeat135 = deliveredAtNs135 == 0L ||
+                            now135 - deliveredAtNs135 >= 24_000_000L
+                        // This experimental gate must never suppress movement or
+                        // wallpaper replacement. Limit to ONE stable suppression
+                        // between delivered notifications, plus 24ms heartbeat.
+                        val suppress135 = supported135 && !posChanged135 &&
+                            !refChanged135 && !heartbeat135 && skippedSinceDelivery135 < 1
+                        if (suppress135) {
+                            skippedSinceDelivery135++
+                            bridgeNotifyCounts135.incrementAndGet(3)
+                        } else {
+                            if (!supported135) bridgeNotifyCounts135.incrementAndGet(4)
+                            if (base135 == null) bridgeNotifyCounts135.incrementAndGet(10)
+                            else if (posChanged135) bridgeNotifyCounts135.incrementAndGet(7)
+                            else if (refChanged135) bridgeNotifyCounts135.incrementAndGet(8)
+                            else if (heartbeat135) bridgeNotifyCounts135.incrementAndGet(9)
+                            if (bridgeNotifyPending.compareAndSet(false, true)) {
+                                // Commit pending only when a runnable is actually queued.
+                                pendingState135 = current135
+                                bridgeNotifyCounts135.incrementAndGet(1)
+                                if (bridgeProbe133) bridgeProducer133.incrementAndGet(1)
+                                post {
+                                    // UI thread serializes native draw and callback.
+                                    // Read the newest merged snapshot at delivery.
+                                    val snapshot135 = pendingState135
+                                    pendingState135 = null
+                                    bridgeNotifyPending.set(false)
+                                    if (!disposed) {
+                                        deliveredState135 = snapshot135
+                                        deliveredAtNs135 = SystemClock.elapsedRealtimeNanos()
+                                        skippedSinceDelivery135 = 0
+                                        bridgeNotifyCounts135.incrementAndGet(5)
+                                        if (bridgeProbe133) bridgeProducer133.incrementAndGet(2)
+                                        bridgeVersion.intValue++
+                                        if (perfProfile288109) KyantPerf288109.notifyCompose()
+                                        releaseTrace28820("COMPOSE_NOTIFY", bridgePublishedPosition.get(), "pending=false")
+                                    }
+                                }
+                            } else {
+                                // Keep the LATEST candidate, even if a queued
+                                // notification has not yet run. No extra post.
+                                pendingState135 = current135
+                                bridgeNotifyCounts135.incrementAndGet(2)
+                                if (bridgeProbe133) bridgeProducer133.incrementAndGet(3)
+                            }
                         }
                     }
-                } else if (bridgeProbe133) {
-                    if (notifyEligible133 && !suppressStable134) bridgeProducer133.incrementAndGet(3)
-                    else if (!notifyEligible133) bridgeProducer133.incrementAndGet(5)
+                } else {
+                    if (notifyEligible133 && !suppressStable134 &&
+                        bridgeNotifyPending.compareAndSet(false, true)) {
+                        bridgeNotifyCounts134.incrementAndGet(1)
+                        if (bridgeProbe133) bridgeProducer133.incrementAndGet(1)
+                        post {
+                            bridgeNotifyPending.set(false)
+                            if (!disposed) {
+                                if (bridgeProbe133) bridgeProducer133.incrementAndGet(2)
+                                bridgeVersion.intValue++
+                                if (perfProfile288109) KyantPerf288109.notifyCompose()
+                                releaseTrace28820("COMPOSE_NOTIFY", bridgePublishedPosition.get(), "pending=false")
+                            }
+                        }
+                    } else if (bridgeProbe133) {
+                        if (notifyEligible133 && !suppressStable134) bridgeProducer133.incrementAndGet(3)
+                        else if (!notifyEligible133) bridgeProducer133.incrementAndGet(5)
+                    }
+                }
+                if (bridgeNotifyMode135 == 2 && count % 240L == 0L) {
+                    val events135 = bridgeNotifyCounts135.get(0)
+                    val partition135 = bridgeNotifyCounts135.get(1) +
+                        bridgeNotifyCounts135.get(2) + bridgeNotifyCounts135.get(3)
+                    android.util.Log.i("KyantBridge288135",
+                        "KYANT288135_WINDOW host=$trace28815Host mode=2 " +
+                        "eligible=$events135 queued=${bridgeNotifyCounts135.get(1)} " +
+                        "merged=${bridgeNotifyCounts135.get(2)} " +
+                        "suppressed=${bridgeNotifyCounts135.get(3)} " +
+                        "unsupported=${bridgeNotifyCounts135.get(4)} " +
+                        "delivered=${bridgeNotifyCounts135.get(5)} " +
+                        "gateOff=${bridgeNotifyCounts135.get(6)} " +
+                        "passMoved=${bridgeNotifyCounts135.get(7)} " +
+                        "passReference=${bridgeNotifyCounts135.get(8)} " +
+                        "passHeartbeat=${bridgeNotifyCounts135.get(9)} " +
+                        "passInitial=${bridgeNotifyCounts135.get(10)} " +
+                        "partition=$partition135 pending=${bridgeNotifyPending.get()} " +
+                        "bridgeVersion=${bridgeVersion.intValue} " +
+                        "scope=decision_partition_not_gpu_or_presented_frames")
                 }
                 if (bridgeNotifyAb288134 == 1 && count % 240L == 0L) {
                     android.util.Log.i("KyantBridge288134",
