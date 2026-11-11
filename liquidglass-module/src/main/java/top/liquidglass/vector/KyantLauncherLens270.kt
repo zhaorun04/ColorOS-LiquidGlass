@@ -1897,6 +1897,23 @@ object KyantLauncherLens270 {
             (reboundFrameAb28891 != 1 || pipelineMode28819 != 2) &&
             frameSync28822 == 0 && v230NativeMode28887 == 0 &&
             nativeLayerMode !in 2..3 && displayIsolationMode != 2
+        // V288.136: diagnostic isolation of ONLY the outer Compose rounded clip.
+        // Mode 0 leaves the full original optical hierarchy unchanged.
+        // Mode 1 requires the verified GPU reference path; internal Kyant shape,
+        // refraction, blur, highlight and backdrop nodes are left untouched.
+        // IMPORTANT: mode 1 may visibly lose corner clipping; never deploy as
+        // a production optimization without a separate, lossless replacement.
+        val outerClipMode288136 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_outer_clip_ab_288136", 0)
+        } catch (_: Throwable) { 0 }
+        val outerClipIsolate288136 = outerClipMode288136 == 1 && gpuReference288110 &&
+            nodePipeline28881 != 4 && nativeLayerMode !in 2..3
+        android.util.Log.i("KyantClip288136",
+            "KYANT288136_HOST host=$trace28815Host rawMode=$outerClipMode288136 " +
+            "effective=$outerClipIsolate288136 gpu=$gpuReference288110 " +
+            "size=${previewWidth}x${previewHeight} " +
+            "scope=outer_compose_rounded_clip_only_not_internal_kyant_shape")
         if (bridgeNotifyMode135 in 0..2) android.util.Log.i("KyantBridge288135",
             "KYANT288135_HOST host=$trace28815Host mode=$bridgeNotifyMode135 " +
             "gpu=$gpuReference288110 carrier=$nativeCarrierAb28869 " +
@@ -4311,7 +4328,7 @@ object KyantLauncherLens270 {
             (previewHeight / density).dp
         ).then(if (renderAbMode == 2) Modifier.graphicsLayer {
             compositingStrategy = CompositingStrategy.Offscreen
-        } else Modifier).then(if (nodePipeline28881 == 4)
+        } else Modifier).then(if (nodePipeline28881 == 4 || outerClipIsolate288136)
             Modifier else Modifier.clip(RoundedCornerShape(cornerDp)))
         Box(opticalContainer) {
             // Diagnostic only: transparent source may also remove the backdrop input.

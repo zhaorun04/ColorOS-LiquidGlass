@@ -1,38 +1,28 @@
-ColorOS-LiquidGlass V1.9.205.288.135｜Bridge 通知状态机一致性与三档 A/B/C 测试
+ColorOS-LiquidGlass V1.9.205.288.136｜HWUI 外层圆角裁剪成本隔离 A/B + 测试窗口修复
 
-一、目标与边界
-- 保留 V288.112 GPU 参考帧、二维折射、模糊、高光、文件夹/Dock 渲染路径。此版本为可恢复实验，默认设置不改变原始通知行为。
-- 0 = 原始通知；1 = V288.134 保守抑制（历史对照）；2 = V288.135 状态机修正后的保守抑制。
-- 新设置键：liquidglass_kyant_bridge_notify_mode_288135。设置值未配置时，兼容旧键 liquidglass_kyant_bridge_notify_ab_288134。
+一、目标
+V288.135 的 Bridge 状态机 C 档未展示稳定掉帧收益，故本版默认回归 A 档。保留 V288.112 GPU 参考帧及所有二维折射、模糊、高光、文件夹和 Dock 光学参数链。
 
-二、状态机设计（Mode 2）
-- latest pending 与 last delivered 分开维护：只有成功排队，才记录待发送状态；Pending 合并会更新为最新候选；在 post runnable 执行时才更新已送达状态。
-- 位置或 Bitmap 身份/代次变化放行；稳定状态最多跳过一次，且 24ms 送达心跳后放行。
-- GPU 路径不符合安全条件时采用原始通知。
-- 本优化不比较所有动态 Shader 输入，因此 Mode 2 仅用于短时 A/B，验证画面贴合、解锁/回弹、调节参数后再考虑生产使用。
+二、实验开关：liquidglass_kyant_outer_clip_ab_288136
+0 = 原始路径（默认），保持 Modifier.clip(RoundedCornerShape(cornerDp))；
+1 = 仅短时诊断隔离外层 Compose 圆角 clip；只有 gpuReference288110 实际生效且非特殊管线时启用。
+注意：档位 1 可能改变圆角裁剪和玻璃边缘外观，不能作为正式无损优化；内部 Kyant 模糊、二维折射、RenderEffect、Highlight/Shadow 和 Source/Backdrop 图层保留。若视觉异常立即恢复 0。
+该 A/B 用于判断 HWUI SW Clip Mask 标记与外层 Compose Clip 是否相关；它不能将所有 Clip Mask 归因于该单一节点，也不能直接代表真实 GPU 带宽。
 
-三、日志与统计口径
-KYANT288135_HOST：显示 mode、gpu、carrier、frameSync。
-KYANT288135_WINDOW（仅 Mode 2）：eligible、queued、merged、suppressed、unsupported、delivered、gateOff、passMoved、passReference、passHeartbeat、passInitial、partition、pending、bridgeVersion。
-- 每个 eligible 回调的决策恰好属于 queued/merged/suppressed 中一个，partition 是三者之和，用于自检（不包含 gateOff）。
-- passMoved/passReference/passHeartbeat/passInitial 是互斥的候选放行理由；不等于成功排队次数。delivered 是另行发生的 post 回调计数。
-- 所有计数是应用层通知事件，不代表 GPU Pass/实际显示帧。
+三、日志
+KYANT288136_HOST host=... rawMode=0/1 effective=true/false gpu=true/false size=WxH。
+只有 B 档 effective=true 且 A 档 effective=false，才能进一步作 A/B 判断。
 
-四、Termux 一键测试
-在包含 lg_test.sh 的目录运行：
-sh lg_test.sh baseline single
-sh lg_test.sh optimized single
-sh lg_test.sh baseline single
-sh lg_test.sh conservative single
-也可将 single 改为 multi。脚本设置 GPU 参考帧，关闭历史缓存和裁剪实验，重启 Launcher，重置 gfxinfo，录制 15 秒 Perfetto 并保存日志/设备状态/帧统计。
-结果保存于 /sdcard/Download/LG135_TestResults/。录制期间请人工按照相同方式滑动。
-关键：优先对比 A→C→A，保持页面与热状态尽可能相同；对比纹理标记密度、RenderThread Drawing 分位和 gfxinfo Janky Frames。异常画质立即停止 B/C。
+四、自动化测试（Termux/root）
+当前工程根目录：sh lg_test.sh baseline single；sh lg_test.sh clip-isolated single。
+可使用 multi 比较多个文件夹场景。建议 A-B-A，以同一页面、尽量相同手势和相近热状态复测。
+脚本依次：设置实验开关、重启 Launcher、逐项读取设置和记录失败、检查版本、重置 gfxinfo、录制 15 秒 perfetto、立即获取 framestats、保存日志。数据在 /sdcard/Download/LG136_TestResults/。所有轮次结束后运行 sh lg_test.sh pack 生成 LG136_TestResults.tar.gz，方便一次上传。
+注意：gfxinfo 统计窗口接近但不严格等于 Perfetto 时间范围；更严格的同帧关联需要进一步按时间戳筛选。Perfetto 15秒录制期间保持左右滑动；不要将 UI 回调次数当作上屏帧。
 
-五、恢复安全配置
-su -c 'settings put global liquidglass_kyant_bridge_notify_mode_288135 0; settings put global liquidglass_kyant_bridge_notify_ab_288134 0; am force-stop com.android.launcher'
+五、参数映射及恢复
+此版未修改现有 UI / SharedPreferences / Root 快照字段 / Launcher 的光学参数映射；新增 Settings.Global 仅供诊断。恢复：
+su -c 'settings put global liquidglass_kyant_outer_clip_ab_288136 0; settings put global liquidglass_kyant_bridge_notify_mode_288135 0; am force-stop com.android.launcher'
 
-六、映射一致性
-本版仅新增 Settings.Global 实验开关及日志/脚本；原有 UI→SharedPreferences→Root 快照→Launcher 变量→折射/模糊/高光渲染参数映射未重排。修改范围没有触及 UI/SP/Root 既有键。
-
-七、构建状态
-源码完成静态检查和 ZIP 完整性校验；尚未在 Android SDK 环境执行完整 Gradle/Kotlin 编译，也未完成真机测试。
+六、交付和验证
+仅修改 Launcher 容器外层 clip 的条件门、Android 模块版本号、系统说明书及 Termux 测试脚本。
+已做静态源文件检查、Shell 语法检查、ZIP 完整性校验。Android Gradle 编译与真机测试仍未执行。
