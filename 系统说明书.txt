@@ -1,27 +1,40 @@
-ColorOS-LiquidGlass V1.9.205.288.137｜Kyant 内层裁剪来源与设备帧稳定性归因版
+ColorOS-LiquidGlass V1.9.205.288.138｜Launcher 回弹整帧卡顿定位版
 
-目标：解释 V288.136.1 实测“单文件夹 A1/A2 相同配置但 CPU/GPU P90 相差很大”的原因，并区分外层 Modifier.clip 与 Kyant Backdrop 内层 GraphicsLayer 的形状裁剪及离屏合成。
+一、目标
+用户已明确指出，滑动不翻页并松手回弹时，整个 Launcher 桌面、图标和文件夹同时出现不连贯，玻璃内部纹理抖动可能是整帧掉帧放大后的视觉表现。本版先研究整体帧呈现，并不更换光学 Shader、壁纸 Bitmap/坐标、模糊或高光算法。
 
-基线：V1.9.205.288.136.1。默认光学渲染与 V288.136.1 A 档相同，不修改折射、模糊、高光、Dock、原生壁纸源或采样坐标。保留旧实验但测试脚本强制关闭其影响。
+二、技术修改
+1. 新增 Settings.Global：liquidglass_kyant_rebound_host_ab_288138
+   0（默认）：完全沿用 V288.137 原 Kyant 文件夹 Host 初始化路径，渲染效果不变。
+   1（仅测试）：在 KyantLauncherLens270.run() 入口跳过创建文件夹 Kyant 光学 Host，保留 OEM FolderIcon / Workspace 原有图标和动画，并继续安装轻量 TouchRelease 时间标记 Hook。该实验仅隔离通过此入口创建的 Kyant 文件夹 Host；Dock、其他旧路径/模块渲染不保证全部关闭，因此不可称为“全模块玻璃关闭”。
+2. 松手 ACTION_UP/CANCEL 标记：KYANT288138_RELEASE + Trace.beginSection("LG138_RELEASE_UP")，用于和系统 gfx/RenderThread 跟踪尝试按单调时钟对齐。Touch Hook 本身有少量开销，A/B 路径均保留。
+3. 将模块 versionName 更新为 1.9.205.288.138，versionCode 更新为 1920529144。
+4. 更新 lg_test.sh。只修改本次实验所需的两个 Global Settings，首次修改前保存它们的原始值；restore 根据备份恢复原值，原本未设置则删除键，不再重置其它 GPU/渲染/Shader 相关配置。脚本采集 15 秒 Perfetto、gfxinfo、CPU 频率、ThermalService、Logcat 和实际档位。
 
-新增全局设置：liquidglass_kyant_clip_provenance_probe_288137，默认 0。为 1 时，在 Host 初始化记录 KYANT288137_HOST，并于内层 Backdrop GraphicsLayer 录制路径每隔约 3 秒输出 KYANT288137_CLIP。字段包含 layerId、录制尺寸、记录与绘制计数、形状 Outline 修订代次变化、尺寸变化、padding、Effect 是否存在，以及该模块固定的 innerClip=true/offscreenCompositing=true 属性。它不能直接观测 HWUI Vulkan 内部纹理 ID、真实裁剪 Pass 次数或 GPU 帧耗时。
+三、严格测试要求
+先确认 Vector 作用域已启用 com.android.launcher，V288.138 安装成功且 A 档玻璃外观正常；固定屏幕刷新率/壁纸/桌面页面，做多次“不翻页回弹”操作。
+运行：
+ cd ~/ColorOS-LiquidGlass-V1.0-Source
+ sh lg_test.sh a single a1
+ sh lg_test.sh b single b1
+ sh lg_test.sh a single a2
+ sh lg_test.sh pack
+结果：/sdcard/Download/LG138_TestResults.tar.gz
+完成后：sh lg_test.sh restore
 
-源码裁剪来源清单：
-1. 文件夹外层：liquidglass-module/src/main/java/top/liquidglass/vector/KyantLauncherLens270.kt 中 Modifier.clip(RoundedCornerShape(cornerDp))；V288.136 B 档隔离实验未证明显著收益。
-2. Kyant Backdrop 内层：backdrop/src/commonMain/kotlin/com/kyant/backdrop/DrawBackdropModifier.kt 的 layoutLayerBlock 中 clip=true, shape=shapeProvider.shape, compositingStrategy=Offscreen；V137 新日志在此节点记录状态。
-3. Dock：liquidglass-module/src/main/java/top/liquidglass/vector/KyantDockLens28827.kt 包含 Android View clipToOutline=true 及 Compose RoundedCornerShape clip，Dock 仍保持不变。
-4. HookEntry.java 中存在多处原生 Canvas clipPath/clipRect，不应仅从源码出现位置判断它们全部在当前 GPU 渲染通道生效。
+四、如何解释结果
+单次采集内按 LG138_RELEASE_UP 标记前后约 300～500ms 对齐分析异常帧（若系统 Perfetto 配置包含必要 FrameTimeline 则进一步结合；不能假定缺失的 FrameTimeline 已采集）。比对 A1、B、A2 的 gfxinfo、RenderThread Drawing、CPU/调频状态和画面主观反馈。B 档文件夹玻璃会消失，这是实验设计，不是最终用户体验；如果 B 档变快，仅证明该 Kyant Host 及其连带开销可能参与了问题，不能单凭 A/B 认定具体瓶颈。
+脚本的 gfxinfo reset 和 Perfetto 启停不保证纳秒级严格相同，应以可验证的独立时间线对齐为准。Perfetto 中 Trace 标记能否实际显示，取决于设备上的 tracing 配置与相关应用 trace 标签。
 
-Termux：安装新版 APK 后，解压本 ZIP 中的 lg_test.sh 到 ~/ColorOS-LiquidGlass-V1.0-Source，运行：
-cd ~/ColorOS-LiquidGlass-V1.0-Source
-sh lg_test.sh single a1
-sh lg_test.sh single a2
-sh lg_test.sh multi m1
-sh lg_test.sh pack
-sh lg_test.sh restore
+五、风险与还原
+不要清除 Launcher 数据。B 档仅用于短时诊断，测试结束必须运行 restore。原始 Settings 备份位于 LG138_TestResults/original_settings.tsv，恢复后重命名为 .restored.*.tsv 以供审计。切换实验档时需要重启 Launcher，因此需要重新确认 Vector 注入及文件夹页面。
+若出现 B 档没有 HOST_DISABLED、两档玻璃均不见、或者松手标记完全缺失，停止采集并排查，而不是据此判定优化有效。
 
-单次采集时间约 15 秒，开始前清空日志、重置 gfxinfo，收集 Perfetto、gfxinfo、Logcat、前后 CPU 频率/热状态/内存快照、设置值及采集起止时间。结果保存在 /sdcard/Download/LG137_TestResults/，打包到 /sdcard/Download/LG137_TestResults.tar.gz。采集期间手动在指定页面连续滑动，单文件夹 a1/a2 要保持相同操作。注意 gfxinfo 与 Perfetto 不能保证严格逐帧同步，应以 Perfetto 实际区间为主对照。
+六、开发验证状态
+已实施源码与脚本修改，需用户 GitHub Actions 实际 Gradle 编译与设备真机测试；不宣称已在 Android 设备测试通过。
 
-边界与安全：V137 不会禁用内层裁剪，不修改 GraphicsLayer 合成策略，也不将调试日志计数视为 GPU 工作量。测试结束恢复设置键 0。新增键与原有 UI→SP→Root→Launcher→Shader 光学设置映射完全独立。
-
-验证状态：Shell 静态语法及 ZIP 完整性检查；Android Gradle/Kotlin 构建和真机实验尚未完成。
+七、Termux 更新源码后 Git
+ cd ~/ColorOS-LiquidGlass-V1.0-Source
+ git add .
+ git commit -m "V1.9.205.288.138 版本"
+ git push origin main

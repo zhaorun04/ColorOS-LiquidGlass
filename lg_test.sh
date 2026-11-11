@@ -1,64 +1,100 @@
 #!/system/bin/sh
-# V1.9.205.288.137 — source/clip provenance + frame-state repeatability capture.
-# Usage: sh lg_test.sh single|multi [run_label]; sh lg_test.sh pack; sh lg_test.sh restore
+# V1.9.205.288.138 – rebound-window A/B/A capture (Termux)
+# sh lg_test.sh a single a1 | b single b1 | a single a2 | pack | restore
+# Safety: backs up the TWO keys it modifies; never rewrites unrelated Kyant settings.
 set -u
-PROFILE="${1:-}"
-BASE=/sdcard/Download/LG137_TestResults
-if [ "$PROFILE" = pack ]; then
-  su -c "cd /sdcard/Download && tar -czf LG137_TestResults.tar.gz LG137_TestResults" || exit 9
-  echo "Upload /sdcard/Download/LG137_TestResults.tar.gz"; exit 0
+BASE=/sdcard/Download/LG138_TestResults
+BACKUP="$BASE/original_settings.tsv"
+MODE="${1:-help}"
+case "$MODE" in
+  pack)
+    su -c "cd /sdcard/Download && tar -czf LG138_TestResults.tar.gz LG138_TestResults" || exit 8
+    echo 'Output: /sdcard/Download/LG138_TestResults.tar.gz'; exit 0;;
+  restore)
+    if [ ! -f "$BACKUP" ]; then
+      echo 'No original-settings backup found. Not changing any settings.'; exit 9
+    fi
+    while IFS='|' read -r key value; do
+      case "$key" in
+        liquidglass_kyant_rebound_host_ab_288138|liquidglass_kyant_release_trace_28821) ;;
+        *) echo "Unexpected backup key: $key"; exit 9;;
+      esac
+      case "$value" in
+        null) su -c "settings delete global '$key'" >/dev/null || exit 9;;
+        0|1) su -c "settings put global '$key' '$value'" || exit 9;;
+        *) echo "Invalid backup value: $value"; exit 9;;
+      esac
+    done < "$BACKUP"
+    su -c 'am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+    mv "$BACKUP" "$BASE/original_settings.restored.$(date +%Y%m%d_%H%M%S).tsv"
+    echo 'Restored original settings from saved backup (no global preset overrides).'; exit 0;;
+  a|b) ;;
+  *) echo 'Usage: sh lg_test.sh a|b single|multi [label] | pack | restore'; exit 2;;
+esac
+SCENE="${2:-single}"
+case "$SCENE" in single|multi) ;; *) echo 'Scene must be single or multi'; exit 2;; esac
+LABEL="${3:-run}"
+case "$LABEL" in *[!a-zA-Z0-9_-]*|'') echo 'Invalid label'; exit 2;; esac
+mkdir -p "$BASE" || exit 3
+# Never overwrite backup. A missing/unreadable setting must fail safely.
+if [ ! -e "$BACKUP" ]; then
+  TEMP="$BACKUP.tmp.$$"
+  : > "$TEMP" || exit 3
+  for key in liquidglass_kyant_rebound_host_ab_288138 liquidglass_kyant_release_trace_28821; do
+    val="$(su -c "settings get global '$key'" 2>&1)"; rc=$?
+    case "$val" in null|0|1) ;; *) echo "Cannot safely backup $key: $val"; rm -f "$TEMP"; exit 4;; esac
+    [ "$rc" -eq 0 ] || { echo "Setting read failed $key: $val"; rm -f "$TEMP"; exit 4; }
+    printf '%s|%s\n' "$key" "$val" >> "$TEMP"
+  done
+  mv "$TEMP" "$BACKUP" || exit 4
 fi
-if [ "$PROFILE" = restore ]; then
-  su -c 'settings put global liquidglass_kyant_clip_provenance_probe_288137 0; settings put global liquidglass_kyant_outer_clip_ab_288136 0; settings put global liquidglass_kyant_perfetto_sections_288120 0; am force-stop com.android.launcher'
-  echo 'Diagnostic disabled; original glass effects restored'; exit 0
-fi
-case "$PROFILE" in single|multi) ;; *) echo 'Usage: sh lg_test.sh single|multi [run_label] | pack | restore'; exit 2 ;; esac
-LABEL="${2:-run}"
-case "$LABEL" in *[!a-zA-Z0-9_-]*|'') echo 'run_label must contain only letters, digits, _ or -'; exit 2;; esac
-OUT="$BASE/${PROFILE}_${LABEL}_$(date +%Y%m%d_%H%M%S)"
-su -c "mkdir -p '$OUT'" || exit 4
-su -c 'settings put global liquidglass_kyant_gpu_reference_ab_288110 1; settings put global liquidglass_kyant_outer_clip_ab_288136 0; settings put global liquidglass_kyant_bridge_notify_mode_288135 0; settings put global liquidglass_kyant_bridge_notify_ab_288134 0; settings put global liquidglass_kyant_source_record_reuse_288125 0; settings put global liquidglass_kyant_static_layer_cache_288116 0; settings put global liquidglass_kyant_effect_isolation_ab_288129 0; settings put global liquidglass_kyant_visibility_ab_288132 -1; settings put global liquidglass_kyant_offscreen_cull_288113 0; settings put global liquidglass_kyant_clip_provenance_probe_288137 1; settings put global liquidglass_kyant_perfetto_sections_288120 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME' || exit 5
+if [ "$MODE" = a ]; then EXPECT=0; else EXPECT=1; fi
+su -c "settings put global liquidglass_kyant_rebound_host_ab_288138 '$EXPECT' && settings put global liquidglass_kyant_release_trace_28821 1" || exit 5
+for pair in "liquidglass_kyant_rebound_host_ab_288138:$EXPECT" 'liquidglass_kyant_release_trace_28821:1'; do
+  key="${pair%%:*}"; expected="${pair#*:}"
+  actual="$(su -c "settings get global '$key'" 2>&1)" || exit 5
+  [ "$actual" = "$expected" ] || { echo "Setting mismatch $key=$actual, expected $expected"; exit 5; }
+done
+su -c 'am force-stop com.android.launcher; input keyevent KEYCODE_HOME' || exit 5
 sleep 3
 VERSION="$(su -c 'dumpsys package top.liquidglass.vector | grep versionName' 2>/dev/null)"
-case "$VERSION" in *versionName=1.9.205.288.137*) ;; *) echo "Wrong module version: $VERSION"; exit 6;; esac
-ACTUAL="$(su -c 'settings get global liquidglass_kyant_clip_provenance_probe_288137' 2>/dev/null | tr -d '\r')"
-[ "$ACTUAL" = 1 ] || { echo "Probe not enabled: $ACTUAL"; exit 6; }
+case "$VERSION" in *versionName=1.9.205.288.138*) ;; *) echo "Wrong installed module version: $VERSION"; exit 6;; esac
+OUT="$BASE/${SCENE}_${MODE}_${LABEL}_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "$OUT" || exit 6
 {
-  echo "profile=$PROFILE run=$LABEL module=$VERSION"
+  echo "module=$VERSION mode=$MODE expectedHostDisabled=$EXPECT scene=$SCENE label=$LABEL"
   echo "date=$(date '+%Y-%m-%d %H:%M:%S %z')"
   echo "launcher_pid=$(su -c 'pidof com.android.launcher' 2>&1)"
-  echo "model=$(getprop ro.product.model)"
-  echo "sdk=$(getprop ro.build.version.sdk)"
-  for key in liquidglass_kyant_clip_provenance_probe_288137 liquidglass_kyant_outer_clip_ab_288136 liquidglass_kyant_gpu_reference_ab_288110 liquidglass_kyant_bridge_notify_mode_288135 liquidglass_kyant_effect_isolation_ab_288129; do
-    RESULT="$(su -c "settings get global $key" 2>&1)"; STATUS=$?
-    echo "SETTING $key exit=$STATUS value=$RESULT"
+  echo "device=$(getprop ro.product.model) sdk=$(getprop ro.build.version.sdk)"
+  echo 'MODIFIED SETTINGS:'
+  for key in liquidglass_kyant_rebound_host_ab_288138 liquidglass_kyant_release_trace_28821; do
+    v="$(su -c "settings get global '$key'" 2>&1)"; rc=$?
+    echo "SETTING $key exit=$rc value=$v"
   done
-} > "$OUT/device_info.txt" 2>&1
+} > "$OUT/device_info.txt"
 snapshot() {
   name="$1"
   {
-    echo "SNAPSHOT_$name"
     date
-    su -c 'dumpsys thermalservice | head -80' 2>&1
-    su -c 'for p in /sys/devices/system/cpu/cpufreq/policy*; do echo "POLICY:$p"; for k in scaling_cur_freq scaling_min_freq scaling_max_freq scaling_governor; do if [ -r "$p/$k" ]; then echo "$k=$(cat "$p/$k")"; fi; done; done' 2>&1
-    su -c 'for p in /sys/class/thermal/thermal_zone*; do if [ -r "$p/type" ] && [ -r "$p/temp" ]; then echo "$(cat "$p/type")=$(cat "$p/temp")"; fi; done' 2>&1
+    su -c 'dumpsys thermalservice | head -70' 2>&1
+    su -c 'for p in /sys/devices/system/cpu/cpufreq/policy*; do echo "POLICY=$p"; for k in scaling_cur_freq scaling_min_freq scaling_max_freq scaling_governor; do if [ -r "$p/$k" ]; then echo "$k=$(cat "$p/$k")"; fi; done; done' 2>&1
     su -c 'cat /proc/meminfo | head -12' 2>&1
   } > "$OUT/${name}_environment.txt"
 }
-
 snapshot before
 su -c 'logcat -c' >/dev/null 2>&1 || true
-printf 'Scene: %s. Go to the requested page; in five seconds swipe in your usual pattern for 15 seconds.\n' "$PROFILE"
+printf 'Mode %s, scene %s. Keep Launcher on the chosen page. Start short non-page-turning swipe/rebound gestures after 5 seconds and repeat for 15 seconds.\n' "$MODE" "$SCENE"
 sleep 5
 su -c 'dumpsys gfxinfo com.android.launcher reset' >/dev/null 2>&1
 su -c "date +%s%N > '$OUT/start_epoch_ns.txt'"
 su -c "perfetto -a com.android.launcher -o '$OUT/perfetto-trace' -t 15s -b 128mb gfx view sched freq" > "$OUT/perfetto_status.txt" 2>&1
-PERF=$?
+STATUS=$?
 su -c "date +%s%N > '$OUT/end_epoch_ns.txt'"
 su -c "dumpsys gfxinfo com.android.launcher framestats > '$OUT/frames.txt'" 2> "$OUT/frames_error.txt"
-su -c "logcat -d -b all -v threadtime | grep -E 'KYANT288137|KYANT288112_NATIVE|FATAL EXCEPTION' > '$OUT/logcat.txt'" 2> "$OUT/log_error.txt"
+su -c "logcat -d -b main -b system -b crash -v threadtime | grep -E 'KYANT288138|KYANT28821_TOUCH_RELEASE|FATAL EXCEPTION|VectorLegacyBridge|KYANT288137' > '$OUT/logcat.txt'" 2> "$OUT/log_error.txt"
 snapshot after
-echo "perfetto_exit=$PERF" >> "$OUT/device_info.txt"
-if [ "$PERF" -ne 0 ]; then echo 'WARNING: Perfetto command failed, see perfetto_status.txt'; fi
-if ! su -c "grep -q 'KYANT288137_CLIP' '$OUT/logcat.txt'"; then echo 'WARNING: no internal clip logs; inspect launcher configuration'; fi
+printf 'perfetto_exit=%s\n' "$STATUS" >> "$OUT/device_info.txt"
+if [ "$STATUS" -ne 0 ]; then echo "WARN: Perfetto failed. Review $OUT/perfetto_status.txt"; fi
+if ! grep -q 'KYANT288138_RELEASE' "$OUT/logcat.txt"; then echo 'WARN: no release markers found, check Vector scope and touch hook'; fi
+if [ "$MODE" = b ] && ! grep -q 'KYANT288138_HOST_DISABLED' "$OUT/logcat.txt"; then echo 'WARN: no host-disabled marker; verify experiment activated'; fi
 echo "Saved $OUT"

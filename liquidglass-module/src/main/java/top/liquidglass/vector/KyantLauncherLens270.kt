@@ -246,6 +246,14 @@ object KyantLauncherLens270 {
             val serial = releaseSeq28820.incrementAndGet()
             XposedBridge.log("KYANT28893_TOUCH_END seq=$serial downSerial=$gestureDownSerial28893 " +
                 "action=$releaseAction28820 dx=$dx dy=$dy eventMs=${event.eventTime} via=$method")
+            // A short trace slice provides a shared monotonic timestamp that
+            // can be aligned with RenderThread/FrameTimeline in Perfetto.
+            try {
+                android.os.Trace.beginSection("LG138_RELEASE_${releaseAction28820}")
+                android.os.Trace.endSection()
+            } catch (_: Throwable) { }
+            XposedBridge.log("KYANT288138_RELEASE seq=$serial action=$releaseAction28820 " +
+                "timeNs=${releaseNs28820.get()} dx=$dx via=$method")
             XposedBridge.log("KYANT28821_TOUCH_RELEASE seq=$serial action=$releaseAction28820 " +
                 "dx=$dx dy=$dy rawX=${event.rawX} rawY=${event.rawY} eventMs=${event.eventTime} via=$method")
             releaseSnapshot28821("BEFORE", serial, method)
@@ -394,6 +402,22 @@ object KyantLauncherLens270 {
 
     @JvmStatic fun run(anchor: View) {
         if (!anchor.isAttachedToWindow || KyantLauncherLensProbe270.isActiveFor273(anchor)) return
+        // V288.138: isolated optical-host absence experiment. OEM Workspace,
+        // FolderIcon animations and icons are unmodified. This intentionally
+        // removes Kyant Folder optics in B ONLY; it is never a quality setting.
+        // Read at host entry, before allocating reference/Compose/GPU resources.
+        val reboundIsolation138 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_rebound_host_ab_288138", 0) == 1
+        } catch (_: Throwable) { false }
+        if (reboundIsolation138) {
+            // Preserve release timing markers even when no optical host exists.
+            installTouchHooks28820(anchor)
+            XposedBridge.log("KYANT288138_HOST_DISABLED host=${System.identityHashCode(anchor)} " +
+                "scope=kyant_folder_host_only oem_workspace_unchanged " +
+                "dock_and_legacy_paths_not_guaranteed_disabled")
+            return
+        }
         val reference = KyantLauncherFrameBridge266.peekReferenceFrame270()
         if (reference == null) {
             XposedBridge.log("KYANT2885_REFERENCE_NOT_READY one_shot_not_consumed")
