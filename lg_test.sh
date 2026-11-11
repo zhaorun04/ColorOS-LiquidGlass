@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# V1.9.205.288.136: isolated outer rounded-clip A/B data collection.
+# V1.9.205.288.136.1: isolated outer rounded-clip A/B data collection.
 # sh lg_test.sh baseline|clip-isolated single|multi
 set -u
 PROFILE="${1:-}"; SCENE="${2:-single}"
@@ -34,7 +34,7 @@ sleep 3
 ACTUAL="$(su -c 'settings get global liquidglass_kyant_outer_clip_ab_288136' 2>/dev/null | tr -d '\r')"
 [ "$ACTUAL" = "$MODE" ] || { echo "Mode mismatch or settings query failure: '$ACTUAL' expected '$MODE'"; exit 6; }
 VERSION="$(su -c 'dumpsys package top.liquidglass.vector | grep versionName' 2>/dev/null)"
-case "$VERSION" in *1.9.205.288.136*) ;; *) echo "WARNING: Expected version 1.9.205.288.136, got $VERSION"; exit 7 ;; esac
+case "$VERSION" in *1.9.205.288.136.1*) ;; *) echo "WARNING: Expected version 1.9.205.288.136.1, got $VERSION"; exit 7 ;; esac
 # Check actual host effective gate. A baseline should report effective=false.
 su -c 'logcat -c' >/dev/null 2>&1 || true
 printf '\nMode %s, scene %s. Open the intended Launcher page and prepare to swipe.\n' "$MODE" "$SCENE"

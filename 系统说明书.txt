@@ -1,4 +1,4 @@
-ColorOS-LiquidGlass V1.9.205.288.136｜HWUI 外层圆角裁剪成本隔离 A/B + 测试窗口修复
+ColorOS-LiquidGlass V1.9.205.288.136.1｜HWUI 外层圆角裁剪成本隔离 A/B + 测试窗口修复
 
 一、目标
 V288.135 的 Bridge 状态机 C 档未展示稳定掉帧收益，故本版默认回归 A 档。保留 V288.112 GPU 参考帧及所有二维折射、模糊、高光、文件夹和 Dock 光学参数链。
@@ -26,3 +26,5 @@ su -c 'settings put global liquidglass_kyant_outer_clip_ab_288136 0; settings pu
 六、交付和验证
 仅修改 Launcher 容器外层 clip 的条件门、Android 模块版本号、系统说明书及 Termux 测试脚本。
 已做静态源文件检查、Shell 语法检查、ZIP 完整性校验。Android Gradle 编译与真机测试仍未执行。
+
+V288.136.1 编译修复：将 Host 初始化读取的 outerClipIsolate288136 显式传入 @Composable LensContent270，修复 Kotlin Unresolved reference；不改变 A/B 裁剪与光学逻辑。
