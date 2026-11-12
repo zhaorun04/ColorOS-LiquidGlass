@@ -1,0 +1,33 @@
+ColorOS-LiquidGlass V1.9.205.288.145.1｜回弹坐标来源只读审计版
+
+一、版本目标
+基于V288.143源码。新增独立只读诊断开关，默认关闭；不调整Shader、文件夹、Dock、采样选择或UI光学滑块。不宣称已经修复回弹不同步。V288.142/143旧实验保持可用但请关闭后独立测试144。
+
+二、源码确认
+原生当前位置由glassScreenPosition(lastBounds)计算：anchor.transformMatrixToGlobal + 根View屏幕/窗口差值，结果是屏幕像素；Workspace自身平移/滚动已随祖先矩阵包含。PreDraw采集相同原生屏幕坐标。screenPosition.value是已经提交的Compose位置状态，可能来自不同绘制时刻。严禁将Workspace scrollX再次叠加到屏幕坐标。
+V288.143的incompatible将运动模式不匹配和离开松手后150ms窗口混为一类。144只读探针在0~150ms分别输出状态、原生、PreDraw、Workspace滚动和独立guard原因；不修改屏幕绘制坐标。
+
+三、测试
+确保GitHub Actions成功构建并安装144后执行：
+su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_coordinate_audit_288144 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+在桌面至少做5次短距离右滑，松手回弹；然后：
+su -c 'logcat -d -v threadtime | grep KYANT288144 | tail -100'
+测试结束恢复：
+su -c 'settings put global liquidglass_kyant_coordinate_audit_288144 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+日志的scope=draw_callback_not_presented并不代表实际最终呈现帧。guard=POTENTIAL_CORRECTION_ONLY只是候选类别，不进行位置修正。为降低性能干扰，日志单Host约每40ms最多一次，仅在松手后150ms窗口生成。
+
+四、参数映射与构建限制
+原UI→SharedPreferences→Root快照→Launcher光学渲染映射不改动。新诊断参数仅通过Settings.Global读取，不增加UI滑块，也不写入Root快照。未在本环境完成Gradle/Kotlin完整编译，需先在GitHub Actions编译验证再安装。
+
+五、Git提交
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.145.1 版本"
+git push origin main
+
+
+V1.9.205.288.145.1：增加只读的 PreDraw→Compose 绘制关联探针。
+开关：settings put global liquidglass_kyant_frame_correlation_288145 1（默认 0）。
+日志：KYANT288145_HOST / KYANT288145_DRAW。
+predrawSerial 是本地 PreDraw 回调序号，不能证明 SurfaceFlinger 同帧显示。
+原生位置与 Compose 状态在绘制回调中比较，不自动修正；建议同时关闭 V288.142/V288.143 实验档。
