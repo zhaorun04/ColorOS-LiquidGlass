@@ -1,22 +1,21 @@
-ColorOS-LiquidGlass V1.9.205.288.146.1｜运行时 VerifyError 安全恢复版
+ColorOS-LiquidGlass V1.9.205.288.147｜独立 CPU 绘制阶段只读诊断
 
-一、故障与修复范围
-V288.146 在 Android 启动 com.android.launcher 时，KyantLauncherLens270.run(View) 触发 VerifyError：expected 1 argument registers, method signature has 2 or more。于是 Kyant0 文件夹玻璃初始化失败，旧版玻璃回退，而 Dock 正常。
-本修复版为稳妥恢复文件夹：将 KyantLauncherLens270.kt 恢复为 V288.145.1 已真机运行的完整实现；撤销 V288.146 所有 PreDraw/Compose 阶段诊断注入，避免在 run(View) 内新增参数和调用。其余模块代码沿用 V288.146，与 V288.145.1 比较，除版本号外无新的运行逻辑改动。
-当前版本只保留 V288.145 帧关联探针（默认关闭），暂不提供 KYANT288146_STAGE 诊断。不能仅凭 Gradle 构建判断 DEX 运行时验证通过。
+基线：V288.146.1 已在用户真机恢复 Kyant0 文件夹玻璃。保留 Lens270.run(View) 的代码与参数结构，不再修改其 Host 初始化逻辑。
 
-二、真机恢复（确认 GitHub Actions 编译成功并安装 V288.146.1 后）
-su -c 'settings put global liquidglass_kyant_stage_audit_288146 0; settings put global liquidglass_kyant_frame_correlation_288145 0; settings put global liquidglass_kyant_coordinate_audit_288144 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
-若安装后 Vector/LSPosed 仍注入旧模块代码，应重启设备完成模块重新加载。禁止清除 Launcher 数据、重置光学参数或随意调整 Host 开关。
-核验：
-su -c 'dumpsys package top.liquidglass.vector | grep versionName; logcat -d -v threadtime | grep -E "KYANT2884_RUN_ERROR|VerifyError|KYANT288145_HOST|KYANT2885_HOST" | tail -50'
-除看日志还必须目视确认文件夹已经恢复 Kyant0 原版效果，Dock 同样保持正常。
+本版：KyantStageAudit288147.kt 独立辅助类。仅在已经存在的 V288.145 draw 诊断路径中接收屏幕内 Host 位置，在同一次 ComposeCanvas 绘制回调结束时再次采集原生位置；记录 drawDeltaX、stateGapPx、preGapPx、drawDurationMs。没有 PreDraw 入口/出口双采样，不能据此确认 PreDraw 内部变化或屏幕最终呈现帧。无光学坐标修改。
 
-三、参数映射与风险
-只修改 Lens270 还原及 module 版本号。UI→SharedPreferences→Root快照→Launcher 光学参数映射无新增变更。独立 Settings.Global 的 V288.146 诊断开关在本版没有运行时消费；其设置值不会影响 Lens270。保留 V288.145.1 所有光学 Shader 和采样路径。未在当前环境完成 Gradle/Android 真机校验，需以设备实测为准。
+诊断需要同时开启：
+su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_coordinate_audit_288144 0; settings put global liquidglass_kyant_frame_correlation_288145 1; settings put global liquidglass_kyant_stage_audit_288146 0; settings put global liquidglass_kyant_stage_audit_288147 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+测试短距离向右滑动松手5~7次，采集：
+su -c 'logcat -d -v threadtime | grep -E "KYANT288145_DRAW|KYANT288147_STAGE|KYANT2884_RUN_ERROR|VerifyError" | tail -120'
+如发生 Kyant0 文件夹消失，应立即回退已确认正常的 V288.146.1，并关闭 V288.147 和 V288.145 诊断。
+结束关闭：
+su -c 'settings put global liquidglass_kyant_stage_audit_288147 0; settings put global liquidglass_kyant_frame_correlation_288145 0'
 
-四、Termux 提交
+风险：未在当前环境完成 Gradle 构建、D8 字节码校验或 Android 运行时类加载。安装后必须先确认文件夹 Kyant0 和 Dock 玻璃都存在，才开启实验。与 V288.146 不同，本版未增加 run(View) 参数或 PreDraw 回调操作，但不能保证绝无 VerifyError。UI→SharedPreferences→Root→Launcher→渲染的光学参数映射未修改；V288.147 诊断采用独立 Settings.Global 键，默认关闭。
+
+Termux 提交：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.146.1 版本"
+git commit -m "V1.9.205.288.147 版本"
 git push origin main

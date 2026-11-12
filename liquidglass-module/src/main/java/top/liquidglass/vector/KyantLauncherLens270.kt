@@ -4672,6 +4672,14 @@ object KyantLauncherLens270 {
                             gap145 <= 12f -> "SMALL_STATE_GAP"
                             else -> "LARGE_STATE_GAP"
                         }
+                        // V288.147: optional helper-only stage audit. No mutation of
+                        // render position and no additional run(View) captures.
+                        if (visible145 && native145 != null) {
+                            KyantStageAudit288147.begin(
+                                diagnosticAnchor288104, traceHost28890, seq145,
+                                pre145?.pos, committedPosition, native145,
+                                if (pre145 != null) drawNow145 - pre145.atNs else -1L)
+                        }
                         android.util.Log.i("KyantFrame288145",
                             "KYANT288145_DRAW host=$traceHost28890 release=$seq145 " +
                             "ageMs=${age145 / 1_000_000f} predrawSerial=${pre145?.serial} " +
@@ -6067,6 +6075,15 @@ object KyantLauncherLens270 {
                     }
                 }
                 } finally {
+                    // V288.147: only read native position when a matching, enabled
+                    // helper snapshot is pending. Failure never affects optical draw.
+                    if (frameCorrelation288145 && KyantStageAudit288147.hasPending(traceHost28890)) {
+                        try {
+                            KyantStageAudit288147.finish(traceHost28890, currentNativePosition())
+                        } catch (_: Throwable) {
+                            KyantStageAudit288147.cancel(traceHost28890)
+                        }
+                    }
                     if (perfettoTrace288120) android.os.Trace.endSection()
                 }
             }
