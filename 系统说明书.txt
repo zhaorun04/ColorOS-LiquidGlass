@@ -1,41 +1,41 @@
-ColorOS-LiquidGlass V1.9.205.288.139｜回弹整帧与壁纸采样回调关联诊断版
+ColorOS-LiquidGlass V1.9.205.288.140｜回弹 UI 帧节奏与采样位置关联诊断版
 
-一、问题与目的
-用户观察：不翻页向右滑动松手回弹时，桌面图标和文件夹会同时出现轻微卡顿；玻璃壁纸纹理相对外部壁纸的贴合可把卡顿或不同步显著放大。两类原因可叠加：1）Launcher 整帧延迟；2）Kyant Source 绘制采用的采样位置与当前文件夹的位置更新不一致。V139 仅关联记录这些回调输入，不修改折射、模糊、高光、壁纸 Bitmap、Shader 或 Host 创建逻辑。默认关闭诊断。
+一、目标及结论边界
+V139 表明 Source 绘制位置等于 Compose 已提交位置，但 Source 与原生 View 回调读取的位置存在回弹期阶段差。V140 只新增有界 Choreographer UI 帧节奏观察，并请求采集 SurfaceFlinger FrameTimeline；不改动 Shader、二维折射、模糊、高光、Bitmap 和图层裁剪。诊断默认关闭。
+注意：Choreographer callback ordinal 不是 SurfaceFlinger FrameTimeline token；UI 帧时间和最终屏幕显示时间不能直接等同。FrameTimeline 数据源即使请求成功，也必须检查 trace 中是否真正包含所需轨道才能作呈现级判断。
 
-二、改动（V138 稳定完整玻璃 A 档基础）
-1. 新增独立开关 Settings.Global：liquidglass_kyant_same_frame_probe_288139，0 默认关闭，1 开启诊断。
-2. KYANT288139_RELEASE：松手（ACTION_UP 或 CANCEL）事件的单调时间戳和序号。Perfetto 附加瞬间标记 LG139_RELEASE_UP/CANCEL（依赖设备 Trace 类别是否启用）。
-3. KYANT288139_PREDRAW：回弹后的 UI PreDraw 原生位置（nativeX/Y）、当时已提交 Compose 状态（committedX/Y）、pendingGapPx、回调间隔和序号。
-4. KYANT288139_SOURCE：相同松手序号下，Compose Source Draw 的 drawX/Y、committedX/Y、最近一次 PreDraw 的位置/序号/年龄、实时原生位置、reference generation 和 GPU 参考帧选项。
-5. 单个 Host、单次松手窗口 650ms；PreDraw 和 Source 各不超过 9 条日志且至少间隔 45ms。只在已选 Host 记录，非每帧持续打印。仅日志观察仍会有小额开销，先按相同设置复测。
-6. versionName=1.9.205.288.139、versionCode=1920529145。
-7. 更新 lg_test.sh：仅备份并调整 V139 探针开关与 V138 Host 隔离开关。测试强制 Host 隔离=0（完整 Kyant），结束按原备份恢复。其它光学、GPU、壁纸、调试设置不改动。保存 Perfetto、gfxinfo、Logcat、CPU 频率和 ThermalService 前后快照。
+二、代码变更
+1. Settings.Global 新增开关 liquidglass_kyant_ui_frame_probe_288140，默认 0。由 Launcher Hook 安装时读取一次，非每帧读取 Settings。
+2. 松手后 650ms 内最多 55 次 Choreographer.FrameCallback（仅实验开启时调度）。日志 KYANT288140_UI_FRAME 包括 release、ordinal、callbackNs、vsyncNs、callbackGapMs、vsyncGapMs、releaseAgeMs；首帧、约每 6 帧及 callbackGapMs>=18ms 时输出，降低诊断扰动。
+3. 继承 V139 的 KYANT288139_RELEASE/PREDRAW/SOURCE；后两者额外携带 uiFrameRelease、uiFrameOrdinal、uiFrameAgeMs，从而粗略关联 UI 回调节奏与 Source/PreDraw 阶段。
+4. versionName=1.9.205.288.140，versionCode=1920529146。
 
-三、关键解释限制
-- 同一个 release 序号加回调时刻，不意味着记录均属于同一 SurfaceFlinger 最终呈现帧；PreDraw/Source 也不具有相同的系统 FrameTimeline token。
-- 两坐标要先判断坐标系/矩阵一致才能将差值解释为壁纸视觉贴合误差。pendingGapPx/nativeDrawGapPx 仅是回调观察的像素差，不是经像素识别验证的纹理错位。
-- Perfetto 命令录制 gfx/view/sched/freq；若设备没有 FrameTimeline datasource，不能宣称已记录或完成 GPU 呈现级归因。
-- gfxinfo reset 与 Perfetto 启停是近似窗口，不保证完全同一时段；结合 release 标记和真实 trace 范围解释。
-- 诊断 key 需要重新启动 Launcher 才能生效。要确保 Vector 已勾选 com.android.launcher 作用域。
+三、测试脚本
+只备份及修改以下三个开关，绝不修改 GPU 参考帧、折射强度、模糊、高光等参数：
+- liquidglass_kyant_rebound_host_ab_288138 => 测试时 0（完整玻璃）
+- liquidglass_kyant_same_frame_probe_288139 => 测试时 1（PreDraw/Source 位置观测）
+- liquidglass_kyant_ui_frame_probe_288140 => 测试时 1（UI 节奏观测）
+首次测试前备份原值到 /sdcard/Download/LG140_TestResults/original_settings.tsv；restore 恢复原值。若之前手动使用 V138 的 B 档且备份为 1，restore 会忠实恢复到 B 档；日常完整玻璃模式须将 liquidglass_kyant_rebound_host_ab_288138 显式设置为 0。
 
-四、完整玻璃真机测试
-安装已编译 V139 APK，确认 Vector 作用域及文件夹玻璃与 Dock 均可正常显示。
+四、Perfetto
+优先运行包含 linux.ftrace + android.surfaceflinger.frametimeline + linux.process_stats 的 15s 文本配置。若设备不支持文本配置或数据源，回退原有 gfx/view/sched/freq 15s 快速采集。每轮 trace_mode.txt 与 perfetto_status.txt 标明采集方式；成功请求不等于 FrameTimeline 内容已验证。gfxinfo 仅近似与 Perfetto 同窗，不能假定严格对齐。
+
+五、真机测试（安装编译 APK 后）
+确保 Vector 对 com.android.launcher 的作用域已开启，完整玻璃正常显示。手指短距离向右滑动，不翻页，然后松手回弹；A1/A2 尽量保持页面/亮度/频率/手势相同。
  cd ~/ColorOS-LiquidGlass-V1.0-Source
  sh lg_test.sh single a1
  sh lg_test.sh single a2
  sh lg_test.sh multi m1
  sh lg_test.sh pack
-结果：/sdcard/Download/LG139_TestResults.tar.gz
-每轮在准备倒计时后，重复短距离右滑不翻页、松手回弹动作约 15 秒；A1/A2 尽量保持相同页面/壁纸/刷新率/操作节奏。绝不以关闭玻璃后看不见抖动作为性能成功证据。
-恢复：sh lg_test.sh restore
-原值备份：LG139_TestResults/original_settings.tsv。第一次采集前备份，仅这两项被脚本写入。若之前的 V138 B 档为 1，restore 会忠实恢复为 1；日常使用应确保 liquidglass_kyant_rebound_host_ab_288138=0。
+结果：/sdcard/Download/LG140_TestResults.tar.gz
+恢复测试前设置：sh lg_test.sh restore
+若仅需确保完整玻璃：su -c 'settings put global liquidglass_kyant_rebound_host_ab_288138 0; settings put global liquidglass_kyant_same_frame_probe_288139 0; settings put global liquidglass_kyant_ui_frame_probe_288140 0; am force-stop com.android.launcher'
 
-五、开发验证状态
-已进行修改点与变量传递静态检查、Shell 语法及 ZIP CRC 校验；本环境无 Gradle SDK 完整编译结果，需 GitHub Actions 的 :liquidglass-module:assembleDebug 实际确认；真机数据尚未收集。
+六、质量与验证
+本 ZIP 必须有单一版本顶层目录；包含系统说明书.txt；Shell 语法和 ZIP CRC 需要核验。完整 Gradle/Kotlin 编译、LSPosed 注入、FrameTimeline 有效性及视觉贴合仍需 GitHub Actions/真机实测确认。不能只用回调时刻的像素差推断呈现级纹理错位。
 
-六、Termux Git
+七、Git
  cd ~/ColorOS-LiquidGlass-V1.0-Source
  git add .
- git commit -m "V1.9.205.288.139 版本"
+ git commit -m "V1.9.205.288.140 版本"
  git push origin main

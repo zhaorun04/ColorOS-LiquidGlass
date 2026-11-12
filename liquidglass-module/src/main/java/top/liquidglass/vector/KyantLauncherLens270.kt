@@ -158,6 +158,51 @@ object KyantLauncherLens270 {
     // The rendering pipeline remains identical to V288.19 mode 2.
     private const val RELEASE_TRACE_28821_KEY = "liquidglass_kyant_release_trace_28821"
     private const val FRAME_SYNC_AB_28822_KEY = "liquidglass_kyant_frame_sync_ab_28822"
+    // V288.140: UI Choreographer cadence, not SurfaceFlinger present timestamps.
+    // A callback ordinal is deliberately NOT a FrameTimeline token.
+    @Volatile private var reboundFrameProbeEnabled288140 = false
+    @Volatile private var uiFrameOrdinal288140 = 0L
+    @Volatile private var uiFrameCallbackAtNs288140 = 0L
+    @Volatile private var uiFrameRelease288140 = 0L
+    private fun beginUiFrameCadence288140(release: Long, releaseAtNs: Long) {
+        if (!reboundFrameProbeEnabled288140) return
+        // Called on the Launcher UI thread via its touch handler. The callback
+        // must never schedule work past its bounded window or a newer release.
+        try {
+            val choreographer = android.view.Choreographer.getInstance()
+            choreographer.postFrameCallback(object : android.view.Choreographer.FrameCallback {
+                private var previousCallbackAt = 0L
+                private var previousVsyncAt = 0L
+                private var count = 0
+                override fun doFrame(frameTimeNanos: Long) {
+                    val now = SystemClock.elapsedRealtimeNanos()
+                    if (releaseSeq28820.get() != release || now - releaseAtNs > 650_000_000L || count >= 55) return
+                    val callbackGap = if (previousCallbackAt > 0L)
+                        (now - previousCallbackAt) / 1_000_000f else -1f
+                    val vsyncGap = if (previousVsyncAt > 0L)
+                        (frameTimeNanos - previousVsyncAt) / 1_000_000f else -1f
+                    previousCallbackAt = now
+                    previousVsyncAt = frameTimeNanos
+                    count++
+                    uiFrameOrdinal288140 = count.toLong()
+                    uiFrameCallbackAtNs288140 = now
+                    uiFrameRelease288140 = release
+                    // Sparse log, always reporting long gaps and the first frame.
+                    if (count == 1 || callbackGap >= 18f || count % 6 == 0) {
+                        android.util.Log.i("KyantFrame288140",
+                            "KYANT288140_UI_FRAME release=$release ordinal=$count " +
+                            "callbackNs=$now vsyncNs=$frameTimeNanos " +
+                            "callbackGapMs=$callbackGap vsyncGapMs=$vsyncGap " +
+                            "releaseAgeMs=${(now - releaseAtNs) / 1_000_000f} " +
+                            "scope=ui_choreographer_not_presented")
+                    }
+                    choreographer.postFrameCallback(this)
+                }
+            })
+        } catch (e: Throwable) {
+            android.util.Log.w("KyantFrame288140", "KYANT288140_UI_FRAME_SETUP_FAILED ${e.javaClass.simpleName}")
+        }
+    }
     private val releaseSeq28820 = AtomicLong(0L)
     private val releaseNs28820 = AtomicLong(0L)
     @Volatile private var releaseDx28820 = 0f
@@ -262,6 +307,7 @@ object KyantLauncherLens270 {
                 "tNs=${releaseNs28820.get()} dx=$dx via=$method")
             XposedBridge.log("KYANT28821_TOUCH_RELEASE seq=$serial action=$releaseAction28820 " +
                 "dx=$dx dy=$dy rawX=${event.rawX} rawY=${event.rawY} eventMs=${event.eventTime} via=$method")
+            beginUiFrameCadence288140(serial, releaseNs28820.get())
             releaseSnapshot28821("BEFORE", serial, method)
         } else if (eventKey == lastTouchEventKey28820 &&
             eventKey != releaseAfterKey28821 && method == releaseBeforeVia28821) {
@@ -273,6 +319,11 @@ object KyantLauncherLens270 {
     }
     private fun installTouchHooks28820(anchor: View) {
         val root = anchor.rootView
+        // Read once at Host hook setup; no Settings IPC on every frame.
+        reboundFrameProbeEnabled288140 = try {
+            Settings.Global.getInt(root.context.contentResolver,
+                "liquidglass_kyant_ui_frame_probe_288140", 0) == 1
+        } catch (_: Throwable) { false }
         activeTouchRoot28820 = WeakReference(root)
         var workspace: View? = anchor
         var depth = 0
@@ -3831,6 +3882,8 @@ object KyantLauncherLens270 {
                                     "nativeX=${currentSample.x} nativeY=${currentSample.y} " +
                                     "committedX=${commit139.x} committedY=${commit139.y} " +
                                     "pendingGapPx=${kotlin.math.max(kotlin.math.abs(currentSample.x - commit139.x), kotlin.math.abs(currentSample.y - commit139.y))} " +
+                                    "uiFrameRelease=$uiFrameRelease288140 uiFrameOrdinal=$uiFrameOrdinal288140 " +
+                                    "uiFrameAgeMs=${if (uiFrameCallbackAtNs288140 > 0) (now139 - uiFrameCallbackAtNs288140) / 1_000_000f else -1f} " +
                                     "callbackGapMs=$gap139 preSeqBeforeUpdate=${predrawSerial28890} " +
                                     "scope=ui_predraw_not_presented")
                             }
@@ -4512,6 +4565,8 @@ object KyantLauncherLens270 {
                                 "committedX=${committedPosition.x} committedY=${committedPosition.y} " +
                                 "drawX=${drawPosition.x} drawY=${drawPosition.y} " +
                                 "nativeX=${native139?.x} nativeY=${native139?.y} " +
+                                "uiFrameRelease=$uiFrameRelease288140 uiFrameOrdinal=$uiFrameOrdinal288140 " +
+                                "uiFrameAgeMs=${if (uiFrameCallbackAtNs288140 > 0) (now139 - uiFrameCallbackAtNs288140) / 1_000_000f else -1f} " +
                                 "nativeDrawGapPx=$nativeGap139 " +
                                 "bridgeVersion=${bridgeVersion.value} reference=${System.identityHashCode(reference)} " +
                                 "referenceGen=${reference.generationId} gpuReference=$gpuReference288110 " +
