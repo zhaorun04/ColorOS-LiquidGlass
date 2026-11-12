@@ -1,26 +1,34 @@
-ColorOS-LiquidGlass V1.9.205.288.150｜Compose 状态消费版本与 Workspace 滚动时序诊断
+ColorOS-LiquidGlass V1.9.205.288.151｜状态发布链路审查与受控修复候选 A/B
 
-基线：V288.149。新增 KyantStateConsumption288150.kt，复用 KyantPageProvenance288148.kt 的只读事件；KyantLauncherLens270.kt 和 KyantGeometryTiming288149.kt 均保持原样。
+一、静态审查结果
+1. KyantLauncherLens270.kt 中的 samplePosition 状态可在初始化、几何变化、PreDraw 位置更新和首次可见等路径被写入；并非没有状态发布。
+2. 正常几何门控 updatePosition 基于 moved、boundsChangedNow、firstPositionSettled 和 visible，无法仅凭日志证明能每帧覆盖全部原生变换变化。
+3. 代码中已有 liquidglass_kyant_native_frame_commit_ab_28863=1 实验：PreDraw 中如果原生矩阵位置和 samplePosition 不同，则提交最新位置并请求 Compose 重绘；无需重复添加插桩。
+4. 代码中也已有 legacySyncAbMode=1 的直接绘制时矩阵路径。但本次仅测试 28863，不叠加改变绘制坐标来源的其他实验。
+5. V288.150 数据：同页回弹 nativePlusScrollDx=0，stateGapX=-12/-10/-8 或 -7/-5，显示相对位置差收敛，不能仅从观察序列断言最终屏幕帧滞后。
 
-新增诊断 KYANT288150_CONSUME：记录 Workspace scrollX、nativeX、PreDraw preX、Compose stateX，同一次 release 相邻采样的 scrollDx/nativeDx/stateDx/preDx、stateRevision，以及绘制回调首次观测到该值的 observedStateAgeMs。首次观测时间不等于 screenPosition 的真实写入时间；stateRevision 是诊断观察序号，不等于内部 Snapshot 版本或 SurfaceFlinger token。调试输出有至少约 40ms 的既有节流，不能证明同一显示帧同步。
+二、交付范围与安全原则
+本版保持 V288.150 的 KyantLauncherLens270.kt、Shader、Dock、文件夹 Host、UI、SharedPreferences、Root 配置及全部光学参数代码字节完全一致，仅改变 APK 版本并附带 A/B 脚本，避免再次触发 V288.146 的 Kotlin/D8 VerifyError 风险。
 
-不修改 Kyant0 Shader、二维透镜、Dock、文件夹布局、位置 State 值、UI、SharedPreferences、Root 快照或 Launcher 光学参数。新开关默认关闭。原有 V288.145/148/149 的日志继续可用。
+这不是宣称回弹已经修复的版本；这是明确验证已实现候选路径是否有效。开关默认行为不变。测试只有设置全局开关与重启 Launcher，没有改壁纸或参数。
 
-先确认安装后 Kyant0 文件夹和 Dock 正常，无 VerifyError。再开启：
-su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_coordinate_audit_288144 0; settings put global liquidglass_kyant_stage_audit_288146 0; settings put global liquidglass_kyant_stage_audit_288147 0; settings put global liquidglass_kyant_geometry_timing_288149 0; settings put global liquidglass_kyant_frame_correlation_288145 1; settings put global liquidglass_kyant_page_provenance_288148 1; settings put global liquidglass_kyant_state_consume_probe_288150 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+三、Termux 测试（将源码内容放进 ~/ColorOS-LiquidGlass-V1.0-Source 后）
+sh lg151_publish_ab.sh status
+sh lg151_publish_ab.sh baseline
+先确认玻璃与 Dock 正常；做 5 次同页短右滑回弹，采集如下日志并保存 baseline.txt：
+su -c 'logcat -d -v threadtime | grep -E "KYANT28863_HOST|KYANT28863_FRAME_COMMIT|KYANT288150_CONSUME|KYANT2884_RUN_ERROR|VerifyError" | tail -120'
+再执行：sh lg151_publish_ab.sh candidate
+确认玻璃与 Dock 正常；同样做 5 次短右滑回弹，采集同一组日志，并保存 candidate.txt。
+如果 candidate 模式玻璃出现异常，立即 sh lg151_publish_ab.sh restore 并回退稳定 APK。
+全部测试完成：sh lg151_publish_ab.sh restore
 
-第一轮仅测试同页短滑回弹 5~7 次，第二轮可单独测试翻页。日志：
-su -c 'logcat -d -v threadtime | grep -E "KYANT288150_CONSUME|KYANT288148_PAGE|KYANT2884_RUN_ERROR|VerifyError" | tail -120'
+如需要 V150 的状态差对比，可以保持诊断开关 liquidglass_kyant_state_consume_probe_288150=1 与所需的 288148/145 开关一致；两次 A/B 必须使用相同的这些诊断开关。建议不要同时打开历史光学修正实验。V288.63 是否真正生效需见 KYANT28863_HOST commitAb=1；pipeline 实验 >=0 会使此路径强制为0，遇到该情况不要盲目修改 pipeline 参数。
 
-关闭诊断：
-su -c 'settings put global liquidglass_kyant_state_consume_probe_288150 0; settings put global liquidglass_kyant_page_provenance_288148 0; settings put global liquidglass_kyant_frame_correlation_288145 0'
+四、发布验证
+ZIP完整性、单顶层文件夹、版本号静态检查完成。Gradle/D8、真机类加载、玻璃视觉与同步效果需 GitHub Actions 与用户真机验证。不能把 A/B 候选当作已验证修复。
 
-如遇 VerifyError 或文件夹退回旧玻璃，立即停止测试，恢复已经正常运行的 V288.149。
-
-本地构建环境未验证 Android Gradle 9.7.1 完整构建，也无法替代 Android 真机 DEX 校验。
-
-Termux Git：
+五、Git
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.150 版本"
+git commit -m "V1.9.205.288.151 版本"
 git push origin main
