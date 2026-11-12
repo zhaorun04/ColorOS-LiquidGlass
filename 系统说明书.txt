@@ -1,31 +1,30 @@
-ColorOS-LiquidGlass V1.9.205.288.141｜回弹可见性门控与帧稳定性诊断版
+ColorOS-LiquidGlass V1.9.205.288.142｜同帧采样原点 A/B 实验版
 
-一、目标与边界
-调查 V288.140 多文件夹 release=81 某 Host 的原生位置持续右移，但 Compose 采样停在 1206px 的现象。此前最多 316px 的状态差不能直接认定为屏幕错位，可能是完全离屏后跳过提交。V288.141 不改变光学、几何、位移、可见性和图层绘制，只记录原有条件的判定结果。
+一、版本定位
+基于完整 V288.141 源码；保留原版二维光学、图标高光、壁纸采样、文件夹与 Dock 几何、可见性 Gate 及全部 UI 参数。仅新增一个默认关闭的源码级 A/B 实验开关，不承诺已解决屏幕呈现错位。本包为待构建验证源码包，非已编译 APK。
 
-二、新增代码
-KyantLauncherLens270.kt 新增 Settings.Global: liquidglass_kyant_visibility_gate_probe_288141，默认0，Host建立时读取。针对被选中的 Host 与手指松开后650ms，每次release至多记录14条 KYANT288141_GATE，间隔45ms或门控状态变化；包括 visible、screen、rect、intersection、moved、boundsChanged、updatePosition、blocked、native/committed位置、gapPx、UI回调序号。KYANT288141_HOST 表示建立探针。所有坐标是 PreDraw 回调中的状态，不是SurfaceFlinger实际呈现帧。
-注意：intersection是依照现有 xy + b 计算的屏幕矩形，不能独立证明视觉裁剪或最终显示。只有排除几何和坐标系问题后，才考虑更改门控条件。
+二、源码改动
+KyantLauncherLens270.kt：新增 Settings.Global 键 liquidglass_kyant_same_frame_snapshot_ab_288142，Host 建立时读取，默认0。
+0=完整保留 V288.141 原有绘制行为；1=仅在 Compose 来源绘制回调内、motionAbMode=0 且 sourceMatrixAb28866=0、最近35ms内有原生 PreDraw 观测时，尝试读取当前原生位置；偏差<=24px 且为有限数才作为本次 bitmap SOURCE 采样原点，否则安全回退原路径。禁止在 Compose draw 中写 samplePosition；禁用 288125 的位置源记录复用捷径。日志 KYANT288142_HOST / KYANT288142_SOURCE 区分接受和回退次数。
+注意：这种“同绘制回调采样”是实验机制，不等于已经建立 SurfaceFlinger 完整帧令牌级原子提交关系，严禁宣称最终呈现同步已修复。默认关闭，须手动开启。
 
-三、测试
-安装编译成功的 1.9.205.288.141，确认 Vector com.android.launcher 作用域与玻璃完整显示。
+三、Android Studio 或 GitHub Actions 编译成功后测试（两轮 A/B 分别重启 Launcher）
 cd ~/ColorOS-LiquidGlass-V1.0-Source
-sh lg_test.sh single a1
-sh lg_test.sh single a2
-sh lg_test.sh multi m1
-sh lg_test.sh pack
-输出 /sdcard/Download/LG141_TestResults.tar.gz。
-测试时反复向右短距离滑动、不翻页、松手回弹；多文件夹场景尤其观察右侧靠近屏幕边缘的容器。
-可用 sh lg_test.sh restore 恢复测试之前的设置；如果备份的 288138 值本来是1，restore会恢复禁用Host的诊断档。日常完整玻璃要明确设置 288138=0。
+# A档：原样基线
+su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+# 观察 5～7 次短距离右滑回弹，记录视频及日志
+# B档：仅启用新采样原点试验
+su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+su -c 'logcat -d -v threadtime | grep KYANT288142 | tail -40'
+# 恢复正常稳定档（务必执行）
+su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
 
-四、判断
-visible=false、intersection=0且blocked=true，支持完全离屏门控导致状态冻结；若intersection>0但visible=false，需要进一步检查位置/几何基准；若visible=true且updatePosition=false，检查 moved、boundsChanged、firstPositionSettled；如果UI帧间隔稳定但实际呈现卡顿，仍需完整FrameTimeline解码，不能凭UI回调序号推断最终帧。
+四、发布限制与构建验证
+当前环境缺少 Gradle 9.7.1，且网络不可用，未能完成 Kotlin/Android 真实编译；必须先运行 GitHub Actions 验证，出错则不可安装；本包不代表构建成功或真机验证成功。
+构建通过后检查：UI参数名称 -> SharedPreferences -> Root设置 -> Launcher读取变量 -> 实际渲染映射与 V288.141 一致，新实验参数单独使用 Settings.Global，不冒充 UI 滑块。
 
-五、版本与检查
-versionName 1.9.205.288.141，versionCode 1920529147。此包不包含已通过的Android Gradle/Kotlin编译结果；需GitHub Actions验证。任何探针日志均不代表已完成无损优化。
-
-六、Termux Git
+五、Termux Git
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.141 版本"
+git commit -m "V1.9.205.288.142 版本"
 git push origin main
