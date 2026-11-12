@@ -89,6 +89,11 @@ internal object KyantPageProvenance288148 {
             KyantGeometryTiming288149.record(
                 anchor, host, release, ageNs, current, next, scroll,
                 nativeX, committedX, preX, xy[0])
+            // V288.150: read-only observed-state revision tracking.
+            // This is NOT a hook at the screenPosition assignment site.
+            KyantStateConsumption288150.record(
+                anchor, host, release, ageNs, current, next, scroll,
+                nativeX, committedX, preX, xy[0])
             Log.i(LOG_TAG, "KYANT288148_PAGE host=$host release=$release ageMs=${ageNs / 1000000f} " +
                 "phase=$phase pageCurrent=${current ?: "NA"} pageNext=${next ?: "NA"} " +
                 "pageStart=${record.startPage ?: "NA"} workspaceFound=${workspace != null} " +
