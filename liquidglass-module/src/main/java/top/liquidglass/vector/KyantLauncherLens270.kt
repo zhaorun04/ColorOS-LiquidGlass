@@ -1487,6 +1487,16 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_coordinate_audit_288144", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.145: read-only producer/draw callback correlation. PreDraw serial
+        // is a LOCAL callback ordering ID, never a GPU frame token.
+        val frameCorrelation288145 = if (pipelineMode28819 >= 0) false else try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_frame_correlation_288145", 0) == 1
+        } catch (_: Throwable) { false }
+        if (frameCorrelation288145) android.util.Log.i("KyantFrame288145",
+            "KYANT288145_HOST host=$trace28815Host enabled=true " +
+            "basis=screen_pixels predrawSerial=local_callback_serial " +
+            "presentedFrameVerified=false opticsUnchanged=true")
         if (coordinateAudit288144) android.util.Log.i("KyantCoord288144",
             "KYANT288144_HOST host=$trace28815Host enabled=true " +
             "source=glassScreenPosition_global_matrix_to_screen " +
@@ -4120,7 +4130,7 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
-                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1 || strictSnapshotAb288143 == 1 || coordinateAudit288144) {
+                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1 || strictSnapshotAb288143 == 1 || coordinateAudit288144 || frameCorrelation288145) {
                         val now90 = SystemClock.elapsedRealtimeNanos()
                         val releaseSeq90 = releaseSeq28820.get()
                         predrawSerial28890++
@@ -4390,6 +4400,8 @@ object KyantLauncherLens270 {
         val snapshot143Counters = androidx.compose.runtime.remember(traceHost28890) { LongArray(12) }
         // V288.144 per-host read-only rate limit; no snapshot writes or shader changes.
         val coord144LastNs = androidx.compose.runtime.remember(traceHost28890) { longArrayOf(0L, -1L) }
+        // Read-only report throttle: one observation about every 40 ms per host.
+        val frame145LastNs = androidx.compose.runtime.remember(traceHost28890) { longArrayOf(0L, -1L) }
         // [draw checks, accepted, rejected, last log time], diagnostic-only counters.
         // V288.123: all values are per-Host Compose-remembered, draw-thread-local.
         // [all, moved, stationary, wallpaperChanged, geometryChanged,
@@ -4622,6 +4634,55 @@ object KyantLauncherLens270 {
                 // Read snapshot state INSIDE the draw phase. Position changes now
                 // invalidate the source drawing, not the whole Compose composition.
                 val committedPosition = screenPosition.value
+                // V288.145 observation: compare same draw callback's Compose
+                // state, native screen position and last PreDraw checkpoint.
+                // Neither callback serial nor elapsed time proves a present frame.
+                if (frameCorrelation288145) {
+                    val drawNow145 = SystemClock.elapsedRealtimeNanos()
+                    val seq145 = releaseSeq28820.get()
+                    val age145 = drawNow145 - releaseNs28820.get()
+                    if (seq145 > 0L && age145 in 0L..150_000_000L &&
+                        (frame145LastNs[1] != seq145 || drawNow145 - frame145LastNs[0] >= 40_000_000L)) {
+                        frame145LastNs[0] = drawNow145
+                        frame145LastNs[1] = seq145
+                        val pre145 = predrawSample28890.get()
+                        val native145 = try { currentNativePosition() } catch (_: Throwable) { null }
+                        val valid145 = native145 != null && native145.x.isFinite() && native145.y.isFinite()
+                        val recent145 = pre145 != null && pre145.releaseSeq == seq145 &&
+                            drawNow145 >= pre145.atNs && drawNow145 - pre145.atNs <= 16_000_000L
+                        val visible145 = valid145 && native145 != null &&
+                            diagnosticAnchor288104.isAttachedToWindow && diagnosticAnchor288104.isShown &&
+                            native145.x + diagnosticAnchor288104.width > 0f && native145.x < screenW.toFloat() &&
+                            native145.y + diagnosticAnchor288104.height > 0f && native145.y < screenH.toFloat()
+                        val gap145 = if (valid145 && native145 != null)
+                            kotlin.math.max(kotlin.math.abs(native145.x - committedPosition.x),
+                                kotlin.math.abs(native145.y - committedPosition.y)) else Float.NaN
+                        val preGap145 = if (valid145 && native145 != null && pre145 != null)
+                            kotlin.math.max(kotlin.math.abs(native145.x - pre145.pos.x),
+                                kotlin.math.abs(native145.y - pre145.pos.y)) else Float.NaN
+                        val classification145 = when {
+                            !valid145 -> "NO_NATIVE"
+                            !visible145 -> "OFFSCREEN"
+                            pre145 == null -> "NO_PREDRAW"
+                            pre145.releaseSeq != seq145 -> "RELEASE_MISMATCH"
+                            !recent145 -> "PREDRAW_NOT_RECENT"
+                            preGap145 > 8f -> "PREDRAW_MOVED"
+                            gap145 <= 0.5f -> "STATE_MATCH"
+                            gap145 <= 12f -> "SMALL_STATE_GAP"
+                            else -> "LARGE_STATE_GAP"
+                        }
+                        android.util.Log.i("KyantFrame288145",
+                            "KYANT288145_DRAW host=$traceHost28890 release=$seq145 " +
+                            "ageMs=${age145 / 1_000_000f} predrawSerial=${pre145?.serial} " +
+                            "preRelease=${pre145?.releaseSeq} preAgeMs=${if (pre145 != null) (drawNow145 - pre145.atNs) / 1_000_000f else -1f} " +
+                            "stateX=${committedPosition.x} stateY=${committedPosition.y} " +
+                            "nativeX=${native145?.x} nativeY=${native145?.y} " +
+                            "preX=${pre145?.pos?.x} preY=${pre145?.pos?.y} " +
+                            "stateGapPx=$gap145 preGapPx=$preGap145 " +
+                            "visible=$visible145 classification=$classification145 " +
+                            "appliedCorrection=false frameToken=UNAVAILABLE scope=draw_callback_not_presented")
+                    }
+                }
                 // V288.6 A/B: reuse the legacy native View matrix sampling at the
                 // moment Compose actually draws. The state remains the invalidation
                 // trigger; it is NOT written from this draw callback.
