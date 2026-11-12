@@ -1,33 +1,22 @@
-ColorOS-LiquidGlass V1.9.205.288.145.1｜回弹坐标来源只读审计版
+ColorOS-LiquidGlass V1.9.205.288.146.1｜运行时 VerifyError 安全恢复版
 
-一、版本目标
-基于V288.143源码。新增独立只读诊断开关，默认关闭；不调整Shader、文件夹、Dock、采样选择或UI光学滑块。不宣称已经修复回弹不同步。V288.142/143旧实验保持可用但请关闭后独立测试144。
+一、故障与修复范围
+V288.146 在 Android 启动 com.android.launcher 时，KyantLauncherLens270.run(View) 触发 VerifyError：expected 1 argument registers, method signature has 2 or more。于是 Kyant0 文件夹玻璃初始化失败，旧版玻璃回退，而 Dock 正常。
+本修复版为稳妥恢复文件夹：将 KyantLauncherLens270.kt 恢复为 V288.145.1 已真机运行的完整实现；撤销 V288.146 所有 PreDraw/Compose 阶段诊断注入，避免在 run(View) 内新增参数和调用。其余模块代码沿用 V288.146，与 V288.145.1 比较，除版本号外无新的运行逻辑改动。
+当前版本只保留 V288.145 帧关联探针（默认关闭），暂不提供 KYANT288146_STAGE 诊断。不能仅凭 Gradle 构建判断 DEX 运行时验证通过。
 
-二、源码确认
-原生当前位置由glassScreenPosition(lastBounds)计算：anchor.transformMatrixToGlobal + 根View屏幕/窗口差值，结果是屏幕像素；Workspace自身平移/滚动已随祖先矩阵包含。PreDraw采集相同原生屏幕坐标。screenPosition.value是已经提交的Compose位置状态，可能来自不同绘制时刻。严禁将Workspace scrollX再次叠加到屏幕坐标。
-V288.143的incompatible将运动模式不匹配和离开松手后150ms窗口混为一类。144只读探针在0~150ms分别输出状态、原生、PreDraw、Workspace滚动和独立guard原因；不修改屏幕绘制坐标。
+二、真机恢复（确认 GitHub Actions 编译成功并安装 V288.146.1 后）
+su -c 'settings put global liquidglass_kyant_stage_audit_288146 0; settings put global liquidglass_kyant_frame_correlation_288145 0; settings put global liquidglass_kyant_coordinate_audit_288144 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+若安装后 Vector/LSPosed 仍注入旧模块代码，应重启设备完成模块重新加载。禁止清除 Launcher 数据、重置光学参数或随意调整 Host 开关。
+核验：
+su -c 'dumpsys package top.liquidglass.vector | grep versionName; logcat -d -v threadtime | grep -E "KYANT2884_RUN_ERROR|VerifyError|KYANT288145_HOST|KYANT2885_HOST" | tail -50'
+除看日志还必须目视确认文件夹已经恢复 Kyant0 原版效果，Dock 同样保持正常。
 
-三、测试
-确保GitHub Actions成功构建并安装144后执行：
-su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_coordinate_audit_288144 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
-在桌面至少做5次短距离右滑，松手回弹；然后：
-su -c 'logcat -d -v threadtime | grep KYANT288144 | tail -100'
-测试结束恢复：
-su -c 'settings put global liquidglass_kyant_coordinate_audit_288144 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
-日志的scope=draw_callback_not_presented并不代表实际最终呈现帧。guard=POTENTIAL_CORRECTION_ONLY只是候选类别，不进行位置修正。为降低性能干扰，日志单Host约每40ms最多一次，仅在松手后150ms窗口生成。
+三、参数映射与风险
+只修改 Lens270 还原及 module 版本号。UI→SharedPreferences→Root快照→Launcher 光学参数映射无新增变更。独立 Settings.Global 的 V288.146 诊断开关在本版没有运行时消费；其设置值不会影响 Lens270。保留 V288.145.1 所有光学 Shader 和采样路径。未在当前环境完成 Gradle/Android 真机校验，需以设备实测为准。
 
-四、参数映射与构建限制
-原UI→SharedPreferences→Root快照→Launcher光学渲染映射不改动。新诊断参数仅通过Settings.Global读取，不增加UI滑块，也不写入Root快照。未在本环境完成Gradle/Kotlin完整编译，需先在GitHub Actions编译验证再安装。
-
-五、Git提交
+四、Termux 提交
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.145.1 版本"
+git commit -m "V1.9.205.288.146.1 版本"
 git push origin main
-
-
-V1.9.205.288.145.1：增加只读的 PreDraw→Compose 绘制关联探针。
-开关：settings put global liquidglass_kyant_frame_correlation_288145 1（默认 0）。
-日志：KYANT288145_HOST / KYANT288145_DRAW。
-predrawSerial 是本地 PreDraw 回调序号，不能证明 SurfaceFlinger 同帧显示。
-原生位置与 Compose 状态在绘制回调中比较，不自动修正；建议同时关闭 V288.142/V288.143 实验档。

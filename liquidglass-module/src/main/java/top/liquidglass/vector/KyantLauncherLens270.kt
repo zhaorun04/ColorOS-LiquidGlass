@@ -1493,14 +1493,6 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_frame_correlation_288145", 0) == 1
         } catch (_: Throwable) { false }
-        // V288.146: read-only observation of PreDraw entry/exit and Compose draw entry/exit.
-        val stageAudit288146 = if (pipelineMode28819 >= 0) false else try {
-            Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_stage_audit_288146", 0) == 1
-        } catch (_: Throwable) { false }
-        if (stageAudit288146) android.util.Log.i("KyantStage288146",
-            "KYANT288146_HOST host=$trace28815Host enabled=true readOnly=true " +
-            "clock=elapsedRealtimeNanos frameToken=UNAVAILABLE")
         if (frameCorrelation288145) android.util.Log.i("KyantFrame288145",
             "KYANT288145_HOST host=$trace28815Host enabled=true " +
             "basis=screen_pixels predrawSerial=local_callback_serial " +
@@ -1538,8 +1530,6 @@ object KyantLauncherLens270 {
             "KYANT288139_HOST host=$trace28815Host enabled=true " +
             "scope=ui_callbacks_not_surfaceflinger_presentation")
         val predrawSample28890 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
-        val predrawEntry288146 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
-        val predrawExit288146 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
         val bridgeSample28890 = java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>(null)
         var predrawSerial28890 = 0L
         var previousPredrawX28890 = Float.NaN
@@ -3269,8 +3259,7 @@ object KyantLauncherLens270 {
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
                 reboundTrace28890, trace28815Host, perfProfile288109,
-                sameFrameProbe288139, sameFrameSnapshotAb288142, strictSnapshotAb288143, coordinateAudit288144, frameCorrelation288145, stageAudit288146,
-                predrawEntry288146, predrawExit288146,
+                sameFrameProbe288139, sameFrameSnapshotAb288142, strictSnapshotAb288143, coordinateAudit288144, frameCorrelation288145,
                 predrawSample28890, bridgeSample28890,
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
@@ -3491,9 +3480,6 @@ object KyantLauncherLens270 {
                     anchor.getLocationOnScreen(locationScratch)
                     val xy = locationScratch
                     val actualSample = glassScreenPosition(lastBounds)
-                    if (stageAudit288146) predrawEntry288146.set(ReboundSample28890(
-                        predrawSerial28890 + 1L, SystemClock.elapsedRealtimeNanos(),
-                        actualSample, releaseSeq28820.get()))
                     if (orderPipeline28884 >= 0 && orderTrace28884 && fullOverlayInstalled28877) {
                         val px84 = orderLastX28884
                         val dx84 = if (px84.isFinite()) actualSample.x - px84 else 0f
@@ -4144,7 +4130,7 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
-                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1 || strictSnapshotAb288143 == 1 || coordinateAudit288144 || frameCorrelation288145 || stageAudit288146) {
+                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1 || strictSnapshotAb288143 == 1 || coordinateAudit288144 || frameCorrelation288145) {
                         val now90 = SystemClock.elapsedRealtimeNanos()
                         val releaseSeq90 = releaseSeq28820.get()
                         predrawSerial28890++
@@ -4234,14 +4220,6 @@ object KyantLauncherLens270 {
                     totalPredrawUs += predrawUs
                     if (predrawUs > maxPredrawUs) maxPredrawUs = predrawUs
                 }
-                if (stageAudit288146) {
-                    // Record the matrix again at the end of THIS PreDraw callback.
-                    // This does not force drawing or update Compose snapshot state.
-                    val endPos146 = try { glassScreenPosition(lastBounds) } catch (_: Throwable) { null }
-                    if (endPos146 != null) predrawExit288146.set(ReboundSample28890(
-                        predrawSerial28890, SystemClock.elapsedRealtimeNanos(),
-                        endPos146, releaseSeq28820.get()))
-                }
                 if (perfProfile288109) KyantPerf288109.flushIfDue()
                 true
             }
@@ -4326,9 +4304,7 @@ object KyantLauncherLens270 {
         perfProfile288109: Boolean,
         sameFrameProbe288139: Boolean, sameFrameSnapshotAb288142: Int,
         strictSnapshotAb288143: Int, coordinateAudit288144: Boolean,
-        frameCorrelation288145: Boolean, stageAudit288146: Boolean,
-        predrawEntry288146: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
-        predrawExit288146: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
+        frameCorrelation288145: Boolean,
         predrawSample28890: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
         bridgeSample28890: java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>,
         currentNativePosition: () -> Offset,
@@ -4427,7 +4403,6 @@ object KyantLauncherLens270 {
         val coord144LastNs = androidx.compose.runtime.remember(traceHost28890) { longArrayOf(0L, -1L) }
         // Read-only report throttle: one observation about every 40 ms per host.
         val frame145LastNs = androidx.compose.runtime.remember(traceHost28890) { longArrayOf(0L, -1L) }
-        val stage146LastNs = androidx.compose.runtime.remember(traceHost28890) { longArrayOf(0L, -1L) }
         // [draw checks, accepted, rejected, last log time], diagnostic-only counters.
         // V288.123: all values are per-Host Compose-remembered, draw-thread-local.
         // [all, moved, stationary, wallpaperChanged, geometryChanged,
@@ -4647,10 +4622,6 @@ object KyantLauncherLens270 {
             }
             ComposeCanvas(sourceModifier) {
                 if (perfettoTrace288120) android.os.Trace.beginSection(traceSourceName288120)
-                val stageDrawEntryNs146 = if (stageAudit288146) SystemClock.elapsedRealtimeNanos() else 0L
-                val stageDrawEntryPos146 = if (stageAudit288146)
-                    try { currentNativePosition() } catch (_: Throwable) { null } else null
-                var stageCommitted146: Offset? = null
                 try {
                 val sourceCpuStart288114 = if (multiHostProbe288114)
                     SystemClock.elapsedRealtimeNanos() else 0L
@@ -4664,7 +4635,6 @@ object KyantLauncherLens270 {
                 // Read snapshot state INSIDE the draw phase. Position changes now
                 // invalidate the source drawing, not the whole Compose composition.
                 val committedPosition = screenPosition.value
-                if (stageAudit288146) stageCommitted146 = committedPosition
                 // V288.145 observation: compare same draw callback's Compose
                 // state, native screen position and last PreDraw checkpoint.
                 // Neither callback serial nor elapsed time proves a present frame.
@@ -6097,45 +6067,6 @@ object KyantLauncherLens270 {
                     }
                 }
                 } finally {
-                    if (stageAudit288146) {
-                        val endNs146 = SystemClock.elapsedRealtimeNanos()
-                        val seq146 = releaseSeq28820.get()
-                        val age146 = endNs146 - releaseNs28820.get()
-                        if (seq146 > 0L && age146 in 0L..150_000_000L &&
-                            (stage146LastNs[1] != seq146 || endNs146 - stage146LastNs[0] >= 40_000_000L)) {
-                            stage146LastNs[0] = endNs146
-                            stage146LastNs[1] = seq146
-                            val endNative146 = try { currentNativePosition() } catch (_: Throwable) { null }
-                            val entry146 = predrawEntry288146.get()
-                            val exit146 = predrawExit288146.get()
-                            val state146 = stageCommitted146
-                            val visible146 = endNative146 != null && endNative146.x.isFinite() &&
-                                endNative146.y.isFinite() && diagnosticAnchor288104.isAttachedToWindow &&
-                                diagnosticAnchor288104.isShown &&
-                                endNative146.x + diagnosticAnchor288104.width > 0f &&
-                                endNative146.x < android.content.res.Resources.getSystem().displayMetrics.widthPixels &&
-                                endNative146.y + diagnosticAnchor288104.height > 0f &&
-                                endNative146.y < android.content.res.Resources.getSystem().displayMetrics.heightPixels
-                            if (visible146) {
-                                val preSpan146 = if (entry146 != null && exit146 != null &&
-                                    entry146.serial == exit146.serial && entry146.releaseSeq == seq146 &&
-                                    exit146.releaseSeq == seq146) exit146.pos.x - entry146.pos.x else Float.NaN
-                                val nativeSpan146 = if (stageDrawEntryPos146 != null && endNative146 != null)
-                                    endNative146.x - stageDrawEntryPos146.x else Float.NaN
-                                android.util.Log.i("KyantStage288146",
-                                    "KYANT288146_STAGE host=$traceHost28890 release=$seq146 " +
-                                    "ageMs=${age146 / 1_000_000f} visible=true " +
-                                    "predrawSerial=${exit146?.serial} preEntryX=${entry146?.pos?.x} " +
-                                    "preExitX=${exit146?.pos?.x} preCallbackDeltaX=$preSpan146 " +
-                                    "preEntryAgeMs=${if (entry146 != null) (stageDrawEntryNs146-entry146.atNs)/1_000_000f else -1f} " +
-                                    "preExitAgeMs=${if (exit146 != null) (stageDrawEntryNs146-exit146.atNs)/1_000_000f else -1f} " +
-                                    "drawEntryNativeX=${stageDrawEntryPos146?.x} drawExitNativeX=${endNative146?.x} " +
-                                    "drawCallbackDeltaX=$nativeSpan146 drawDurationMs=${(endNs146-stageDrawEntryNs146)/1_000_000f} " +
-                                    "committedX=${state146?.x} currentReleaseMatch=${exit146?.releaseSeq == seq146} " +
-                                    "frameToken=UNAVAILABLE scope=callbacks_not_presented")
-                            }
-                        }
-                    }
                     if (perfettoTrace288120) android.os.Trace.endSection()
                 }
             }
