@@ -4680,6 +4680,13 @@ object KyantLauncherLens270 {
                                 pre145?.pos, committedPosition, native145,
                                 if (pre145 != null) drawNow145 - pre145.atNs else -1L)
                         }
+                        // V288.148: separate, read-only page/coordinate provenance.
+                        // No new captures or arguments in run(View); never change optics.
+                        if (valid145 && native145 != null) {
+                            KyantPageProvenance288148.record(
+                                diagnosticAnchor288104, traceHost28890, seq145, age145,
+                                committedPosition.x, pre145?.pos?.x, native145.x, screenW)
+                        }
                         android.util.Log.i("KyantFrame288145",
                             "KYANT288145_DRAW host=$traceHost28890 release=$seq145 " +
                             "ageMs=${age145 / 1_000_000f} predrawSerial=${pre145?.serial} " +
