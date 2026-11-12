@@ -1,24 +1,25 @@
-ColorOS-LiquidGlass V1.9.205.288.148｜Workspace 页面与坐标来源只读诊断
+ColorOS-LiquidGlass V1.9.205.288.149｜Host 坐标几何与 Workspace 回弹时序只读诊断
 
-稳定基线：V288.147（Kyant0 文件夹与 Dock 真机渲染正常，阶段诊断日志有效）。
+基线：V288.148（真机测试已确认 Kyant0 文件夹及 Dock 恢复，未见 VerifyError）。
+本版只新增 KyantGeometryTiming288149.kt，并从已有独立 KyantPageProvenance288148.kt 读取现有结果；KyantLauncherLens270.kt 与 V288.148 逐字节相同。保留原版 Kyant 透镜、Shader、Dock、UI、SharedPreferences、Root 快照和 Launcher 光学参数，不做位置补偿。
 
-本版仅新增独立 KyantPageProvenance288148.kt，并在 V288.145 绘制诊断的已有入口调用。没有修改 Lens270.run(View)、Host 生命周期、Shader、光学采样坐标、UI 或原有配置映射。
+观测：hostAnchorOffsetX 为 nativeX - anchorScreenX（当前真机约 51px，来源尚未证明）。同时记录 anchorPaddingLeft、anchorX、anchorLeft、anchorScaleX 和 translationX 作为可比几何值。每次 release 的相邻样本记录 scrollDx、nativeDx、committedDx、anchorDx、nativePlusScrollDx、composePlusScrollDx 与 stateGapX。全部是 CPU 绘制阶段日志，不代表 SurfaceFlinger 已呈现的帧。NO_PAGE_TARGET_DIFF_OBSERVED 不等于保证从未翻页。
 
-诊断需要同时开启帧关联和页面来源开关（默认为关闭）：
-su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_coordinate_audit_288144 0; settings put global liquidglass_kyant_stage_audit_288146 0; settings put global liquidglass_kyant_stage_audit_288147 0; settings put global liquidglass_kyant_frame_correlation_288145 1; settings put global liquidglass_kyant_page_provenance_288148 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+安装后必须先确认原版 Kyant0 文件夹和 Dock 正常；若出现 VerifyError，停用并回退 V288.148。
 
-真机分组：第一轮仅做 5~7 次短距离右滑松手不翻页；采集后清空日志；第二轮有意翻页一次。日志：
-su -c 'logcat -d -v threadtime | grep -E "KYANT288148_PAGE|KYANT288145_DRAW|VerifyError|KYANT2884_RUN_ERROR" | tail -120'
+开启诊断（避免旧实验影响）：
+su -c '''settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; settings put global liquidglass_kyant_coordinate_audit_288144 0; settings put global liquidglass_kyant_stage_audit_288146 0; settings put global liquidglass_kyant_stage_audit_288147 0; settings put global liquidglass_kyant_frame_correlation_288145 1; settings put global liquidglass_kyant_page_provenance_288148 1; settings put global liquidglass_kyant_geometry_timing_288149 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'''
 
-分类仅基于可观察事实：PAGE_CHANGE_OBSERVED=观测期当前页编号改变；PAGE_TARGET_DIFF=当前页与目标页不同；NO_PAGE_CHANGE_OBSERVED=没有观察到页面变化（不等同于证明未翻页）；PAGE_INDEX_UNKNOWN/WORKSPACE_UNKNOWN=缺失可靠来源。屏幕外文件夹过滤；仅记录 release 后 0~150ms，最多约 40ms 一次。
+第一轮只做同页右滑回弹，第二轮可单独实际翻页。采集：
+su -c '''logcat -d -v threadtime | grep -E "KYANT288149_GEOMETRY|KYANT288148_PAGE|VerifyError|KYANT2884_RUN_ERROR" | tail -120'''
 
-如 Kyant0 消失或 VerifyError，立即回退 V288.147，勿清空 Launcher 数据。诊断结束：
-su -c 'settings put global liquidglass_kyant_page_provenance_288148 0; settings put global liquidglass_kyant_frame_correlation_288145 0'
+关闭：
+su -c '''settings put global liquidglass_kyant_geometry_timing_288149 0; settings put global liquidglass_kyant_page_provenance_288148 0; settings put global liquidglass_kyant_frame_correlation_288145 0'''
 
-风险说明：未在当前环境完成 Gradle/D8/Android 真机验证。日志仅代表 CPU 回调，不代表 SurfaceFlinger 最终呈现帧。页面编号由 OEM Workspace 的 getCurrentPage/getNextPage 反射获取，无法获取时记录 NA，不臆造。
+本地无 Gradle 9.7.1 Android SDK 构建环境；源码 ZIP 校验不能替代 GitHub Actions 和 Android 真机 DEX 校验。
 
 Termux Git：
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.148 版本"
+git commit -m "V1.9.205.288.149 版本"
 git push origin main

@@ -85,6 +85,10 @@ internal object KyantPageProvenance288148 {
             workspace?.getLocationOnScreen(wsX)
             val gap = nativeX - committedX
             val preGap = if (preX == null) Float.NaN else nativeX - preX
+            // V288.149 read-only geometric/time-source audit; independent switch.
+            KyantGeometryTiming288149.record(
+                anchor, host, release, ageNs, current, next, scroll,
+                nativeX, committedX, preX, xy[0])
             Log.i(LOG_TAG, "KYANT288148_PAGE host=$host release=$release ageMs=${ageNs / 1000000f} " +
                 "phase=$phase pageCurrent=${current ?: "NA"} pageNext=${next ?: "NA"} " +
                 "pageStart=${record.startPage ?: "NA"} workspaceFound=${workspace != null} " +
