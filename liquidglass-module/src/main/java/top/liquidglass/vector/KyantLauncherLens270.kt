@@ -4840,11 +4840,22 @@ object KyantLauncherLens270 {
                             "guard=$guard144 appliedCorrection=false scope=draw_callback_not_presented")
                     }
                 }
-                val drawPosition = if (strictSnapshotAb288143 == 1) {
+                val drawPositionBefore152 = if (strictSnapshotAb288143 == 1) {
                     if (corrected143 && candidate143 != null) candidate143
                     else originalDrawPosition142
                 } else if (accepted142 && candidate142 != null) candidate142
                 else originalDrawPosition142
+                // V288.152: separate opt-in draw-consumption experiment. The
+                // current native matrix is sampled only for a visible, same-page
+                // rebound with a bounded 0.5..16px gap. No Compose State write,
+                // no shader/bridge mutation, and no changes to run(View).
+                val drawPosition = if (legacySyncAbMode == 0 && motionAbMode == 0 &&
+                    sourceMatrixAb28866 == 0 && strictSnapshotAb288143 == 0 &&
+                    sameFrameSnapshotAb288142 == 0) {
+                    KyantReboundConsume288152.choose(
+                        diagnosticAnchor288104, drawPositionBefore152,
+                        currentNativePosition, releaseNs28820.get())
+                } else drawPositionBefore152
                 if (strictSnapshotAb288143 == 1) {
                     val c143 = snapshot143Counters
                     c143[0]++

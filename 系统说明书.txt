@@ -32,3 +32,9 @@ cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
 git commit -m "V1.9.205.288.151 版本"
 git push origin main
+
+
+V1.9.205.288.152｜Compose 绘制消费侧位置同步 A/B 候选（默认关闭）
+本版基于 V288.151。仅在松手后 0～150ms、Workspace 当前页等于目标页、Host 在屏幕内、横向原生与原始采样差距 0.5～16px 且纵向偏差 <=1px 时，候选路径选择实时原生坐标。未满足条件时完全使用原有采样原点；不写 Compose State，不改 Shader，不改 Dock，也不处理实际翻页。
+开关：settings global liquidglass_kyant_rebound_consume_ab_288152，默认 0；辅助脚本 lg152_consume_ab.sh 支持 baseline/candidate/restore/status，恢复前请保持备份文件。先确认 Kyant0 文件夹与 Dock 正常，再分别测试不翻页右滑回弹；检查 KYANT288152_CONSUME 与既有 KYANT288150_CONSUME 日志，比较视觉变化。此实验无法证明最终 SurfaceFlinger 呈现帧，必须经过真机验证。若出现效果异常，立即运行 sh lg152_consume_ab.sh restore，必要时回退 V288.151。
+独立检查：UI、SharedPreferences、Root 快照、Launcher 参数原路径未修改，新开关只在 Launcher 绘制读取；不修改现有 UI 参数映射。未在本环境完成 Gradle 构建和 Android DEX 运行时校验。
