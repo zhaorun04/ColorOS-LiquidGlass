@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# V1.9.205.288.142: full-glass rebound diagnostics (no optical-host isolation).
+# V1.9.205.288.143: full-glass rebound diagnostics (no optical-host isolation).
 # sh lg_test.sh single a1 | single a2 | multi m1 | pack | restore
 set -u
 BASE=/sdcard/Download/LG141_TestResults
@@ -60,7 +60,7 @@ done
 su -c 'am force-stop com.android.launcher; input keyevent KEYCODE_HOME' || exit 5
 sleep 3
 VERSION="$(su -c 'dumpsys package top.liquidglass.vector | grep versionName' 2>/dev/null)"
-case "$VERSION" in *versionName=1.9.205.288.142*) ;; *) echo "Wrong module version: $VERSION"; exit 6 ;; esac
+case "$VERSION" in *versionName=1.9.205.288.143*) ;; *) echo "Wrong module version: $VERSION"; exit 6 ;; esac
 OUT="$BASE/${MODE}_${LABEL}_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$OUT" || exit 6
 {

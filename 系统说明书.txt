@@ -1,30 +1,30 @@
-ColorOS-LiquidGlass V1.9.205.288.142｜同帧采样原点 A/B 实验版
+ColorOS-LiquidGlass V1.9.205.288.143｜严格坐标来源 A/B 实验版
 
 一、版本定位
-基于完整 V288.141 源码；保留原版二维光学、图标高光、壁纸采样、文件夹与 Dock 几何、可见性 Gate 及全部 UI 参数。仅新增一个默认关闭的源码级 A/B 实验开关，不承诺已解决屏幕呈现错位。本包为待构建验证源码包，非已编译 APK。
+基于 V288.142 完整源码；默认不改变原版光学、Shader、壁纸采样、文件夹/Dock 材质以及 UI 设置映射。引入独立且默认关闭的诊断实验开关。尚未完成 Android 编译或真机验证，不可宣称回弹问题已修复。
 
-二、源码改动
-KyantLauncherLens270.kt：新增 Settings.Global 键 liquidglass_kyant_same_frame_snapshot_ab_288142，Host 建立时读取，默认0。
-0=完整保留 V288.141 原有绘制行为；1=仅在 Compose 来源绘制回调内、motionAbMode=0 且 sourceMatrixAb28866=0、最近35ms内有原生 PreDraw 观测时，尝试读取当前原生位置；偏差<=24px 且为有限数才作为本次 bitmap SOURCE 采样原点，否则安全回退原路径。禁止在 Compose draw 中写 samplePosition；禁用 288125 的位置源记录复用捷径。日志 KYANT288142_HOST / KYANT288142_SOURCE 区分接受和回退次数。
-注意：这种“同绘制回调采样”是实验机制，不等于已经建立 SurfaceFlinger 完整帧令牌级原子提交关系，严禁宣称最终呈现同步已修复。默认关闭，须手动开启。
+二、版本特性
+新增 Settings.Global：liquidglass_kyant_strict_snapshot_ab_288143；0=关闭，1=严格实验。V288.142 开关保留，建议测试143前设置142=0，便于隔离变量。143=1 时优先使用143路径，142接受统计停用。
+仅当 motionAbMode=0、sourceMatrixAb28866=0、Host可见且位于屏幕、松手后0～150ms、PreDraw年龄0～16ms、PreDraw所属release编号匹配、候选与PreDraw差<=8px、候选与原坐标差>0.5px且<=12px时采用新位置。否则使用V288.141原位置路径。不修改Compose状态/Shader，不做固定像素补偿。
+新增 KYANT288143_HOST / KYANT288143_SOURCE：分离 zero/corrected/rejected/noPredraw/stale/coordMismatch/offscreen/incompatible 计数；日志并不证明SurfaceFlinger已呈现。该实验只验证严格的回调时序和坐标一致性，并非真正的 SurfaceFlinger 同帧 token 同步。
+重要限制：诊断Host可见性与屏幕边界使用屏幕像素和关联Anchor范围的保守近似，不能代替实际SurfaceFlinger裁剪。建议配合肉眼视频与V7 Perfetto对比。
 
-三、Android Studio 或 GitHub Actions 编译成功后测试（两轮 A/B 分别重启 Launcher）
+三、终端操作（确认APK编译安装成功后）
 cd ~/ColorOS-LiquidGlass-V1.0-Source
-# A档：原样基线
-su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
-# 观察 5～7 次短距离右滑回弹，记录视频及日志
-# B档：仅启用新采样原点试验
-su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
-su -c 'logcat -d -v threadtime | grep KYANT288142 | tail -40'
-# 恢复正常稳定档（务必执行）
-su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+# 先恢复两组开关做基线观察
+su -c 'settings put global liquidglass_kyant_same_frame_snapshot_ab_288142 0; settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+# 仅开启143实验
+su -c 'settings put global liquidglass_kyant_strict_snapshot_ab_288143 1; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
+# 进行5~7次短右滑回弹之后查看
+su -c 'logcat -d -v threadtime | grep KYANT288143 | tail -50'
+# 实验结束恢复
+su -c 'settings put global liquidglass_kyant_strict_snapshot_ab_288143 0; am force-stop com.android.launcher; input keyevent KEYCODE_HOME'
 
-四、发布限制与构建验证
-当前环境缺少 Gradle 9.7.1，且网络不可用，未能完成 Kotlin/Android 真实编译；必须先运行 GitHub Actions 验证，出错则不可安装；本包不代表构建成功或真机验证成功。
-构建通过后检查：UI参数名称 -> SharedPreferences -> Root设置 -> Launcher读取变量 -> 实际渲染映射与 V288.141 一致，新实验参数单独使用 Settings.Global，不冒充 UI 滑块。
+四、构建要求
+本环境未完成 Android Gradle/Kotlin 编译，请通过GitHub Actions的 assembleDebug 检查之后再安装。UI -> SharedPreferences -> Root快照 -> Launcher变量 -> 渲染映射沿用142路径，新功能只由 Settings.Global 驱动，未新增UI滑块或声称Root快照同步。不要在构建未通过时覆盖稳定APK。
 
 五、Termux Git
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.142 版本"
+git commit -m "V1.9.205.288.143 版本"
 git push origin main

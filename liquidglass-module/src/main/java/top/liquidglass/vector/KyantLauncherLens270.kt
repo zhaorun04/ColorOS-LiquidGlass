@@ -1475,6 +1475,16 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_same_frame_snapshot_ab_288142", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
+        // V288.143: strict-coordinate A/B (independent of the V288.142 switch).
+        // Never claim equivalent SurfaceFlinger frame tokens from PreDraw timing.
+        val strictSnapshotAb288143 = if (pipelineMode28819 >= 0) 0 else try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_strict_snapshot_ab_288143", 0).coerceIn(0, 1)
+        } catch (_: Throwable) { 0 }
+        android.util.Log.i("KyantFrame288143",
+            "KYANT288143_HOST host=$trace28815Host mode=$strictSnapshotAb288143 " +
+            "legacy142=$sameFrameSnapshotAb288142 sourceMatrix=$sourceMatrixAb28866 " +
+            "motion=$motionAbMode scope=predraw_correlated_not_presented")
         android.util.Log.i("KyantFrame288142",
             "KYANT288142_HOST host=$trace28815Host mode=$sameFrameSnapshotAb288142 " +
             "legacySync=$legacySyncAbMode sourceMatrix=$sourceMatrixAb28866 " +
@@ -3229,7 +3239,7 @@ object KyantLauncherLens270 {
                 pipelineMode28819, frameSync28822,
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
                 reboundTrace28890, trace28815Host, perfProfile288109,
-                sameFrameProbe288139, sameFrameSnapshotAb288142,
+                sameFrameProbe288139, sameFrameSnapshotAb288142, strictSnapshotAb288143,
                 predrawSample28890, bridgeSample28890,
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
@@ -4100,7 +4110,7 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
-                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1) {
+                    if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1 || strictSnapshotAb288143 == 1) {
                         val now90 = SystemClock.elapsedRealtimeNanos()
                         val releaseSeq90 = releaseSeq28820.get()
                         predrawSerial28890++
@@ -4273,6 +4283,7 @@ object KyantLauncherLens270 {
         reboundTrace28890: Boolean, traceHost28890: Int,
         perfProfile288109: Boolean,
         sameFrameProbe288139: Boolean, sameFrameSnapshotAb288142: Int,
+        strictSnapshotAb288143: Int,
         predrawSample28890: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
         bridgeSample28890: java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>,
         currentNativePosition: () -> Offset,
@@ -4336,6 +4347,7 @@ object KyantLauncherLens270 {
         // composition. Only the simple screenPosition-driven hardware GPU path
         // is eligible; all special motion/native sampling paths fail open.
         val sourceReuseGate125 = sourceRecordReuse288125 && sameFrameSnapshotAb288142 == 0 &&
+            strictSnapshotAb288143 == 0 &&
             gpuReference288110 && bridgeBitmap != null &&
             motionAbMode == 0 && legacySyncAbMode != 1 && sourceMatrixAb28866 == 0 &&
             nodePipeline28881 < 0 && pipelineMode28819 < 0 &&
@@ -4363,6 +4375,9 @@ object KyantLauncherLens270 {
         val frozenSource = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicReference<Offset?>(null) }
         val sourceDrawCount = androidx.compose.runtime.remember { java.util.concurrent.atomic.AtomicLong(0L) }
         val snapshot142Counters = androidx.compose.runtime.remember(traceHost28890) { LongArray(4) }
+        // [checks, zero, corrected, rejected, noPredraw, stale, coordMismatch,
+        //  offscreen, incompatible, maxAcceptedMilliPx, lastLogNs, releaseWindow]
+        val snapshot143Counters = androidx.compose.runtime.remember(traceHost28890) { LongArray(12) }
         // [draw checks, accepted, rejected, last log time], diagnostic-only counters.
         // V288.123: all values are per-Host Compose-remembered, draw-thread-local.
         // [all, moved, stationary, wallpaperChanged, geometryChanged,
@@ -4620,7 +4635,7 @@ object KyantLauncherLens270 {
                 // draw callback, but ONLY when the same-coordinate native PreDraw
                 // recently ran. Reject stale/large/invalid jumps and incompatible
                 // freeze or alternate matrix modes. Never mutate screenPosition.
-                val candidate142 = if (sameFrameSnapshotAb288142 == 1 &&
+                val candidate142 = if (sameFrameSnapshotAb288142 == 1 && strictSnapshotAb288143 == 0 &&
                     motionAbMode == 0 && sourceMatrixAb28866 == 0) {
                     val predraw142 = predrawSample28890.get()
                     val now142 = SystemClock.elapsedRealtimeNanos()
@@ -4636,9 +4651,84 @@ object KyantLauncherLens270 {
                         kotlin.math.abs(candidate142.y - originalDrawPosition142.y))
                     else Float.NaN
                 val accepted142 = delta142.isFinite() && delta142 <= 24f
-                val drawPosition = if (accepted142 && candidate142 != null)
-                    candidate142 else originalDrawPosition142
-                if (sameFrameSnapshotAb288142 == 1) {
+                // V288.143 is a separate strict experiment. It supersedes legacy
+                // 142 only while explicitly enabled; OFF retains exact 142 behavior.
+                // All three positions are currentNativePosition/committed Offset in
+                // screen pixel space; a PreDraw timestamp is NOT a frame token.
+                val now143 = if (strictSnapshotAb288143 == 1)
+                    SystemClock.elapsedRealtimeNanos() else 0L
+                val pre143 = if (strictSnapshotAb288143 == 1)
+                    predrawSample28890.get() else null
+                val preAge143 = if (pre143 != null) now143 - pre143.atNs else Long.MAX_VALUE
+                val release143 = releaseSeq28820.get()
+                val releaseAge143 = now143 - releaseNs28820.get()
+                val inRebound143 = release143 > 0L &&
+                    releaseAge143 in 0L..150_000_000L
+                val compatible143 = motionAbMode == 0 && sourceMatrixAb28866 == 0
+                val visible143 = diagnosticAnchor288104.isAttachedToWindow && diagnosticAnchor288104.isShown &&
+                    diagnosticAnchor288104.visibility == View.VISIBLE &&
+                    diagnosticAnchor288104.width > 0 && diagnosticAnchor288104.height > 0
+                // Bounds check is conservative; skip objects completely outside screen.
+                val candidate143 = if (strictSnapshotAb288143 == 1 && compatible143 &&
+                    visible143 && inRebound143 && pre143 != null &&
+                    preAge143 in 0L..16_000_000L &&
+                    pre143.releaseSeq == release143) {
+                    try { currentNativePosition() } catch (_: Throwable) { null }
+                } else null
+                val finite143 = candidate143 != null && candidate143.x.isFinite() &&
+                    candidate143.y.isFinite() && originalDrawPosition142.x.isFinite() &&
+                    originalDrawPosition142.y.isFinite()
+                val delta143 = if (finite143 && candidate143 != null)
+                    kotlin.math.max(kotlin.math.abs(candidate143.x - originalDrawPosition142.x),
+                        kotlin.math.abs(candidate143.y - originalDrawPosition142.y)) else Float.NaN
+                val preDelta143 = if (finite143 && candidate143 != null && pre143 != null)
+                    kotlin.math.max(kotlin.math.abs(candidate143.x - pre143.pos.x),
+                        kotlin.math.abs(candidate143.y - pre143.pos.y)) else Float.NaN
+                val onScreen143 = candidate143 != null &&
+                    candidate143.x + diagnosticAnchor288104.width > 0f && candidate143.x < screenW.toFloat() &&
+                    candidate143.y + diagnosticAnchor288104.height > 0f && candidate143.y < screenH.toFloat()
+                // Reject likely mismatched coordinate bases or fast-moving stale samples.
+                // Keep correction bounded; zero-delta acceptances are NOT corrections.
+                val corrected143 = finite143 && onScreen143 &&
+                    delta143 > 0.5f && delta143 <= 12f &&
+                    preDelta143.isFinite() && preDelta143 <= 8f
+                val drawPosition = if (strictSnapshotAb288143 == 1) {
+                    if (corrected143 && candidate143 != null) candidate143
+                    else originalDrawPosition142
+                } else if (accepted142 && candidate142 != null) candidate142
+                else originalDrawPosition142
+                if (strictSnapshotAb288143 == 1) {
+                    val c143 = snapshot143Counters
+                    c143[0]++
+                    when {
+                        !compatible143 || !inRebound143 -> c143[8]++
+                        !visible143 || (finite143 && !onScreen143) -> c143[7]++
+                        pre143 == null -> c143[4]++
+                        preAge143 !in 0L..16_000_000L || pre143.releaseSeq != release143 -> c143[5]++
+                        !finite143 || !preDelta143.isFinite() || preDelta143 > 8f -> c143[6]++
+                        delta143 <= 0.5f -> c143[1]++
+                        corrected143 -> {
+                            c143[2]++
+                            c143[9] = maxOf(c143[9], (delta143 * 1000f).toLong())
+                        }
+                        else -> c143[3]++
+                    }
+                    if (now143 - c143[10] >= 1_000_000_000L) {
+                        c143[10] = now143
+                        android.util.Log.i("KyantFrame288143",
+                            "KYANT288143_SOURCE host=$traceHost28890 release=$release143 " +
+                            "ageMs=${releaseAge143 / 1_000_000f} checks=${c143[0]} " +
+                            "zero=${c143[1]} corrected=${c143[2]} rejected=${c143[3]} " +
+                            "noPredraw=${c143[4]} stale=${c143[5]} " +
+                            "coordMismatch=${c143[6]} offscreen=${c143[7]} " +
+                            "incompatible=${c143[8]} maxCorrectedPx=${c143[9] / 1000f} " +
+                            "lastDeltaPx=$delta143 lastPreDeltaPx=$preDelta143 " +
+                            "preAgeMs=${if (preAge143 == Long.MAX_VALUE) -1f else preAge143 / 1_000_000f} " +
+                            "scope=predraw_correlated_not_presented")
+                        for (i143 in 0..9) c143[i143] = 0L
+                    }
+                }
+                if (sameFrameSnapshotAb288142 == 1 && strictSnapshotAb288143 == 0) {
                     snapshot142Counters[0]++
                     if (accepted142) snapshot142Counters[1]++ else snapshot142Counters[2]++
                     val now142 = SystemClock.elapsedRealtimeNanos()
