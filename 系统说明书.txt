@@ -1,4 +1,4 @@
-ColorOS-LiquidGlass V1.9.205.288.145｜回弹坐标来源只读审计版
+ColorOS-LiquidGlass V1.9.205.288.145.1｜回弹坐标来源只读审计版
 
 一、版本目标
 基于V288.143源码。新增独立只读诊断开关，默认关闭；不调整Shader、文件夹、Dock、采样选择或UI光学滑块。不宣称已经修复回弹不同步。V288.142/143旧实验保持可用但请关闭后独立测试144。
@@ -22,11 +22,11 @@ su -c 'settings put global liquidglass_kyant_coordinate_audit_288144 0; am force
 五、Git提交
 cd ~/ColorOS-LiquidGlass-V1.0-Source
 git add .
-git commit -m "V1.9.205.288.145 版本"
+git commit -m "V1.9.205.288.145.1 版本"
 git push origin main
 
 
-V1.9.205.288.145：增加只读的 PreDraw→Compose 绘制关联探针。
+V1.9.205.288.145.1：增加只读的 PreDraw→Compose 绘制关联探针。
 开关：settings put global liquidglass_kyant_frame_correlation_288145 1（默认 0）。
 日志：KYANT288145_HOST / KYANT288145_DRAW。
 predrawSerial 是本地 PreDraw 回调序号，不能证明 SurfaceFlinger 同帧显示。
