@@ -1,41 +1,31 @@
-ColorOS-LiquidGlass V1.9.205.288.140｜回弹 UI 帧节奏与采样位置关联诊断版
+ColorOS-LiquidGlass V1.9.205.288.141｜回弹可见性门控与帧稳定性诊断版
 
-一、目标及结论边界
-V139 表明 Source 绘制位置等于 Compose 已提交位置，但 Source 与原生 View 回调读取的位置存在回弹期阶段差。V140 只新增有界 Choreographer UI 帧节奏观察，并请求采集 SurfaceFlinger FrameTimeline；不改动 Shader、二维折射、模糊、高光、Bitmap 和图层裁剪。诊断默认关闭。
-注意：Choreographer callback ordinal 不是 SurfaceFlinger FrameTimeline token；UI 帧时间和最终屏幕显示时间不能直接等同。FrameTimeline 数据源即使请求成功，也必须检查 trace 中是否真正包含所需轨道才能作呈现级判断。
+一、目标与边界
+调查 V288.140 多文件夹 release=81 某 Host 的原生位置持续右移，但 Compose 采样停在 1206px 的现象。此前最多 316px 的状态差不能直接认定为屏幕错位，可能是完全离屏后跳过提交。V288.141 不改变光学、几何、位移、可见性和图层绘制，只记录原有条件的判定结果。
 
-二、代码变更
-1. Settings.Global 新增开关 liquidglass_kyant_ui_frame_probe_288140，默认 0。由 Launcher Hook 安装时读取一次，非每帧读取 Settings。
-2. 松手后 650ms 内最多 55 次 Choreographer.FrameCallback（仅实验开启时调度）。日志 KYANT288140_UI_FRAME 包括 release、ordinal、callbackNs、vsyncNs、callbackGapMs、vsyncGapMs、releaseAgeMs；首帧、约每 6 帧及 callbackGapMs>=18ms 时输出，降低诊断扰动。
-3. 继承 V139 的 KYANT288139_RELEASE/PREDRAW/SOURCE；后两者额外携带 uiFrameRelease、uiFrameOrdinal、uiFrameAgeMs，从而粗略关联 UI 回调节奏与 Source/PreDraw 阶段。
-4. versionName=1.9.205.288.140，versionCode=1920529146。
+二、新增代码
+KyantLauncherLens270.kt 新增 Settings.Global: liquidglass_kyant_visibility_gate_probe_288141，默认0，Host建立时读取。针对被选中的 Host 与手指松开后650ms，每次release至多记录14条 KYANT288141_GATE，间隔45ms或门控状态变化；包括 visible、screen、rect、intersection、moved、boundsChanged、updatePosition、blocked、native/committed位置、gapPx、UI回调序号。KYANT288141_HOST 表示建立探针。所有坐标是 PreDraw 回调中的状态，不是SurfaceFlinger实际呈现帧。
+注意：intersection是依照现有 xy + b 计算的屏幕矩形，不能独立证明视觉裁剪或最终显示。只有排除几何和坐标系问题后，才考虑更改门控条件。
 
-三、测试脚本
-只备份及修改以下三个开关，绝不修改 GPU 参考帧、折射强度、模糊、高光等参数：
-- liquidglass_kyant_rebound_host_ab_288138 => 测试时 0（完整玻璃）
-- liquidglass_kyant_same_frame_probe_288139 => 测试时 1（PreDraw/Source 位置观测）
-- liquidglass_kyant_ui_frame_probe_288140 => 测试时 1（UI 节奏观测）
-首次测试前备份原值到 /sdcard/Download/LG140_TestResults/original_settings.tsv；restore 恢复原值。若之前手动使用 V138 的 B 档且备份为 1，restore 会忠实恢复到 B 档；日常完整玻璃模式须将 liquidglass_kyant_rebound_host_ab_288138 显式设置为 0。
+三、测试
+安装编译成功的 1.9.205.288.141，确认 Vector com.android.launcher 作用域与玻璃完整显示。
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+sh lg_test.sh single a1
+sh lg_test.sh single a2
+sh lg_test.sh multi m1
+sh lg_test.sh pack
+输出 /sdcard/Download/LG141_TestResults.tar.gz。
+测试时反复向右短距离滑动、不翻页、松手回弹；多文件夹场景尤其观察右侧靠近屏幕边缘的容器。
+可用 sh lg_test.sh restore 恢复测试之前的设置；如果备份的 288138 值本来是1，restore会恢复禁用Host的诊断档。日常完整玻璃要明确设置 288138=0。
 
-四、Perfetto
-优先运行包含 linux.ftrace + android.surfaceflinger.frametimeline + linux.process_stats 的 15s 文本配置。若设备不支持文本配置或数据源，回退原有 gfx/view/sched/freq 15s 快速采集。每轮 trace_mode.txt 与 perfetto_status.txt 标明采集方式；成功请求不等于 FrameTimeline 内容已验证。gfxinfo 仅近似与 Perfetto 同窗，不能假定严格对齐。
+四、判断
+visible=false、intersection=0且blocked=true，支持完全离屏门控导致状态冻结；若intersection>0但visible=false，需要进一步检查位置/几何基准；若visible=true且updatePosition=false，检查 moved、boundsChanged、firstPositionSettled；如果UI帧间隔稳定但实际呈现卡顿，仍需完整FrameTimeline解码，不能凭UI回调序号推断最终帧。
 
-五、真机测试（安装编译 APK 后）
-确保 Vector 对 com.android.launcher 的作用域已开启，完整玻璃正常显示。手指短距离向右滑动，不翻页，然后松手回弹；A1/A2 尽量保持页面/亮度/频率/手势相同。
- cd ~/ColorOS-LiquidGlass-V1.0-Source
- sh lg_test.sh single a1
- sh lg_test.sh single a2
- sh lg_test.sh multi m1
- sh lg_test.sh pack
-结果：/sdcard/Download/LG140_TestResults.tar.gz
-恢复测试前设置：sh lg_test.sh restore
-若仅需确保完整玻璃：su -c 'settings put global liquidglass_kyant_rebound_host_ab_288138 0; settings put global liquidglass_kyant_same_frame_probe_288139 0; settings put global liquidglass_kyant_ui_frame_probe_288140 0; am force-stop com.android.launcher'
+五、版本与检查
+versionName 1.9.205.288.141，versionCode 1920529147。此包不包含已通过的Android Gradle/Kotlin编译结果；需GitHub Actions验证。任何探针日志均不代表已完成无损优化。
 
-六、质量与验证
-本 ZIP 必须有单一版本顶层目录；包含系统说明书.txt；Shell 语法和 ZIP CRC 需要核验。完整 Gradle/Kotlin 编译、LSPosed 注入、FrameTimeline 有效性及视觉贴合仍需 GitHub Actions/真机实测确认。不能只用回调时刻的像素差推断呈现级纹理错位。
-
-七、Git
- cd ~/ColorOS-LiquidGlass-V1.0-Source
- git add .
- git commit -m "V1.9.205.288.140 版本"
- git push origin main
+六、Termux Git
+cd ~/ColorOS-LiquidGlass-V1.0-Source
+git add .
+git commit -m "V1.9.205.288.141 版本"
+git push origin main

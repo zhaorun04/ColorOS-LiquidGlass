@@ -1468,6 +1468,22 @@ object KyantLauncherLens270 {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_same_frame_probe_288139", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.141: observation only. Capture actual viewport intersection and
+        // the precise existing visibility gate, with bounded release-scoped logs.
+        // No position commit, host visibility, shape, or rendering behavior changes.
+        val visibilityProbe288141 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_visibility_gate_probe_288141", 0) == 1
+        } catch (_: Throwable) { false }
+        var visibilityProbeRelease288141 = -1L
+        var visibilityProbeCount288141 = 0
+        var visibilityProbeLastLogNs288141 = 0L
+        var visibilityProbeLastVisible288141: Boolean? = null
+        var visibilityProbeLastBlocked288141 = false
+        if (visibilityProbe288141) android.util.Log.i("KyantGate288141",
+            "KYANT288141_HOST host=$trace28815Host display=${displayWidth}x${displayHeight} " +
+            "bounds=${initialBounds.width()}x${initialBounds.height()} " +
+            "scope=ui_predraw_visibility_not_presented_frame")
         val predrawProbeCounts288139 = LongArray(4) // release, number, last time, last predraw time
         if (sameFrameProbe288139) android.util.Log.i("KyantSync288139",
             "KYANT288139_HOST host=$trace28815Host enabled=true " +
@@ -3786,6 +3802,62 @@ object KyantLauncherLens270 {
                     // Commit every visible transform change; offscreen transitions are reconciled on return.
                     val updatePosition = (moved || !firstPositionSettled || boundsChangedNow) && visible
                     if (moved && !updatePosition) skippedPositionUpdates++
+                    // V288.141: read-only visibility-gate provenance. Use exactly
+                    // the same xy/b/display values as the real commit decision.
+                    // Do not use anchor.isShown/frame visibility as substitutes
+                    // for the existing screen intersection gate.
+                    if (visibilityProbe288141) {
+                        val gateNow141 = SystemClock.elapsedRealtimeNanos()
+                        val gateRelease141 = releaseSeq28820.get()
+                        val gateAge141 = gateNow141 - releaseNs28820.get()
+                        if (gateRelease141 > 0L && gateAge141 in 0L..650_000_000L &&
+                            trace28815Host in selectedHostIds28821) {
+                            if (visibilityProbeRelease288141 != gateRelease141) {
+                                visibilityProbeRelease288141 = gateRelease141
+                                visibilityProbeCount288141 = 0
+                                visibilityProbeLastLogNs288141 = 0L
+                                visibilityProbeLastVisible288141 = null
+                                visibilityProbeLastBlocked288141 = false
+                            }
+                            val screenL141 = xy[0] + b.left
+                            val screenT141 = xy[1] + b.top
+                            val screenR141 = xy[0] + b.right
+                            val screenB141 = xy[1] + b.bottom
+                            val intersectionW141 = (minOf(screenR141, displayWidth) -
+                                maxOf(screenL141, 0)).coerceAtLeast(0)
+                            val intersectionH141 = (minOf(screenB141, displayHeight) -
+                                maxOf(screenT141, 0)).coerceAtLeast(0)
+                            val blocked141 = moved && !updatePosition
+                            val transitioned141 = visibilityProbeLastVisible288141 != visible ||
+                                visibilityProbeLastBlocked288141 != blocked141
+                            if (visibilityProbeCount288141 < 14 &&
+                                (transitioned141 || gateNow141 - visibilityProbeLastLogNs288141 >= 45_000_000L)) {
+                                visibilityProbeCount288141++
+                                visibilityProbeLastLogNs288141 = gateNow141
+                                val committed141 = samplePosition.value
+                                val native141 = glassScreenPosition(b)
+                                val delta141 = kotlin.math.max(
+                                    kotlin.math.abs(native141.x - committed141.x),
+                                    kotlin.math.abs(native141.y - committed141.y))
+                                android.util.Log.i("KyantGate288141",
+                                    "KYANT288141_GATE host=$trace28815Host release=$gateRelease141 " +
+                                    "ageMs=${gateAge141 / 1_000_000f} visible=$visible " +
+                                    "anchorShown=${anchor.isShown} frameVis=${frame.visibility} " +
+                                    "screen=${displayWidth}x${displayHeight} " +
+                                    "rect=$screenL141,$screenT141,$screenR141,$screenB141 " +
+                                    "intersection=${intersectionW141}x${intersectionH141} " +
+                                    "moved=$moved settled=$firstPositionSettled boundsChanged=$boundsChangedNow " +
+                                    "updatePosition=$updatePosition blocked=$blocked141 " +
+                                    "nativeX=${native141.x} nativeY=${native141.y} " +
+                                    "committedX=${committed141.x} committedY=${committed141.y} " +
+                                    "gapPx=$delta141 uiRelease=$uiFrameRelease288140 " +
+                                    "uiOrdinal=$uiFrameOrdinal288140 " +
+                                    "scope=pre_commit_not_presented")
+                            }
+                            visibilityProbeLastVisible288141 = visible
+                            visibilityProbeLastBlocked288141 = blocked141
+                        }
+                    }
                     if (boundsChangedNow || updatePosition || hostMisplaced) {
                         geometryChanges++
                         if (hostMisplaced) {
