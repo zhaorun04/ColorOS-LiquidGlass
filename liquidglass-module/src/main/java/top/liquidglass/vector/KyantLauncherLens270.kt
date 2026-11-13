@@ -2040,6 +2040,12 @@ object KyantLauncherLens270 {
             -998
         }
         val requestedGpuReference288110 = rawGpuReference288111 == 1
+        // V288.153: opt-in full affine screen-to-Host source mapping.
+        // Default is the exact V288.152 rectangle mapping. Requires Launcher restart.
+        val affineGpuAb288153 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_affine_gpu_ab_288153", 0) == 1
+        } catch (_: Throwable) { false }
         val gpuReference288110 = requestedGpuReference288110 &&
             bridgeBitmap != null && nativeBridgeMode == 1 &&
             nativeCarrierAb28869 == 1 && fusionMode28889 == 0 &&
@@ -4854,8 +4860,7 @@ object KyantLauncherLens270 {
                     sameFrameSnapshotAb288142 == 0) {
                     KyantReboundConsume288152.choose(
                         diagnosticAnchor288104, drawPositionBefore152,
-                        currentNativePosition, releaseNs28820.get(),
-                        touchActive28894)
+                        currentNativePosition, releaseNs28820.get())
                 } else drawPositionBefore152
                 if (strictSnapshotAb288143 == 1) {
                     val c143 = snapshot143Counters
@@ -5481,8 +5486,15 @@ object KyantLauncherLens270 {
                                 val traceJoint131 = jointProbe288131 && perfettoTrace288120
                                 if (traceJoint131) android.os.Trace.beginSection("LG131_SOURCE_BITMAP_H${traceHost28890}")
                                 try {
-                                    canvas.nativeCanvas.drawBitmap(reference, null,
-                                        wholeDestination, bitmapPaint)
+                                    val affineDone288153 = affineGpuAb288153 &&
+                                        KyantGpuAffine288153.draw(
+                                            canvas.nativeCanvas, reference, bitmapPaint,
+                                            frame, size.width, size.height,
+                                            screenW, screenH)
+                                    if (!affineDone288153) {
+                                        canvas.nativeCanvas.drawBitmap(reference, null,
+                                            wholeDestination, bitmapPaint)
+                                    }
                                 } finally {
                                     if (traceJoint131) android.os.Trace.endSection()
                                 }
