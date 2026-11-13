@@ -5531,7 +5531,7 @@ object KyantLauncherLens270 {
                                             wholeDestination, bitmapPaint)
                                     }
                                     if (frameOwnershipProbe288157) {
-                                        KyantFrameOwnershipProbe288157.observe(
+                                        KyantCoordinateSpaceProbe288158.observe(
                                             affineHost288153, drawPosition.x, drawPosition.y,
                                             size.width, size.height,
                                             if (continuityDone288156) 4 else if (versionedDone288155) 3
