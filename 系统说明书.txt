@@ -38,3 +38,20 @@ V1.9.205.288.152｜Compose 绘制消费侧位置同步 A/B 候选（默认关闭
 本版基于 V288.151。仅在松手后 0～150ms、Workspace 当前页等于目标页、Host 在屏幕内、横向原生与原始采样差距 0.5～16px 且纵向偏差 <=1px 时，候选路径选择实时原生坐标。未满足条件时完全使用原有采样原点；不写 Compose State，不改 Shader，不改 Dock，也不处理实际翻页。
 开关：settings global liquidglass_kyant_rebound_consume_ab_288152，默认 0；辅助脚本 lg152_consume_ab.sh 支持 baseline/candidate/restore/status，恢复前请保持备份文件。先确认 Kyant0 文件夹与 Dock 正常，再分别测试不翻页右滑回弹；检查 KYANT288152_CONSUME 与既有 KYANT288150_CONSUME 日志，比较视觉变化。此实验无法证明最终 SurfaceFlinger 呈现帧，必须经过真机验证。若出现效果异常，立即运行 sh lg152_consume_ab.sh restore，必要时回退 V288.151。
 独立检查：UI、SharedPreferences、Root 快照、Launcher 参数原路径未修改，新开关只在 Launcher 绘制读取；不修改现有 UI 参数映射。未在本环境完成 Gradle 构建和 Android DEX 运行时校验。
+
+
+V1.9.205.288.153｜GPU 全仿射屏幕映射 A/B（实验版）
+- 默认模式 A（0）：完全保留 V288.152 GPU 参考图矩形映射。
+- 实验模式 B（1）：从参考 Bitmap 的屏幕坐标，经窗口坐标、Host 全局逆矩阵，映射至 Compose Source 局部坐标。支持父级缩放/斜切；不增加壁纸截图或 Bitmap 复制。
+- 只影响符合既有 gpuReference288110 条件的文件夹 GPU Source；不修改 Dock 或 Kyant 光学 Shader。
+- 设置：su -c 'settings put global liquidglass_kyant_affine_gpu_ab_288153 1'；关闭改为 0。每次切换后重启 Launcher。
+- 注意：该版本为未经真机验证的 A/B 候选，不代表已修复回弹错位；若父级只有平移，B 与 A 理论等价。
+- 构建：./gradlew :liquidglass-module:assembleDebug；真机需检查 DEX VerifyError 和大小文件夹、Dock 回归。
+
+V288.153 编译修正：将 A/B 开关及 Host View 显式传入 LensContent270，解决 Kotlin 作用域未解析问题。
+
+V1.9.205.288.154：新增 GPU 全仿射矩阵同帧快照 B 模式。须先开启 288153 仿射模式，再设置 settings put global liquidglass_kyant_frame_snapshot_288154 1。默认 0 保持 V288.153 B 模式。仅文件夹 GPU Source 生效，不改 Dock 和光学 Shader。此为待真机验证的 A/B 实验，非已证实修复。
+
+V288.154 编译修正：修复 frameSnapshot288154 的设置读取与 Compose 参数传递；以单调时钟约16.67ms桶替代不可访问的 frameTimeNanos。该桶并非真正的 Choreographer 帧标识，B 模式仍是实验。
+
+V1.9.205.288.155：矩阵版本一致性实验。开启 V288.153 全仿射与 V288.154 快照后，设置 liquidglass_kyant_matrix_versioned_288155=1 可启用几何校验快照；0 保留 V288.154 时间桶快照。矩阵与窗口偏移变化即重算；不保证 HWUI 同帧。Dock 不改动。

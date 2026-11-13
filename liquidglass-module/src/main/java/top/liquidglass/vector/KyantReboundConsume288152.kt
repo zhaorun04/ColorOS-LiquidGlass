@@ -25,12 +25,11 @@ internal object KyantReboundConsume288152 {
     private fun enabled(anchor: View, now: Long): Boolean {
         // Avoid a ContentResolver query for every draw. Settings changes are
         // reloaded after <=1s; the Launcher restart also resets this cache.
-        // Default ON: the lg152_consume_ab.sh baseline still forces 0 for A/B.
         if (lastSettingNs == 0L || now - lastSettingNs >= 1_000_000_000L) {
             lastSettingNs = now
             enabledCache = try {
-                Settings.Global.getInt(anchor.context.contentResolver, KEY, 1) == 1
-            } catch (_: Throwable) { true }
+                Settings.Global.getInt(anchor.context.contentResolver, KEY, 0) == 1
+            } catch (_: Throwable) { false }
         }
         return enabledCache
     }
@@ -51,17 +50,11 @@ internal object KyantReboundConsume288152 {
     }
 
     @JvmStatic fun choose(anchor: View, baseline: Offset,
-                          nativePosition: () -> Offset, releaseNs: Long,
-                          touchActive: Boolean = false): Offset {
+                          nativePosition: () -> Offset, releaseNs: Long): Offset {
         try {
             val now = SystemClock.elapsedRealtimeNanos()
-            // Same-page rebound lasts up to ~650ms after ACTION_UP; a 150ms
-            // window missed the second half of the spring-back. While the
-            // finger is still down there is no release yet, so the touch
-            // phase is admitted directly (the same-page gate still applies).
-            val inWindow = touchActive ||
-                (releaseNs > 0L && now - releaseNs in 0L..650_000_000L)
-            if (!enabled(anchor, now) || !inWindow ||
+            if (!enabled(anchor, now) || releaseNs <= 0L ||
+                now - releaseNs !in 0L..150_000_000L ||
                 !anchor.isAttachedToWindow || !anchor.isShown ||
                 !baseline.x.isFinite() || !baseline.y.isFinite()) return baseline
             var p: View? = anchor.parent as? View
@@ -87,23 +80,15 @@ internal object KyantReboundConsume288152 {
             val dx = native.x - baseline.x
             val dy = native.y - baseline.y
             val gap = max(abs(dx), abs(dy))
-            // Root fix: inside a same-page gesture (touch down or <=650ms after
-            // release) there is NO legitimate difference between the committed
-            // Compose state and the live native matrix -- any gap is pure
-            // one-frame pipeline lag, largest exactly at spring-back onset
-            // (rebound velocity x frame time = the observed 5..15px and beyond).
-            // transformMatrixToGlobal() read in this draw callback is the SAME
-            // transform that positions the FolderIcon in this frame, so using it
-            // unconditionally is frame-exact; gap caps only re-admitted the
-            // stale state on the worst frames. Log the gap for diagnostics.
+            if (abs(dy) > 1f || gap < 0.5f || gap > 16f) return baseline
             val host = System.identityHashCode(anchor)
             val prev = lastLogNs[host] ?: 0L
-            if (gap >= 0.25f && now - prev >= 40_000_000L) {
+            if (now - prev >= 40_000_000L) {
                 lastLogNs[host] = now
                 Log.i(TAG, "KYANT288152_CONSUME host=$host page=$current " +
-                    "ageMs=${(now-releaseNs)/1_000_000f} touch=$touchActive " +
+                    "ageMs=${(now-releaseNs)/1_000_000f} " +
                     "baselineX=${baseline.x} nativeX=${native.x} deltaX=$dx " +
-                    "gapPx=$gap applied=true scope=cpu_source_draw_not_presented")
+                    "applied=true scope=cpu_source_draw_not_presented")
             }
             return native
         } catch (_: Throwable) { return baseline }
