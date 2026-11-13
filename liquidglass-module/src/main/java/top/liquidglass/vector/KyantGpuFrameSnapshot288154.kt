@@ -5,13 +5,12 @@ import android.graphics.Canvas
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.os.Looper
-import android.view.Choreographer
 import android.view.View
 
 /**
  * V288.154 opt-in frame-owned transform snapshot. The first consumer of a
- * Choreographer frame captures the full affine mapping; subsequent consumers
- * within the same frame reuse it. No bitmap copies, no per-frame logcat.
+ * approximate 16.67ms time bucket captures the full affine mapping; subsequent
+ * consumers within the same bucket reuse it. This is NOT a guaranteed HWUI frame. No bitmap copies, no per-frame logcat.
  * A mode remains V288.153 affine. B mode is an experiment, not a proven fix.
  */
 internal object KyantGpuFrameSnapshot288154 {
@@ -34,8 +33,10 @@ internal object KyantGpuFrameSnapshot288154 {
             screenWidth <= 0 || screenHeight <= 0 ||
             image.width <= 0 || image.height <= 0) return false
         return try {
-            val frame = try { Choreographer.getInstance().frameTimeNanos }
-                        catch (_: Throwable) { Long.MIN_VALUE }
+            // Public Android SDK does not expose a reliable current-frame token
+            // from this drawing callback. Use a bounded monotonic time bucket as
+            // an experimental approximation; NOT a guaranteed Choreographer frame.
+            val frame = android.os.SystemClock.elapsedRealtimeNanos() / 16_666_667L
             val reusable = frame != Long.MIN_VALUE && frame == lastFrame &&
                 lastHost === host && lastWidth == composeWidth &&
                 lastHeight == composeHeight && lastScreenWidth == screenWidth &&

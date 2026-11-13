@@ -51,3 +51,5 @@ V1.9.205.288.153｜GPU 全仿射屏幕映射 A/B（实验版）
 V288.153 编译修正：将 A/B 开关及 Host View 显式传入 LensContent270，解决 Kotlin 作用域未解析问题。
 
 V1.9.205.288.154：新增 GPU 全仿射矩阵同帧快照 B 模式。须先开启 288153 仿射模式，再设置 settings put global liquidglass_kyant_frame_snapshot_288154 1。默认 0 保持 V288.153 B 模式。仅文件夹 GPU Source 生效，不改 Dock 和光学 Shader。此为待真机验证的 A/B 实验，非已证实修复。
+
+V288.154 编译修正：修复 frameSnapshot288154 的设置读取与 Compose 参数传递；以单调时钟约16.67ms桶替代不可访问的 frameTimeNanos。该桶并非真正的 Choreographer 帧标识，B 模式仍是实验。
