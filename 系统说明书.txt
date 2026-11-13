@@ -62,3 +62,9 @@ V1.9.205.288.156：实验性 GPU 矩阵连续性保护。需先启用 288153/288
 V1.9.205.288.157 帧归属诊断实验：基于 V288.156，默认关闭，启用命令 su -c 'settings put global liquidglass_kyant_frame_ownership_probe_288157 1'，重启 Launcher 后用 logcat -d -s KyantFrameProbe288157:I 查看低频坐标、绘制路径统计。关闭设置为 0。此版本仅诊断，不改变 Dock、Kyant Shader 或原 GPU 绘制路径；日志中的位置差不等于已证明 GPU 合成跨帧。建议 continuity_288156=0，matrix_versioned_288155=1，frame_snapshot_288154=1，affine_gpu_ab_288153=1。
 
 V1.9.205.288.158：坐标空间诊断。沿用 V288.157 的诊断开关 liquidglass_kyant_frame_ownership_probe_288157；日志标签 KyantSpaceProbe288158。记录原始坐标差值、相邻绘制相对运动残差、可见矩形与窗口偏移。原始差值不能直接视为可见抖动；诊断不改变渲染或 Dock。
+
+
+V1.9.205.288.159：可见文件夹异常触发式环形诊断。
+沿用 liquidglass_kyant_frame_ownership_probe_288157=1 开关；仅记录可见到可见的相邻绘制位移残差>2px或路径变化，输出最多12条前序采样，每Host每1.5秒限流。
+日志：logcat -d -s KyantEventProbe288159:I。仅诊断，不修改壁纸采样、Dock、Shader。
+注意：采样发生在Compose绘制回调，不能单独证明GPU最终合成帧归属。

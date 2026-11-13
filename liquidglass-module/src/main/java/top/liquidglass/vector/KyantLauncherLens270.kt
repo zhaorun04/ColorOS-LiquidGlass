@@ -5536,6 +5536,10 @@ object KyantLauncherLens270 {
                                             size.width, size.height,
                                             if (continuityDone288156) 4 else if (versionedDone288155) 3
                                             else if (snapshotDone288154) 2 else if (affineDone288153) 1 else 0)
+                                        KyantReboundEventProbe288159.observe(
+                                            affineHost288153, drawPosition.x, drawPosition.y,
+                                            if (continuityDone288156) 4 else if (versionedDone288155) 3
+                                            else if (snapshotDone288154) 2 else if (affineDone288153) 1 else 0)
                                     }
                                 } finally {
                                     if (traceJoint131) android.os.Trace.endSection()
