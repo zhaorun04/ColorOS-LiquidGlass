@@ -2055,6 +2055,10 @@ object KyantLauncherLens270 {
             android.provider.Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_matrix_versioned_288155", 0) == 1
         } catch (_: Throwable) { false }
+        val continuity288156 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_continuity_288156", 0) == 1
+        } catch (_: Throwable) { false }
         val gpuReference288110 = requestedGpuReference288110 &&
             bridgeBitmap != null && nativeBridgeMode == 1 &&
             nativeCarrierAb28869 == 1 && fusionMode28889 == 0 &&
@@ -3267,7 +3271,7 @@ object KyantLauncherLens270 {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
                 displayWidth, displayHeight, samplePosition, sampleRadiusPx.floatValue, effectiveSamplingMode28862,
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
-                gpuReference288110, affineGpuAb288153, frameSnapshot288154, matrixVersioned288155, frame, outerClipIsolate288136,
+                gpuReference288110, affineGpuAb288153, frameSnapshot288154, matrixVersioned288155, continuity288156, frame, outerClipIsolate288136,
                 offscreenCull288113, offscreenDraws288113, onscreenDraws288113,
                 multiHostProbe288114, multiHostCounts288114, multiHostWindow288114,
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
@@ -4302,7 +4306,7 @@ object KyantLauncherLens270 {
         legacySyncAbMode: Int, motionCompare28861: Boolean, layerSampleMode28862: Int, displayIsolationMode: Int, nativeLayerMode: Int, bridgeBitmap: Bitmap?,
         bridgeVersion: androidx.compose.runtime.State<Int>,
         gpuReference288110: Boolean,
-        affineGpuAb288153: Boolean, frameSnapshot288154: Boolean, matrixVersioned288155: Boolean, affineHost288153: View,
+        affineGpuAb288153: Boolean, frameSnapshot288154: Boolean, matrixVersioned288155: Boolean, continuity288156: Boolean, affineHost288153: View,
         outerClipIsolate288136: Boolean,
         offscreenCull288113: Boolean,
         offscreenDraws288113: java.util.concurrent.atomic.AtomicLong,
@@ -5496,7 +5500,13 @@ object KyantLauncherLens270 {
                                 val traceJoint131 = jointProbe288131 && perfettoTrace288120
                                 if (traceJoint131) android.os.Trace.beginSection("LG131_SOURCE_BITMAP_H${traceHost28890}")
                                 try {
-                                    val versionedDone288155 = affineGpuAb288153 && frameSnapshot288154 && matrixVersioned288155 &&
+                                    val continuityDone288156 = affineGpuAb288153 && frameSnapshot288154 &&
+                                         matrixVersioned288155 && continuity288156 &&
+                                         KyantGpuContinuity288156.draw(
+                                             canvas.nativeCanvas, reference, bitmapPaint,
+                                             affineHost288153, size.width, size.height,
+                                             screenW, screenH)
+                                     val versionedDone288155 = continuityDone288156 || (affineGpuAb288153 && frameSnapshot288154 && matrixVersioned288155 && !continuity288156) &&
                                         KyantGpuVersionedSnapshot288155.draw(
                                             canvas.nativeCanvas, reference, bitmapPaint,
                                             affineHost288153, size.width, size.height,
