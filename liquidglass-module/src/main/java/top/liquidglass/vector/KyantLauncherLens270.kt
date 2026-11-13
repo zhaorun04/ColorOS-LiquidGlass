@@ -5487,7 +5487,12 @@ object KyantLauncherLens270 {
                                 val traceJoint131 = jointProbe288131 && perfettoTrace288120
                                 if (traceJoint131) android.os.Trace.beginSection("LG131_SOURCE_BITMAP_H${traceHost28890}")
                                 try {
-                                    val affineDone288153 = affineGpuAb288153 &&
+                                    val snapshotDone288154 = affineGpuAb288153 && frameSnapshot288154 &&
+                                        KyantGpuFrameSnapshot288154.draw(
+                                            canvas.nativeCanvas, reference, bitmapPaint,
+                                            affineHost288153, size.width, size.height,
+                                            screenW, screenH)
+                                    val affineDone288153 = snapshotDone288154 || (affineGpuAb288153 && !frameSnapshot288154) &&
                                         KyantGpuAffine288153.draw(
                                             canvas.nativeCanvas, reference, bitmapPaint,
                                             affineHost288153, size.width, size.height,
