@@ -47,3 +47,5 @@ V1.9.205.288.153｜GPU 全仿射屏幕映射 A/B（实验版）
 - 设置：su -c 'settings put global liquidglass_kyant_affine_gpu_ab_288153 1'；关闭改为 0。每次切换后重启 Launcher。
 - 注意：该版本为未经真机验证的 A/B 候选，不代表已修复回弹错位；若父级只有平移，B 与 A 理论等价。
 - 构建：./gradlew :liquidglass-module:assembleDebug；真机需检查 DEX VerifyError 和大小文件夹、Dock 回归。
+
+V288.153 编译修正：将 A/B 开关及 Host View 显式传入 LensContent270，解决 Kotlin 作用域未解析问题。

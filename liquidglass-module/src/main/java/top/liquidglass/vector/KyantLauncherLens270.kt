@@ -3258,7 +3258,7 @@ object KyantLauncherLens270 {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
                 displayWidth, displayHeight, samplePosition, sampleRadiusPx.floatValue, effectiveSamplingMode28862,
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
-                gpuReference288110, outerClipIsolate288136,
+                gpuReference288110, affineGpuAb288153, frame, outerClipIsolate288136,
                 offscreenCull288113, offscreenDraws288113, onscreenDraws288113,
                 multiHostProbe288114, multiHostCounts288114, multiHostWindow288114,
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
@@ -4293,6 +4293,7 @@ object KyantLauncherLens270 {
         legacySyncAbMode: Int, motionCompare28861: Boolean, layerSampleMode28862: Int, displayIsolationMode: Int, nativeLayerMode: Int, bridgeBitmap: Bitmap?,
         bridgeVersion: androidx.compose.runtime.State<Int>,
         gpuReference288110: Boolean,
+        affineGpuAb288153: Boolean, affineHost288153: View,
         outerClipIsolate288136: Boolean,
         offscreenCull288113: Boolean,
         offscreenDraws288113: java.util.concurrent.atomic.AtomicLong,
@@ -5489,7 +5490,7 @@ object KyantLauncherLens270 {
                                     val affineDone288153 = affineGpuAb288153 &&
                                         KyantGpuAffine288153.draw(
                                             canvas.nativeCanvas, reference, bitmapPaint,
-                                            frame, size.width, size.height,
+                                            affineHost288153, size.width, size.height,
                                             screenW, screenH)
                                     if (!affineDone288153) {
                                         canvas.nativeCanvas.drawBitmap(reference, null,
