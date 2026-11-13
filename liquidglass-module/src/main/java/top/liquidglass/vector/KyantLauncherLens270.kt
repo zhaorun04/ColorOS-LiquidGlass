@@ -4854,7 +4854,8 @@ object KyantLauncherLens270 {
                     sameFrameSnapshotAb288142 == 0) {
                     KyantReboundConsume288152.choose(
                         diagnosticAnchor288104, drawPositionBefore152,
-                        currentNativePosition, releaseNs28820.get())
+                        currentNativePosition, releaseNs28820.get(),
+                        touchActive28894)
                 } else drawPositionBefore152
                 if (strictSnapshotAb288143 == 1) {
                     val c143 = snapshot143Counters

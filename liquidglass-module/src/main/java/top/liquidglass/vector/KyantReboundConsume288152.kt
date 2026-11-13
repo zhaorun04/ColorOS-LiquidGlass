@@ -25,11 +25,12 @@ internal object KyantReboundConsume288152 {
     private fun enabled(anchor: View, now: Long): Boolean {
         // Avoid a ContentResolver query for every draw. Settings changes are
         // reloaded after <=1s; the Launcher restart also resets this cache.
+        // Default ON: the lg152_consume_ab.sh baseline still forces 0 for A/B.
         if (lastSettingNs == 0L || now - lastSettingNs >= 1_000_000_000L) {
             lastSettingNs = now
             enabledCache = try {
-                Settings.Global.getInt(anchor.context.contentResolver, KEY, 0) == 1
-            } catch (_: Throwable) { false }
+                Settings.Global.getInt(anchor.context.contentResolver, KEY, 1) == 1
+            } catch (_: Throwable) { true }
         }
         return enabledCache
     }
@@ -50,11 +51,17 @@ internal object KyantReboundConsume288152 {
     }
 
     @JvmStatic fun choose(anchor: View, baseline: Offset,
-                          nativePosition: () -> Offset, releaseNs: Long): Offset {
+                          nativePosition: () -> Offset, releaseNs: Long,
+                          touchActive: Boolean = false): Offset {
         try {
             val now = SystemClock.elapsedRealtimeNanos()
-            if (!enabled(anchor, now) || releaseNs <= 0L ||
-                now - releaseNs !in 0L..150_000_000L ||
+            // Same-page rebound lasts up to ~650ms after ACTION_UP; a 150ms
+            // window missed the second half of the spring-back. While the
+            // finger is still down there is no release yet, so the touch
+            // phase is admitted directly (the same-page gate still applies).
+            val inWindow = touchActive ||
+                (releaseNs > 0L && now - releaseNs in 0L..650_000_000L)
+            if (!enabled(anchor, now) || !inWindow ||
                 !anchor.isAttachedToWindow || !anchor.isShown ||
                 !baseline.x.isFinite() || !baseline.y.isFinite()) return baseline
             var p: View? = anchor.parent as? View
@@ -80,7 +87,9 @@ internal object KyantReboundConsume288152 {
             val dx = native.x - baseline.x
             val dy = native.y - baseline.y
             val gap = max(abs(dx), abs(dy))
-            if (abs(dy) > 1f || gap < 0.5f || gap > 16f) return baseline
+            // Relaxed bounds: observed stateGapX reaches 12-15px, and vertical
+            // jitter up to ~2.5px still reads as the same-folder origin.
+            if (abs(dy) > 2.5f || gap < 0.25f || gap > 32f) return baseline
             val host = System.identityHashCode(anchor)
             val prev = lastLogNs[host] ?: 0L
             if (now - prev >= 40_000_000L) {
