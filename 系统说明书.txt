@@ -57,3 +57,6 @@ V288.154 编译修正：修复 frameSnapshot288154 的设置读取与 Compose �
 V1.9.205.288.155：矩阵版本一致性实验。开启 V288.153 全仿射与 V288.154 快照后，设置 liquidglass_kyant_matrix_versioned_288155=1 可启用几何校验快照；0 保留 V288.154 时间桶快照。矩阵与窗口偏移变化即重算；不保证 HWUI 同帧。Dock 不改动。
 
 V1.9.205.288.156：实验性 GPU 矩阵连续性保护。需先启用 288153/288154/288155 三个开关，再通过 settings put global liquidglass_kyant_continuity_288156 1 启用。默认关闭。仅抑制 Host 静止时极微小的矩阵数值噪声，不平滑真实回弹位移；每 600 次绘制输出一次诊断。未经过 Gradle 编译和真机验证。
+
+
+V1.9.205.288.157 帧归属诊断实验：基于 V288.156，默认关闭，启用命令 su -c 'settings put global liquidglass_kyant_frame_ownership_probe_288157 1'，重启 Launcher 后用 logcat -d -s KyantFrameProbe288157:I 查看低频坐标、绘制路径统计。关闭设置为 0。此版本仅诊断，不改变 Dock、Kyant Shader 或原 GPU 绘制路径；日志中的位置差不等于已证明 GPU 合成跨帧。建议 continuity_288156=0，matrix_versioned_288155=1，frame_snapshot_288154=1，affine_gpu_ab_288153=1。
