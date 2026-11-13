@@ -2040,17 +2040,6 @@ object KyantLauncherLens270 {
             -998
         }
         val requestedGpuReference288110 = rawGpuReference288111 == 1
-        // V288.153: opt-in full affine screen-to-Host source mapping.
-        // Default is the exact V288.152 rectangle mapping. Requires Launcher restart.
-        val affineGpuAb288153 = try {
-            Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_affine_gpu_ab_288153", 0) == 1
-        } catch (_: Throwable) { false }
-        // V288.154 B mode: read once on Launcher startup, same as V288.153.
-        val frameSnapshot288154 = try {
-            Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_frame_snapshot_288154", 0) == 1
-        } catch (_: Throwable) { false }
         val gpuReference288110 = requestedGpuReference288110 &&
             bridgeBitmap != null && nativeBridgeMode == 1 &&
             nativeCarrierAb28869 == 1 && fusionMode28889 == 0 &&
@@ -3263,7 +3252,7 @@ object KyantLauncherLens270 {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
                 displayWidth, displayHeight, samplePosition, sampleRadiusPx.floatValue, effectiveSamplingMode28862,
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
-                gpuReference288110, affineGpuAb288153, frameSnapshot288154, frame, outerClipIsolate288136,
+                gpuReference288110, outerClipIsolate288136,
                 offscreenCull288113, offscreenDraws288113, onscreenDraws288113,
                 multiHostProbe288114, multiHostCounts288114, multiHostWindow288114,
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
@@ -4298,7 +4287,6 @@ object KyantLauncherLens270 {
         legacySyncAbMode: Int, motionCompare28861: Boolean, layerSampleMode28862: Int, displayIsolationMode: Int, nativeLayerMode: Int, bridgeBitmap: Bitmap?,
         bridgeVersion: androidx.compose.runtime.State<Int>,
         gpuReference288110: Boolean,
-        affineGpuAb288153: Boolean, frameSnapshot288154: Boolean, affineHost288153: View,
         outerClipIsolate288136: Boolean,
         offscreenCull288113: Boolean,
         offscreenDraws288113: java.util.concurrent.atomic.AtomicLong,
@@ -4866,7 +4854,8 @@ object KyantLauncherLens270 {
                     sameFrameSnapshotAb288142 == 0) {
                     KyantReboundConsume288152.choose(
                         diagnosticAnchor288104, drawPositionBefore152,
-                        currentNativePosition, releaseNs28820.get())
+                        currentNativePosition, releaseNs28820.get(),
+                        touchActive28894)
                 } else drawPositionBefore152
                 if (strictSnapshotAb288143 == 1) {
                     val c143 = snapshot143Counters
@@ -5492,20 +5481,8 @@ object KyantLauncherLens270 {
                                 val traceJoint131 = jointProbe288131 && perfettoTrace288120
                                 if (traceJoint131) android.os.Trace.beginSection("LG131_SOURCE_BITMAP_H${traceHost28890}")
                                 try {
-                                    val snapshotDone288154 = affineGpuAb288153 && frameSnapshot288154 &&
-                                        KyantGpuFrameSnapshot288154.draw(
-                                            canvas.nativeCanvas, reference, bitmapPaint,
-                                            affineHost288153, size.width, size.height,
-                                            screenW, screenH)
-                                    val affineDone288153 = snapshotDone288154 || (affineGpuAb288153 && !snapshotDone288154) &&
-                                        KyantGpuAffine288153.draw(
-                                            canvas.nativeCanvas, reference, bitmapPaint,
-                                            affineHost288153, size.width, size.height,
-                                            screenW, screenH)
-                                    if (!affineDone288153) {
-                                        canvas.nativeCanvas.drawBitmap(reference, null,
-                                            wholeDestination, bitmapPaint)
-                                    }
+                                    canvas.nativeCanvas.drawBitmap(reference, null,
+                                        wholeDestination, bitmapPaint)
                                 } finally {
                                     if (traceJoint131) android.os.Trace.endSection()
                                 }
