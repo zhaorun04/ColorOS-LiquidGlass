@@ -4543,6 +4543,10 @@ object KyantLauncherLens270 {
         // Clip the WHOLE optical pipeline, including wallpaper source and highlight,
         // not just the Kyant lens shape. Prevent pixels escaping rounded corners.
         val cornerDp = (cornerRadiusPx / density).dp
+        // V288.165: parent clipping and Kyant lens must share the SAME live corner geometry.
+        // Both values are derived from Compose material state, so moving the slider
+        // invalidates both layers in the same recomposition.
+        val effectiveCornerDp288165 = cornerDp * (optics28827.cornerScale / 100f)
         if (nodePipeline28881 == 2 || positionPipeline28882 in 1..4) {
             // ComposeView -> AndroidView -> native View.onDraw. This keeps the
             // ComposeView host but removes Compose Canvas as the pixel painter.
@@ -4631,7 +4635,7 @@ object KyantLauncherLens270 {
         ).then(if (renderAbMode == 2) Modifier.graphicsLayer {
             compositingStrategy = CompositingStrategy.Offscreen
         } else Modifier).then(if (nodePipeline28881 == 4 || outerClipIsolate288136)
-            Modifier else Modifier.clip(RoundedCornerShape(cornerDp)))
+            Modifier else Modifier.clip(RoundedCornerShape(effectiveCornerDp288165)))
         Box(opticalContainer) {
             // Diagnostic only: transparent source may also remove the backdrop input.
             // Never interpret visible highlights alone as genuine refraction.
@@ -6188,7 +6192,7 @@ object KyantLauncherLens270 {
                 .drawBackdrop(
                 backdrop = backdrop,
                 // The OEM radius is in physical pixels. Convert to dp and clamp to avoid a circle.
-                shape = { RoundedRectangle(cornerDp * (optics28827.cornerScale / 100f)) },
+                shape = { RoundedRectangle(effectiveCornerDp288165) },
                 effects = {
                     val m = size.minDimension
                     blur(optics28827.blur.dp.toPx())
