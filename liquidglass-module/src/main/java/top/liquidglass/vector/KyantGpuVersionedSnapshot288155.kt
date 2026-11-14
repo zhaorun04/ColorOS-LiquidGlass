@@ -15,19 +15,23 @@ import android.view.View
  * This does not guarantee synchronization with SurfaceFlinger composition.
  */
 internal object KyantGpuVersionedSnapshot288155 {
-    private var lastHost: View? = null
-    private var lastWidth = 0f
-    private var lastHeight = 0f
-    private var lastScreenWidth = 0
-    private var lastScreenHeight = 0
-    private var lastBitmapWidth = 0
-    private var lastBitmapHeight = 0
-    private var lastHostWidth = 0
-    private var lastHostHeight = 0
-    private val previousGlobal = FloatArray(9)
-    private val previousWindowOffset = IntArray(2)
-    private val cachedMapping = Matrix()
-    private var valid = false
+    // One mapping per Host. Weak keys avoid retaining detached Launcher views.
+    private class HostCache {
+        var width = 0f
+        var height = 0f
+        var screenWidth = 0
+        var screenHeight = 0
+        var bitmapWidth = 0
+        var bitmapHeight = 0
+        var hostWidth = 0
+        var hostHeight = 0
+        val global = FloatArray(9)
+        var offsetX = 0
+        var offsetY = 0
+        val mapping = Matrix()
+        var valid = false
+    }
+    private val caches = java.util.WeakHashMap<View, HostCache>()
 
     fun draw(canvas: Canvas, image: Bitmap, paint: Paint, host: View,
              composeWidth: Float, composeHeight: Float,
@@ -49,16 +53,17 @@ internal object KyantGpuVersionedSnapshot288155 {
             host.rootView.getLocationInWindow(window)
             val offsetX = window[0] - screen[0]
             val offsetY = window[1] - screen[1]
-            val same = valid && lastHost === host &&
-                lastWidth == composeWidth && lastHeight == composeHeight &&
-                lastScreenWidth == screenWidth && lastScreenHeight == screenHeight &&
-                lastBitmapWidth == image.width && lastBitmapHeight == image.height &&
-                lastHostWidth == host.width && lastHostHeight == host.height &&
-                previousWindowOffset[0] == offsetX && previousWindowOffset[1] == offsetY &&
-                values.indices.all { values[it] == previousGlobal[it] }
+            val state = caches.getOrPut(host) { HostCache() }
+            val same = state.valid &&
+                state.width == composeWidth && state.height == composeHeight &&
+                state.screenWidth == screenWidth && state.screenHeight == screenHeight &&
+                state.bitmapWidth == image.width && state.bitmapHeight == image.height &&
+                state.hostWidth == host.width && state.hostHeight == host.height &&
+                state.offsetX == offsetX && state.offsetY == offsetY &&
+                values.indices.all { values[it] == state.global[it] }
             if (!same) {
                 val inverse = Matrix()
-                if (!global.invert(inverse)) { valid = false; return false }
+                if (!global.invert(inverse)) { state.valid = false; return false }
                 val mapping = Matrix()
                 mapping.setScale(screenWidth.toFloat() / image.width,
                     screenHeight.toFloat() / image.height)
@@ -67,24 +72,23 @@ internal object KyantGpuVersionedSnapshot288155 {
                 mapping.postScale(composeWidth / host.width, composeHeight / host.height)
                 val mapped = FloatArray(9)
                 mapping.getValues(mapped)
-                if (!mapped.all { it.isFinite() }) { valid = false; return false }
-                cachedMapping.set(mapping)
-                values.copyInto(previousGlobal)
-                previousWindowOffset[0] = offsetX
-                previousWindowOffset[1] = offsetY
-                lastHost = host
-                lastWidth = composeWidth
-                lastHeight = composeHeight
-                lastScreenWidth = screenWidth
-                lastScreenHeight = screenHeight
-                lastBitmapWidth = image.width
-                lastBitmapHeight = image.height
-                lastHostWidth = host.width
-                lastHostHeight = host.height
-                valid = true
+                if (!mapped.all { it.isFinite() }) { state.valid = false; return false }
+                state.mapping.set(mapping)
+                values.copyInto(state.global)
+                state.offsetX = offsetX
+                state.offsetY = offsetY
+                state.width = composeWidth
+                state.height = composeHeight
+                state.screenWidth = screenWidth
+                state.screenHeight = screenHeight
+                state.bitmapWidth = image.width
+                state.bitmapHeight = image.height
+                state.hostWidth = host.width
+                state.hostHeight = host.height
+                state.valid = true
             }
-            canvas.drawBitmap(image, cachedMapping, paint)
+            canvas.drawBitmap(image, state.mapping, paint)
             true
-        } catch (_: Throwable) { valid = false; false }
+        } catch (_: Throwable) { caches.remove(host); false }
     }
 }

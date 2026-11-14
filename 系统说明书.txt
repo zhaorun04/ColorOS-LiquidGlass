@@ -1,3 +1,11 @@
+V1.9.205.288.169｜GPU 多 Host 映射隔离与时间桶安全修复
+
+本版变更：
+1. KyantGpuVersionedSnapshot288155 采用 WeakHashMap<View, HostCache>，按 Host 隔离缓存；每次消费检查完整 Host 全局矩阵、根窗口偏移、Host 与 Compose 尺寸、背景尺寸。
+2. KyantGpuFrameSnapshot288154 不再使用固定 16.67ms 时间桶复用矩阵，改为复用 155 的几何校验路径。
+3. 不修改文件夹与 Dock 的光学参数、Shader、容器几何及 Workspace 动画。
+
+重要：本版修复可证实的缓存风险，不代表已经根治回弹错位。未完成 Android Gradle 编译及真机测试；请先保留 V288.168 稳定备份。
 V1.9.205.288.168｜Dock 圆角固定原生 100% 修正版
 
 本版基于 V288.167。Dock 的外层 Android View 裁剪、Compose 裁剪和 Kyant RoundedRectangle 折射形状统一采用原生 Dock 圆角（100%），不再跟随文件夹的圆角比例滑块 100%～150%。
