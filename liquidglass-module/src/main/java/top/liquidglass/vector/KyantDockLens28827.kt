@@ -365,14 +365,14 @@ object KyantDockLens28827 {
                     blur(mat.blur.dp.toPx())
                     if (mat.strength > 0) {
                         val factor = mat.strength / 100f
-                        // V288.170: Dock-only optical compensation. The short
+                        // V288.171: Dock-only optical compensation. The short
                         // capsule dimension otherwise makes the same slider values
                         // visually much weaker than on large square folders.
                         // Keep the native Dock corner radius unchanged.
-                        val dockHeightBoost288170 = 1.5f
-                        val dockAmountBoost288170 = 1.8f
-                        lens(refractionHeight = (mat.refractionHeight / 100f) * m * factor * dockHeightBoost288170,
-                            refractionAmount = .2f * m * factor * dockAmountBoost288170,
+                        val dockHeightBoost288171 = 2.5f
+                        val dockAmountBoost288171 = 2.8f
+                        lens(refractionHeight = (mat.refractionHeight / 100f) * m * factor * dockHeightBoost288171,
+                            refractionAmount = .2f * m * factor * dockAmountBoost288171,
                             depthEffect = true,
                             chromaticAberration = mat.chromatic != 0,
                             chromaticIntensity = mat.chromatic / 100f)

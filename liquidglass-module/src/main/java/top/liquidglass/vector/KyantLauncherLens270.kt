@@ -6198,16 +6198,21 @@ object KyantLauncherLens270 {
                     blur(optics28827.blur.dp.toPx())
                     if (rootPipeline28879 != 3 && motionAbMode != 2 && zeroLensAb28868 == 0 && optics28827.strength > 0) {
                         val amount28827 = optics28827.strength / 100f
-                        // V288.167: boost only the *amount* for smaller folders.
-                        // Keep refraction height unchanged (<= 10% of the short edge) to
-                        // avoid expanding intersecting corner displacement regions.
-                        // 500dp folders remain unchanged; 182dp folders get up to 1.65x.
-                        val referenceShortEdgePx288167 = 500.dp.toPx()
-                        val smallFolderBoost288167 = kotlin.math.sqrt(
-                            (referenceShortEdgePx288167 / m.coerceAtLeast(1f)).coerceAtLeast(1f)
+                        // V288.171: adaptive compensation for small square, horizontal,
+                        // and vertical folders. The short edge drives optical thickness,
+                        // while the continuous size factor avoids shape-type discontinuities.
+                        // Large folders (short edge >= 500dp) retain the stable baseline.
+                        val referenceShortEdgePx288171 = 500.dp.toPx()
+                        val smallFolderBoost288171 = kotlin.math.sqrt(
+                            (referenceShortEdgePx288171 / m.coerceAtLeast(1f)).coerceAtLeast(1f)
                         ).coerceIn(1f, 1.65f)
-                        lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827,
-                            refractionAmount = .2f * m * amount28827 * smallFolderBoost288167,
+                        val smallFolderProgress288171 =
+                            ((smallFolderBoost288171 - 1f) / .65f).coerceIn(0f, 1f)
+                        val folderHeightBoost288171 = 1f + .35f * smallFolderProgress288171
+                        val folderAmountBoost288171 =
+                            smallFolderBoost288171 * (1f + .20f * smallFolderProgress288171)
+                        lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288171,
+                            refractionAmount = .2f * m * amount28827 * folderAmountBoost288171,
                             depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
                             chromaticIntensity = optics28827.chromatic / 100f)
                     }
