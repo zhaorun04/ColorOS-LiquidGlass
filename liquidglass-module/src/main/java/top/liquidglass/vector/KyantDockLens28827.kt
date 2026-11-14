@@ -200,10 +200,9 @@ object KyantDockLens28827 {
             if (w <= 0 || h <= 0) return
             val native = geometryOf(hotseat) ?: return
             if (geometry.value != native) geometry.value = native
-            // Match the native outline with Compose clip and Kyant lens shape.
-            // This is evaluated on every geometry update, including optical setting changes.
-            val opticalCornerScale288166 = KyantOptics28827.material.cornerScale / 100f
-            val targetRadius288166 = (native.radius * opticalCornerScale288166)
+            // Dock always uses 100% of its native corner radius, independent of
+            // the Kyant folder corner-scale slider (100%..150%).
+            val targetRadius288166 = native.radius
                 .coerceIn(0f, minOf(native.width, native.height) * .5f)
             if (capsuleRadiusPx != targetRadius288166) {
                 capsuleRadiusPx = targetRadius288166
@@ -330,9 +329,9 @@ object KyantDockLens28827 {
         val mat = KyantOptics28827.material
         val opticalW = g.width
         val opticalH = g.height
-        // Use the same material snapshot and corner-scale rule as folders.
-        // Preserve the native capsule dimensions and clamp radius to its short side.
-        val effectiveRadiusPx288166 = (g.radius * (mat.cornerScale / 100f))
+        // Dock retains its native 100% capsule radius; folder corner-scale
+        // adjustment must not affect either Dock clipping or lens geometry.
+        val effectiveRadiusPx288166 = g.radius
             .coerceIn(0f, minOf(opticalW, opticalH) * .5f)
         val radiusDp = (effectiveRadiusPx288166 / density).dp
         val backdrop = rememberLayerBackdrop()

@@ -1,17 +1,7 @@
-V1.9.205.288.167｜小文件夹折射强度自适应增强版
+V1.9.205.288.168｜Dock 圆角固定原生 100% 修正版
 
-本版基于 V288.166：仅对文件夹 Kyant refractionAmount 施加连续尺寸补偿。
-短边 >=500dp：1.0倍；约182dp：最多1.65倍；折射高度仍保持原上限10%。
-不修改 Dock、Shader、Workspace 回弹同步路径；本版不宣称修复回弹抖动。
-Gradle 编译与真机回归仍待验证。
+本版基于 V288.167。Dock 的外层 Android View 裁剪、Compose 裁剪和 Kyant RoundedRectangle 折射形状统一采用原生 Dock 圆角（100%），不再跟随文件夹的圆角比例滑块 100%～150%。
 
-V1.9.205.288.166｜Kyant 圆角裁剪与折射几何同步修正版
+文件夹的圆角调节和小文件夹自适应折射增强保持不变；Dock 其余光学参数继续读取共享配置。
 
-修复：外层 Compose RoundedCornerShape 使用原生圆角，而内部 Kyant RoundedRectangle 使用缩放圆角，导致两层轮廓不同步。现在统一使用 effectiveCornerDp288165，跟随光学状态实时更新。
-保留圆角比例 100%～150%、折射高度 0%～10%、色差强度 0%～100%、Workspace A/B 与 Dock 现有逻辑。
-静态检查已完成；Gradle 编译和真机回归待验证。
-
-
-V1.9.205.288.166：Dock 与文件夹光学参数统一（阶段性源码）。
-Dock 现在读取共享 material 的折射高度、色差强度及圆角比例；原生 Dock 几何尺寸不变，裁剪圆角受短边一半限制。
-Workspace 回弹的同帧同步修复尚未完成，本版本不能视为回弹抖动已修复。
+Workspace 不翻页回弹抖动仍未修复。需在 GitHub Actions 执行 Android Gradle 编译并真机验证。
