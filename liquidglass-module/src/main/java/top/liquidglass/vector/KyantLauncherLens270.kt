@@ -6198,8 +6198,16 @@ object KyantLauncherLens270 {
                     blur(optics28827.blur.dp.toPx())
                     if (rootPipeline28879 != 3 && motionAbMode != 2 && zeroLensAb28868 == 0 && optics28827.strength > 0) {
                         val amount28827 = optics28827.strength / 100f
+                        // V288.167: boost only the *amount* for smaller folders.
+                        // Keep refraction height unchanged (<= 10% of the short edge) to
+                        // avoid expanding intersecting corner displacement regions.
+                        // 500dp folders remain unchanged; 182dp folders get up to 1.65x.
+                        val referenceShortEdgePx288167 = 500.dp.toPx()
+                        val smallFolderBoost288167 = kotlin.math.sqrt(
+                            (referenceShortEdgePx288167 / m.coerceAtLeast(1f)).coerceAtLeast(1f)
+                        ).coerceIn(1f, 1.65f)
                         lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827,
-                            refractionAmount = .2f * m * amount28827,
+                            refractionAmount = .2f * m * amount28827 * smallFolderBoost288167,
                             depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
                             chromaticIntensity = optics28827.chromatic / 100f)
                     }

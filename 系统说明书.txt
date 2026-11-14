@@ -1,3 +1,10 @@
+V1.9.205.288.167｜小文件夹折射强度自适应增强版
+
+本版基于 V288.166：仅对文件夹 Kyant refractionAmount 施加连续尺寸补偿。
+短边 >=500dp：1.0倍；约182dp：最多1.65倍；折射高度仍保持原上限10%。
+不修改 Dock、Shader、Workspace 回弹同步路径；本版不宣称修复回弹抖动。
+Gradle 编译与真机回归仍待验证。
+
 V1.9.205.288.166｜Kyant 圆角裁剪与折射几何同步修正版
 
 修复：外层 Compose RoundedCornerShape 使用原生圆角，而内部 Kyant RoundedRectangle 使用缩放圆角，导致两层轮廓不同步。现在统一使用 effectiveCornerDp288165，跟随光学状态实时更新。
