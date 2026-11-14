@@ -2055,6 +2055,12 @@ object KyantLauncherLens270 {
             android.provider.Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_matrix_versioned_288155", 0) == 1
         } catch (_: Throwable) { false }
+        // V288.160 opt-in: compare host-affine mapping against draw-phase source
+        // coordinates. This is a geometry A/B, not a confirmed HWUI-frame fix.
+        val workspaceSourceAb288160 = try {
+            Settings.Global.getInt(anchor.context.contentResolver,
+                "liquidglass_kyant_workspace_source_ab_288160", 0) == 1
+        } catch (_: Throwable) { false }
         val continuity288156 = try {
             Settings.Global.getInt(anchor.context.contentResolver,
                 "liquidglass_kyant_continuity_288156", 0) == 1
@@ -3276,7 +3282,7 @@ object KyantLauncherLens270 {
                 LensContent270(referenceState28832.value, sampleWidth.intValue, sampleHeight.intValue,
                 displayWidth, displayHeight, samplePosition, sampleRadiusPx.floatValue, effectiveSamplingMode28862,
                 effectiveLargeContinuous28862, effectiveRenderMode28862, motionAbMode, legacySyncAbMode, motionCompare28861, layerSampleEffective28862, if (nativeLayerMode in 2..3) 3 else displayIsolationMode, nativeLayerMode, bridgeBitmap, bridgeVersion,
-                gpuReference288110, affineGpuAb288153, frameSnapshot288154, matrixVersioned288155, continuity288156, frameOwnershipProbe288157, frame, outerClipIsolate288136,
+                gpuReference288110, affineGpuAb288153, frameSnapshot288154, matrixVersioned288155, continuity288156, frameOwnershipProbe288157, workspaceSourceAb288160, frame, outerClipIsolate288136,
                 offscreenCull288113, offscreenDraws288113, onscreenDraws288113,
                 multiHostProbe288114, multiHostCounts288114, multiHostWindow288114,
                 if (nativeCarrierAb28869 == 1) 2 else if (displayIsolationMode in 1..3) 0 else bridgeSyncMode,
@@ -4311,7 +4317,7 @@ object KyantLauncherLens270 {
         legacySyncAbMode: Int, motionCompare28861: Boolean, layerSampleMode28862: Int, displayIsolationMode: Int, nativeLayerMode: Int, bridgeBitmap: Bitmap?,
         bridgeVersion: androidx.compose.runtime.State<Int>,
         gpuReference288110: Boolean,
-        affineGpuAb288153: Boolean, frameSnapshot288154: Boolean, matrixVersioned288155: Boolean, continuity288156: Boolean, frameOwnershipProbe288157: Boolean, affineHost288153: View,
+        affineGpuAb288153: Boolean, frameSnapshot288154: Boolean, matrixVersioned288155: Boolean, continuity288156: Boolean, frameOwnershipProbe288157: Boolean, workspaceSourceAb288160: Boolean, affineHost288153: View,
         outerClipIsolate288136: Boolean,
         offscreenCull288113: Boolean,
         offscreenDraws288113: java.util.concurrent.atomic.AtomicLong,
@@ -5505,13 +5511,23 @@ object KyantLauncherLens270 {
                                 val traceJoint131 = jointProbe288131 && perfettoTrace288120
                                 if (traceJoint131) android.os.Trace.beginSection("LG131_SOURCE_BITMAP_H${traceHost28890}")
                                 try {
-                                    val continuityDone288156 = affineGpuAb288153 && frameSnapshot288154 &&
+                                    // B: consume the source position already sampled for this
+                                    // Compose draw. A: preserve V288.155 host affine path.
+                                    // Do not alter Dock or any Shader/Bitmap source.
+                                    val workspaceDone288160 = workspaceSourceAb288160 &&
+                                        affineGpuAb288153 && frameSnapshot288154 &&
+                                        matrixVersioned288155 && !continuity288156 &&
+                                        KyantWorkspaceSource288160.draw(
+                                            canvas.nativeCanvas, reference, bitmapPaint,
+                                            drawPosition.x, drawPosition.y, size.width, size.height,
+                                            previewWidth, previewHeight, screenW, screenH)
+                                    val continuityDone288156 = !workspaceDone288160 && affineGpuAb288153 && frameSnapshot288154 &&
                                          matrixVersioned288155 && continuity288156 &&
                                          KyantGpuContinuity288156.draw(
                                              canvas.nativeCanvas, reference, bitmapPaint,
                                              affineHost288153, size.width, size.height,
                                              screenW, screenH)
-                                     val versionedDone288155 = continuityDone288156 || (affineGpuAb288153 && frameSnapshot288154 && matrixVersioned288155 && !continuity288156) &&
+                                     val versionedDone288155 = workspaceDone288160 || continuityDone288156 || (affineGpuAb288153 && frameSnapshot288154 && matrixVersioned288155 && !continuity288156) &&
                                         KyantGpuVersionedSnapshot288155.draw(
                                             canvas.nativeCanvas, reference, bitmapPaint,
                                             affineHost288153, size.width, size.height,
@@ -5534,11 +5550,11 @@ object KyantLauncherLens270 {
                                         KyantCoordinateSpaceProbe288158.observe(
                                             affineHost288153, drawPosition.x, drawPosition.y,
                                             size.width, size.height,
-                                            if (continuityDone288156) 4 else if (versionedDone288155) 3
+                                            if (workspaceDone288160) 5 else if (continuityDone288156) 4 else if (versionedDone288155) 3
                                             else if (snapshotDone288154) 2 else if (affineDone288153) 1 else 0)
                                         KyantReboundEventProbe288159.observe(
                                             affineHost288153, drawPosition.x, drawPosition.y,
-                                            if (continuityDone288156) 4 else if (versionedDone288155) 3
+                                            if (workspaceDone288160) 5 else if (continuityDone288156) 4 else if (versionedDone288155) 3
                                             else if (snapshotDone288154) 2 else if (affineDone288153) 1 else 0)
                                     }
                                 } finally {
@@ -6172,15 +6188,15 @@ object KyantLauncherLens270 {
                 .drawBackdrop(
                 backdrop = backdrop,
                 // The OEM radius is in physical pixels. Convert to dp and clamp to avoid a circle.
-                shape = { RoundedRectangle(cornerDp) },
+                shape = { RoundedRectangle(cornerDp * (optics28827.cornerScale / 100f)) },
                 effects = {
                     val m = size.minDimension
                     blur(optics28827.blur.dp.toPx())
                     if (rootPipeline28879 != 3 && motionAbMode != 2 && zeroLensAb28868 == 0 && optics28827.strength > 0) {
                         val amount28827 = optics28827.strength / 100f
-                        lens(refractionHeight = .1f * m * amount28827,
+                        lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827,
                             refractionAmount = .2f * m * amount28827,
-                            depthEffect = true, chromaticAberration = false)
+                            depthEffect = true, chromaticAberration = optics28827.chromatic != 0)
                     }
                 },
                 highlight = { Highlight(alpha = optics28827.highlight / 100f,
