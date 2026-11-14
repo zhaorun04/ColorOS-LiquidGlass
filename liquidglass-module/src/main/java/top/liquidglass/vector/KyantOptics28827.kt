@@ -21,7 +21,8 @@ object KyantOptics28827 {
 
     const val CORNER_SCALE_KEY = "liquidglass_kyant_corner_scale_288161"
     const val REFRACTION_HEIGHT_KEY = "liquidglass_kyant_refraction_height_288161"
-    const val CHROMATIC_KEY = "liquidglass_kyant_chromatic_288161"
+    const val CHROMATIC_KEY = "liquidglass_kyant_chromatic_intensity_288163"
+    private const val LEGACY_CHROMATIC_KEY = "liquidglass_kyant_chromatic_288161"
 
     // Corner scale 100% preserves OEM geometry; refraction height 10% is
     // the previous hardcoded .1f of minDimension. Chromatic 0 preserves optics.
@@ -71,9 +72,11 @@ object KyantOptics28827 {
                 Settings.Global.getInt(resolver, STRENGTH_KEY, 100).coerceIn(0, 200),
                 Settings.Global.getInt(resolver, BLUR_KEY, 0).coerceIn(0, 20),
                 Settings.Global.getInt(resolver, HIGHLIGHT_KEY, 100).coerceIn(0, 100),
-                Settings.Global.getInt(resolver, CORNER_SCALE_KEY, 100).coerceIn(0, 150),
-                Settings.Global.getInt(resolver, REFRACTION_HEIGHT_KEY, 10).coerceIn(0, 50),
-                Settings.Global.getInt(resolver, CHROMATIC_KEY, 0).coerceIn(0, 1)
+                Settings.Global.getInt(resolver, CORNER_SCALE_KEY, 100).coerceIn(100, 150),
+                Settings.Global.getInt(resolver, REFRACTION_HEIGHT_KEY, 10).coerceIn(0, 10),
+                Settings.Global.getInt(resolver, CHROMATIC_KEY,
+                    if (Settings.Global.getInt(resolver, LEGACY_CHROMATIC_KEY, 0) != 0) 15 else 0
+                ).coerceIn(0, 100)
             )
             if (material != next) material = next
         } catch (t: Throwable) {

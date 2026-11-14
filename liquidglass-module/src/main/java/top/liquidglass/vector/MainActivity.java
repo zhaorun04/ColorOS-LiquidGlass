@@ -276,14 +276,14 @@ public final class MainActivity extends Activity {
         kyantGlobalSwitch28827("桌面文件夹 · Kyant0 光学引擎",KYANT_FOLDER_KEY);
         kyantGlobalSwitch28827("Dock 胶囊 · Kyant0 光学引擎",KYANT_DOCK_KEY);
         current.addView(text("两个 Kyant 开关独立。Dock Kyant 需要上方「启用 Dock 玻璃」主开关处于开启状态；不会擅自打开已手动关闭的 Dock。任一 Kyant 开启都会自动应用稳定光学路径并关闭冲突实验。",12,false));
-        current.addView(text("Kyant0 原版五项光学控制（保留原有高光附加项）：圆角默认跟随系统容器，100% 为原始圆角；色差 0=关闭、1=开启。",12,false));
-        kyantGlobalSlider28827("圆角半径 · 系统圆角比例 (%)", "liquidglass_kyant_corner_scale_288161",100,0,150);
+        current.addView(text("Kyant0 原版五项光学控制（保留原有高光附加项）：圆角默认跟随系统容器，100% 为原始圆角；色差强度支持 0～100%，0 为关闭，建议从 5%～15% 开始。",12,false));
+        kyantGlobalSlider28827("圆角半径 · 系统圆角比例 (%)", "liquidglass_kyant_corner_scale_288161",100,100,150);
         kyantGlobalSlider28827("模糊半径 (dp)", "liquidglass_kyant_optical_blur_28827",0,0,20);
-        kyantGlobalSlider28827("折射高度 · 容器短边比例 (%)", "liquidglass_kyant_refraction_height_288161",10,0,50);
+        kyantGlobalSlider28827("折射高度 · 容器短边比例 (%)", "liquidglass_kyant_refraction_height_288161",10,0,10);
         kyantGlobalSlider28827("折射强度 (%)", "liquidglass_kyant_optical_strength_28827",100,0,200);
-        kyantGlobalSlider28827("色差效果 (0 关闭 / 1 开启)", "liquidglass_kyant_chromatic_288161",0,0,1);
+        kyantGlobalSlider28827("色差强度 (%) · 0 为关闭", "liquidglass_kyant_chromatic_intensity_288163",0,0,100);
         kyantGlobalSlider28827("附加 · 高光透明度 (%)", "liquidglass_kyant_optical_highlight_28827",100,0,100);
-        current.addView(text("默认值与 V288.160 一致。修改后由 Launcher 监听全局配置并更新；圆角调整仅改变 Kyant 光学遮罩，不改变 OEM 文件夹和 Dock 的实际布局几何。",12,false));
+        current.addView(text("折射高度最大 10%，旧版超过 10% 的保存值会在渲染读取时自动限制。其他默认值与 V288.160 一致。修改后由 Launcher 监听全局配置并更新；圆角调整仅改变 Kyant 光学遮罩，不改变 OEM 文件夹和 Dock 的实际布局几何。",12,false));
         kyantLargeSquareSwitch28830();
         current.addView(text("此项仅作用于大方形文件夹；小文件夹、竖条、横条及 Dock 不受影响。连续采样与旧版裁剪可对照测试，切换后请重启 Launcher。",12,false));
     }

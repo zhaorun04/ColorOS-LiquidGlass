@@ -6196,7 +6196,8 @@ object KyantLauncherLens270 {
                         val amount28827 = optics28827.strength / 100f
                         lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827,
                             refractionAmount = .2f * m * amount28827,
-                            depthEffect = true, chromaticAberration = optics28827.chromatic != 0)
+                            depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
+                            chromaticIntensity = optics28827.chromatic / 100f)
                     }
                 },
                 highlight = { Highlight(alpha = optics28827.highlight / 100f,

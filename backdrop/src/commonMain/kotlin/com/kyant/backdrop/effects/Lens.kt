@@ -17,7 +17,8 @@ fun BackdropEffectScope.lens(
     @FloatRange(from = 0.0) refractionHeight: Float,
     @FloatRange(from = 0.0) refractionAmount: Float,
     depthEffect: Boolean = false,
-    chromaticAberration: Boolean = false
+    chromaticAberration: Boolean = false,
+    chromaticIntensity: Float = if (chromaticAberration) 1f else 0f
 ) {
     if (!isRuntimeShaderSupported()) return
     if (refractionHeight <= 0f || refractionAmount <= 0f) return
@@ -30,7 +31,7 @@ fun BackdropEffectScope.lens(
     val effect =
         if (cornerRadii != null) {
             val shader =
-                if (!chromaticAberration) {
+                if (chromaticIntensity <= 0f) {
                     obtainRuntimeShader(
                         "Refraction",
                         RoundedRectRefractionShaderString
@@ -48,8 +49,8 @@ fun BackdropEffectScope.lens(
                 setFloatUniform("refractionHeight", refractionHeight)
                 setFloatUniform("refractionAmount", -refractionAmount)
                 setFloatUniform("depthEffect", if (depthEffect) 1f else 0f)
-                if (chromaticAberration) {
-                    setFloatUniform("chromaticAberration", 1f)
+                if (chromaticIntensity > 0f) {
+                    setFloatUniform("chromaticAberration", chromaticIntensity.coerceIn(0f, 1f))
                 }
             }
             RuntimeShaderEffect(shader, "content")

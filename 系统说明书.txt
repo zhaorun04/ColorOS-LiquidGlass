@@ -1,22 +1,12 @@
-V1.9.205.288.160 — Workspace 绘制位置 A/B 实验
+V1.9.205.288.164｜Kyant 圆角比例 100%～150% 安全范围版
 
-实验目的：V288.159 捕获多个可见 Host 同时出现 11–12px 的 Host/Source 位移失配。本版提供一个默认关闭的绘制位置 A/B，验证这种失配是否与 Host affine 矩阵的二次读取有关。
+圆角比例滑块限制为 100%～150%，保持 OEM 原生圆角为下限；底层 Settings.Global 读取同步钳制到 100～150，旧配置低于 100 的值不会继续缩小渲染圆角。
+折射高度仍限制为 0～10%；色差强度仍为 0～100%；Workspace A/B 模式保留，建议 A 模式。
+注意：圆角下限是减少折痕风险的经验约束，不能证明或彻底修复二维折射映射的对角不连续。
 
-A（默认）：settings put global liquidglass_kyant_workspace_source_ab_288160 0，保留 V288.155 原绘制路径。
-B（实验）：settings put global liquidglass_kyant_workspace_source_ab_288160 1，使用当前 Compose drawPosition 和完整屏幕参考图计算采样目标矩形。
-前置开关：288153=1、288154=1、288155=1、288156=0，GPU reference 保持原有配置。
-设置后重启 Launcher；每个模式测试相同的右滑不翻页回弹次数。
+V1.9.205.288.163｜Kyant 色差强度连续调节版
 
-注意：B 不是对 Workspace 最终 HWUI 合成矩阵的保证。若 B 发生旋转/缩放异常、光学外观回退或抖动加剧，立即设为 0 并重启 Launcher。Dock、Shader 未改动。
-
-状态：源码静态检查及 ZIP 检查；未完成 Gradle 编译或真机测试。
-
-V1.9.205.288.161｜Kyant0 五项光学参数接入
-- 在原 V288.160 Workspace 采样 A/B 实验基础上增加：圆角比例、折射高度、色差开关。
-- 原有模糊半径、折射强度、高光透明度保留，界面共六项（五项 Kyant 原版光学控制 + 一项原模块高光附加控制）。
-- 默认值：圆角比例 100%（保持系统容器圆角）、模糊 0dp、折射高度 10%（原固定值）、折射强度 100%、色差 0（原关闭）、高光 100%。
-- 圆角比例只调整 Kyant 光学遮罩，不改变 OEM 文件夹/Dock 的实际布局与触摸几何；不等同于原版示例 APK 的绝对圆角半径。
-- 色差为 Kyant lens 的布尔参数，因此提供开关而不是虚构连续强度滑块。
-- 设置路径：Settings.Global 由设置页 root 写入；KyantOptics28827 监听六个材料键并更新 Compose 状态；KyantLauncherLens270 消费参数绘制。
-- 保留 V288.160 A/B 开关 liquidglass_kyant_workspace_source_ab_288160。
-- 本源码包未完成 Android Gradle 构建和真机测试，请先 CI 编译，再安装测试。
+色差滑块 0～100%，默认 0%，建议 5～15%。保留 V288.162 折射高度 10% 上限与 V288.160 A/B。
+底层使用原版 Kyant dispersion shader 的 chromaticAberration float uniform，而非仅切换 Boolean。旧版色差开关开启时新参数未设置则按 15% 兼容；新参数设置后优先使用新参数。
+当前仅修改 Launcher 文件夹的色差绘制；Dock 原有路径未改。
+本包为源码，未完成 Android Gradle 编译和真机测试。
