@@ -200,8 +200,13 @@ object KyantDockLens28827 {
             if (w <= 0 || h <= 0) return
             val native = geometryOf(hotseat) ?: return
             if (geometry.value != native) geometry.value = native
-            if (capsuleRadiusPx != native.radius) {
-                capsuleRadiusPx = native.radius
+            // Match the native outline with Compose clip and Kyant lens shape.
+            // This is evaluated on every geometry update, including optical setting changes.
+            val opticalCornerScale288166 = KyantOptics28827.material.cornerScale / 100f
+            val targetRadius288166 = (native.radius * opticalCornerScale288166)
+                .coerceIn(0f, minOf(native.width, native.height) * .5f)
+            if (capsuleRadiusPx != targetRadius288166) {
+                capsuleRadiusPx = targetRadius288166
                 frame.invalidateOutline()
             }
             val capsuleW = max(1, ceil(native.width.toDouble()).toInt())
@@ -325,7 +330,11 @@ object KyantDockLens28827 {
         val mat = KyantOptics28827.material
         val opticalW = g.width
         val opticalH = g.height
-        val radiusDp = (g.radius / density).dp
+        // Use the same material snapshot and corner-scale rule as folders.
+        // Preserve the native capsule dimensions and clamp radius to its short side.
+        val effectiveRadiusPx288166 = (g.radius * (mat.cornerScale / 100f))
+            .coerceIn(0f, minOf(opticalW, opticalH) * .5f)
+        val radiusDp = (effectiveRadiusPx288166 / density).dp
         val backdrop = rememberLayerBackdrop()
         val paint = androidx.compose.runtime.remember { Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG) }
         val dst = androidx.compose.runtime.remember { RectF() }
@@ -356,9 +365,12 @@ object KyantDockLens28827 {
                     val m = size.minDimension
                     blur(mat.blur.dp.toPx())
                     if (mat.strength > 0) {
-                        val factor = mat.strength/100f
-                        lens(refractionHeight=.1f*m*factor, refractionAmount=.2f*m*factor,
-                            depthEffect=true, chromaticAberration=false)
+                        val factor = mat.strength / 100f
+                        lens(refractionHeight = (mat.refractionHeight / 100f) * m * factor,
+                            refractionAmount = .2f * m * factor,
+                            depthEffect = true,
+                            chromaticAberration = mat.chromatic != 0,
+                            chromaticIntensity = mat.chromatic / 100f)
                     }
                 },
                 highlight = { Highlight(alpha=mat.highlight/100f, style=HighlightStyle.Plain) }
