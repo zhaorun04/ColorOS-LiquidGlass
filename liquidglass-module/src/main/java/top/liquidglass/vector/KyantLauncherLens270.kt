@@ -5541,7 +5541,9 @@ object KyantLauncherLens270 {
                                             canvas.nativeCanvas, reference, bitmapPaint,
                                             affineHost288153, size.width, size.height,
                                             screenW, screenH)
-                                    val affineDone288153 = snapshotDone288154 || (affineGpuAb288153 && !snapshotDone288154) &&
+                                    // V288.172: do not bypass the validated snapshot path with an
+                                    // unchecked second affine read when 155 is enabled.
+                                    val affineDone288153 = snapshotDone288154 || (affineGpuAb288153 && !snapshotDone288154 && !matrixVersioned288155) &&
                                         KyantGpuAffine288153.draw(
                                             canvas.nativeCanvas, reference, bitmapPaint,
                                             affineHost288153, size.width, size.height,

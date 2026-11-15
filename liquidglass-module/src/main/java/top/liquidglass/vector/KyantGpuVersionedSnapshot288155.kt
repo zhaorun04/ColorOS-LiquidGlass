@@ -53,6 +53,22 @@ internal object KyantGpuVersionedSnapshot288155 {
             host.rootView.getLocationInWindow(window)
             val offsetX = window[0] - screen[0]
             val offsetY = window[1] - screen[1]
+            // V288.172: reject a torn geometry read. A Workspace rebound can
+            // change a parent transform between reading the global matrix and
+            // reading root/window coordinates. Never cache or draw a mapping
+            // assembled from two different observed geometry states.
+            val verifyGlobal = Matrix()
+            host.transformMatrixToGlobal(verifyGlobal)
+            val verifyValues = FloatArray(9)
+            verifyGlobal.getValues(verifyValues)
+            if (!verifyValues.all { it.isFinite() } ||
+                values.indices.any { values[it] != verifyValues[it] }) return false
+            val verifyScreen = IntArray(2)
+            val verifyWindow = IntArray(2)
+            host.rootView.getLocationOnScreen(verifyScreen)
+            host.rootView.getLocationInWindow(verifyWindow)
+            if (verifyWindow[0] - verifyScreen[0] != offsetX ||
+                verifyWindow[1] - verifyScreen[1] != offsetY) return false
             val state = caches.getOrPut(host) { HostCache() }
             val same = state.valid &&
                 state.width == composeWidth && state.height == composeHeight &&
