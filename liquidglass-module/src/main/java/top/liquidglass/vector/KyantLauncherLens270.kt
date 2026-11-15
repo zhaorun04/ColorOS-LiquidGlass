@@ -1558,16 +1558,19 @@ object KyantLauncherLens270 {
         // reference/position changes, and sends a heartbeat after 24 ms.
         // It is an experimental source-invalidation gate, NOT a visual-key proof:
         // shader/dynamic inputs might invalidate independently.
+        // V288.174: mode 3 is a delivery-aware stable-state notification gate.
+        // Never suppresses motion/reference changes; 100ms safety heartbeat.
+        // Modes 0/1/2 remain selectable for regression testing.
         // V288.135: three-mode A/B/C. When the new key is unset (-1), keep
         // compatibility with V288.134's existing mode switch.
         val bridgeNotifyMode135 = try {
             val configured = Settings.Global.getInt(anchor.context.contentResolver,
-                "liquidglass_kyant_bridge_notify_mode_288135", -1)
-            if (configured in 0..2) configured else Settings.Global.getInt(
+                "liquidglass_kyant_bridge_notify_mode_288135", 3)
+            if (configured in 0..3) configured else Settings.Global.getInt(
                 anchor.context.contentResolver,
                 "liquidglass_kyant_bridge_notify_ab_288134", 0).coerceIn(0, 1)
         } catch (_: Throwable) { 0 }
-        val bridgeNotifyAb288134 = bridgeNotifyMode135
+        val bridgeNotifyAb288134 = if (bridgeNotifyMode135 == 1) 1 else 0
         // 0=nativeEligible, 1=passed, 2=suppressedStable,
         // 3=passedMotion, 4=passedReference, 5=passedHeartbeat,
         // 6=passedInitial, 7=passedUnsupported
@@ -2096,7 +2099,7 @@ object KyantLauncherLens270 {
             "effective=$outerClipIsolate288136 gpu=$gpuReference288110 " +
             "size=${previewWidth}x${previewHeight} " +
             "scope=outer_compose_rounded_clip_only_not_internal_kyant_shape")
-        if (bridgeNotifyMode135 in 0..2) android.util.Log.i("KyantBridge288135",
+        if (bridgeNotifyMode135 in 0..3) android.util.Log.i("KyantBridge288135",
             "KYANT288135_HOST host=$trace28815Host mode=$bridgeNotifyMode135 " +
             "gpu=$gpuReference288110 carrier=$nativeCarrierAb28869 " +
             "frameSync=$frameSync28822 scope=notification_state_machine_not_gpu_frames")
@@ -2602,7 +2605,7 @@ object KyantLauncherLens270 {
                 }
                 // V288.135: the original A/B code is preserved verbatim for modes
                 // 0 and 1. Mode 2 uses a separate delivery-aware state machine.
-                if (bridgeNotifyMode135 == 2) {
+                if (bridgeNotifyMode135 == 2 || bridgeNotifyMode135 == 3) {
                     if (!notifyEligible133) {
                         bridgeNotifyCounts135.incrementAndGet(6)
                         if (bridgeProbe133) bridgeProducer133.incrementAndGet(5)
@@ -2625,12 +2628,12 @@ object KyantLauncherLens270 {
                             base135.bitmapGen != current135.bitmapGen
                         val now135 = SystemClock.elapsedRealtimeNanos()
                         val heartbeat135 = deliveredAtNs135 == 0L ||
-                            now135 - deliveredAtNs135 >= 24_000_000L
+                            now135 - deliveredAtNs135 >= (if (bridgeNotifyMode135 == 3) 100_000_000L else 24_000_000L)
                         // This experimental gate must never suppress movement or
                         // wallpaper replacement. Limit to ONE stable suppression
                         // between delivered notifications, plus 24ms heartbeat.
                         val suppress135 = supported135 && !posChanged135 &&
-                            !refChanged135 && !heartbeat135 && skippedSinceDelivery135 < 1
+                            !refChanged135 && !heartbeat135 && (bridgeNotifyMode135 == 3 || skippedSinceDelivery135 < 1)
                         if (suppress135) {
                             skippedSinceDelivery135++
                             bridgeNotifyCounts135.incrementAndGet(3)
@@ -2690,7 +2693,7 @@ object KyantLauncherLens270 {
                         else if (!notifyEligible133) bridgeProducer133.incrementAndGet(5)
                     }
                 }
-                if (bridgeNotifyMode135 == 2 && count % 240L == 0L) {
+                if (bridgeNotifyMode135 in 2..3 && count % 240L == 0L) {
                     val events135 = bridgeNotifyCounts135.get(0)
                     val partition135 = bridgeNotifyCounts135.get(1) +
                         bridgeNotifyCounts135.get(2) + bridgeNotifyCounts135.get(3)
@@ -6210,9 +6213,9 @@ object KyantLauncherLens270 {
                         ).coerceIn(1f, 1.65f)
                         val smallFolderProgress288171 =
                             ((smallFolderBoost288171 - 1f) / .65f).coerceIn(0f, 1f)
-                        val folderHeightBoost288171 = 1f + .35f * smallFolderProgress288171
+                        val folderHeightBoost288171 = 2f * (1f + .35f * smallFolderProgress288171)
                         val folderAmountBoost288171 =
-                            smallFolderBoost288171 * (1f + .20f * smallFolderProgress288171)
+                            2f * smallFolderBoost288171 * (1f + .20f * smallFolderProgress288171)
                         lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288171,
                             refractionAmount = .2f * m * amount28827 * folderAmountBoost288171,
                             depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
