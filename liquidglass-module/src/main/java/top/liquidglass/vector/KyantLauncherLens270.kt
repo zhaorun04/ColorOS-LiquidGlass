@@ -6203,24 +6203,24 @@ object KyantLauncherLens270 {
                     blur(optics28827.blur.dp.toPx())
                     if (rootPipeline28879 != 3 && motionAbMode != 2 && zeroLensAb28868 == 0 && optics28827.strength > 0) {
                         val amount28827 = optics28827.strength / 100f
-                        // V288.171: adaptive compensation for small square, horizontal,
-                        // and vertical folders. The short edge drives optical thickness,
-                        // while the continuous size factor avoids shape-type discontinuities.
-                        // Large folders (short edge >= 500dp) retain the stable baseline.
-                        val referenceShortEdgePx288171 = 500.dp.toPx()
-                        val smallFolderBoost288171 = kotlin.math.sqrt(
-                            (referenceShortEdgePx288171 / m.coerceAtLeast(1f)).coerceAtLeast(1f)
-                        ).coerceIn(1f, 1.65f)
-                        val smallFolderProgress288171 =
-                            ((smallFolderBoost288171 - 1f) / .65f).coerceIn(0f, 1f)
-                        val folderHeightBoost288171 = .5f * (1f + .35f * smallFolderProgress288171)
-                        val folderAmountBoost288171 =
-                            .5f * smallFolderBoost288171 * (1f + .20f * smallFolderProgress288171)
-                        // V288.177: Keep the optical transition inside the shape's short edge.
-                        // Do not attenuate refractionAmount when limiting the transition width.
-                        val folderRefractionHeight288177 = ((optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288171)
+                        // V288.178: continuous inverse-short-edge optical scaling.
+                        // Smaller glass containers receive higher multipliers, regardless
+                        // of square/horizontal/vertical shape. No discrete size classes.
+                        val referenceShortEdgePx288178 = 500.dp.toPx()
+                        val inverseSize288178 = kotlin.math.sqrt(
+                            (referenceShortEdgePx288178 / m.coerceAtLeast(1f)).coerceAtLeast(1f)
+                        )
+                        val heightSizeBoost288178 = inverseSize288178.coerceAtMost(1.6f)
+                        val amountSizeBoost288178 = inverseSize288178.coerceAtMost(2.0f)
+                        // Raise the weak V288.177 baseline while keeping displacement
+                        // and transition-width controls independent.
+                        val folderHeightBoost288178 = .75f * heightSizeBoost288178
+                        val folderAmountBoost288178 = .85f * amountSizeBoost288178
+                        // Preserve the V288.177 bound so the transition remains inside
+                        // the container's short edge even at maximum slider values.
+                        val folderRefractionHeight288178 = ((optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288178)
                             .coerceIn(0f, m * .48f)
-                        lens(refractionHeight = folderRefractionHeight288177,
+                        lens(refractionHeight = folderRefractionHeight288178,
                             refractionAmount = .2f * m * amount28827 * folderAmountBoost288171,
                             depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
                             chromaticIntensity = optics28827.chromatic / 100f)

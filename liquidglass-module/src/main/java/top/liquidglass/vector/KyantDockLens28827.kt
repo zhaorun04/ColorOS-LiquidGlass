@@ -365,18 +365,19 @@ object KyantDockLens28827 {
                     blur(mat.blur.dp.toPx())
                     if (mat.strength > 0) {
                         val factor = mat.strength / 100f
-                        // V288.171: Dock-only optical compensation. The short
-                        // capsule dimension otherwise makes the same slider values
-                        // visually much weaker than on large square folders.
-                        // Keep the native Dock corner radius unchanged.
-                        val dockHeightBoost288171 = 1.25f
-                        val dockAmountBoost288171 = 1.4f
-                        // V288.177: The refraction transition must fit inside the short edge.
-                        // Keep the displacement amplitude independent of this geometry bound.
-                        val dockRefractionHeight288177 = ((mat.refractionHeight / 100f) * m * factor * dockHeightBoost288171)
+                        // V288.178: the Dock is a short glass capsule and uses the
+                        // same continuous inverse-short-edge principle as folders.
+                        // Keep its OEM corner geometry and optical slider semantics.
+                        val referenceShortEdgePx288178 = 500.dp.toPx()
+                        val dockInverseSize288178 = kotlin.math.sqrt(
+                            (referenceShortEdgePx288178 / m.coerceAtLeast(1f)).coerceAtLeast(1f)
+                        )
+                        val dockHeightBoost288178 = .75f * dockInverseSize288178.coerceAtMost(1.8f)
+                        val dockAmountBoost288178 = 1.4f * dockInverseSize288178.coerceAtMost(2.0f)
+                        val dockRefractionHeight288178 = ((mat.refractionHeight / 100f) * m * factor * dockHeightBoost288178)
                             .coerceIn(0f, m * .48f)
-                        lens(refractionHeight = dockRefractionHeight288177,
-                            refractionAmount = .2f * m * factor * dockAmountBoost288171,
+                        lens(refractionHeight = dockRefractionHeight288178,
+                            refractionAmount = .2f * m * factor * dockAmountBoost288178,
                             depthEffect = true,
                             chromaticAberration = mat.chromatic != 0,
                             chromaticIntensity = mat.chromatic / 100f)
