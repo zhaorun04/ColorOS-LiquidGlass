@@ -6213,10 +6213,14 @@ object KyantLauncherLens270 {
                         ).coerceIn(1f, 1.65f)
                         val smallFolderProgress288171 =
                             ((smallFolderBoost288171 - 1f) / .65f).coerceIn(0f, 1f)
-                        val folderHeightBoost288171 = 1f * (1f + .35f * smallFolderProgress288171)
+                        val folderHeightBoost288171 = .5f * (1f + .35f * smallFolderProgress288171)
                         val folderAmountBoost288171 =
-                            1f * smallFolderBoost288171 * (1f + .20f * smallFolderProgress288171)
-                        lens(refractionHeight = (optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288171,
+                            .5f * smallFolderBoost288171 * (1f + .20f * smallFolderProgress288171)
+                        // V288.177: Keep the optical transition inside the shape's short edge.
+                        // Do not attenuate refractionAmount when limiting the transition width.
+                        val folderRefractionHeight288177 = ((optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288171)
+                            .coerceIn(0f, m * .48f)
+                        lens(refractionHeight = folderRefractionHeight288177,
                             refractionAmount = .2f * m * amount28827 * folderAmountBoost288171,
                             depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
                             chromaticIntensity = optics28827.chromatic / 100f)

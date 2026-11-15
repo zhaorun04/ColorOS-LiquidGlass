@@ -369,9 +369,13 @@ object KyantDockLens28827 {
                         // capsule dimension otherwise makes the same slider values
                         // visually much weaker than on large square folders.
                         // Keep the native Dock corner radius unchanged.
-                        val dockHeightBoost288171 = 2.5f
-                        val dockAmountBoost288171 = 2.8f
-                        lens(refractionHeight = (mat.refractionHeight / 100f) * m * factor * dockHeightBoost288171,
+                        val dockHeightBoost288171 = 1.25f
+                        val dockAmountBoost288171 = 1.4f
+                        // V288.177: The refraction transition must fit inside the short edge.
+                        // Keep the displacement amplitude independent of this geometry bound.
+                        val dockRefractionHeight288177 = ((mat.refractionHeight / 100f) * m * factor * dockHeightBoost288171)
+                            .coerceIn(0f, m * .48f)
+                        lens(refractionHeight = dockRefractionHeight288177,
                             refractionAmount = .2f * m * factor * dockAmountBoost288171,
                             depthEffect = true,
                             chromaticAberration = mat.chromatic != 0,
