@@ -6221,7 +6221,7 @@ object KyantLauncherLens270 {
                         val folderRefractionHeight288178 = ((optics28827.refractionHeight / 100f) * m * amount28827 * folderHeightBoost288178)
                             .coerceIn(0f, m * .48f)
                         lens(refractionHeight = folderRefractionHeight288178,
-                            refractionAmount = .2f * m * amount28827 * folderAmountBoost288171,
+                            refractionAmount = .2f * m * amount28827 * folderAmountBoost288178,
                             depthEffect = true, chromaticAberration = optics28827.chromatic != 0,
                             chromaticIntensity = optics28827.chromatic / 100f)
                     }
