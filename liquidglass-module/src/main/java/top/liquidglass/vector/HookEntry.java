@@ -1043,7 +1043,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(v.length>=32){nonlinear107=clampInt(x[26],0,100);thickness107=clampInt(x[27],0,100);interior107=clampInt(x[28],0,100);focus107=clampInt(x[29],0,100);reflection107=clampInt(x[30],0,100);}
             // V219: 0.1 dp blur survives Launcher restart and root publications.
             if(v.length>=34)folderMicroBlurDp95=clampInt(x[32],0,400)/10f;
-            int nextIconBrightness288199=v.length>=35?clampInt(x[33],0,150):100;
+            int nextIconBrightness288199=v.length>=35?clampInt(x[33],50,150):100;
             if(nextIconBrightness288199!=iconSpecularBrightness288199){
                 iconSpecularBrightness288199=nextIconBrightness288199;
                 synchronized(ICON_INNER_MASK_288187){ICON_INNER_MASK_288187.clear();ICON_INNER_RETRY_288187.clear();}
@@ -9539,26 +9539,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(d>15f)continue;
                 // Widths doubled to preserve the same *physical* optical
                 // thickness when the cached mask resolution doubles.
+                // V288.201: preserve the V288.199 verified silhouette/EDT,
+                // raster target, corner alignment and 5x5 alpha resolve.
+                // Change ONLY the optical amplitude profile *inside* that
+                // established distance field. No new border or shifted rim.
+                float crest=(float)Math.exp(-d*d/(2f*2.15f*2.15f));
+                float feather=(float)Math.exp(-d*d/(2f*5.4f*5.4f));
                 float u=(x+.5f)/n;
                 float v=(y+.5f)/n;
-                // V288.200: one unified intensity drives the entire optical
-                // profile. Avoid a separate bright contour at the silhouette:
-                // the reflection rises gently inside the curved edge, then
-                // fades monotonically toward the icon interior. Preserve the
-                // existing EDT, icon silhouette, and 5x5 alpha resolve.
+                float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
+                float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
+                float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
+                float cornerGlint=.22f*((1f-u)*(1f-v)+u*v);
+                float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
+                // Same d=0 crest as V288.199: keep light attached to the
+                // actual drawable alpha contour rather than moving its peak
+                // inward. Lower the broad halo and smoothly widen the crest.
+                float baseline=(crest*.88f+feather*.12f)*rimStrength;
+                float shoulder=(float)Math.exp(-d*d/(2f*3.7f*3.7f));
+                float shoulderLight=.055f*shoulder*(.38f+.62f*horizontalGlint);
                 float strength=iconSpecularBrightness288199/100f;
-                float innerRise=1f-(float)Math.exp(-d*d/(2f*1.45f*1.45f));
-                float softBody=(float)Math.exp(-d*d/(2f*5.8f*5.8f));
-                float broadBody=(float)Math.exp(-d*d/(2f*9.0f*9.0f));
-                float directional=.42f+.36f*(1f-u)*(1f-v)+.22f*u*v;
-                float softHighlight=innerRise*(.80f*softBody+.20f*broadBody)*directional;
-                float brightness=strength*softHighlight*115f;
-                int a=Math.min(255,Math.round(alpha/255f*brightness));
-                // No independent dark stroke: at 0%, the optical overlay is
-                // fully transparent, including the former shoulder component.
-                int dark=0;
+                float brightness=(baseline+shoulderLight)*strength;
+                int a=Math.min(255,Math.round(alpha/255f*brightness*126f));
+                // All optical components share the single strength control;
+                // 0% means no overlay, with no independent dark outline.
                 if(a>0){out[i]=(a<<24)|0x00F4F9FF;active++;}
-                else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
             }
             if(active<100)return null;
             // V288.198: separable, symmetric 5-tap optical-alpha resolve.
