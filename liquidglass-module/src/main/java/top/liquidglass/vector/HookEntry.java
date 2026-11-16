@@ -9531,23 +9531,42 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 if(alpha==0)continue;
                 float d=(float)Math.sqrt(distanceSquared[i]);
                 if(d>15f)continue;
-                // Widths doubled to preserve the same *physical* optical
-                // thickness when the cached mask resolution doubles.
-                float crest=(float)Math.exp(-d*d/(2f*1.8f*1.8f));
-                float feather=(float)Math.exp(-d*d/(2f*6.5f*6.5f));
+                // V288.195: three-dimensional inward bevel, with NO changes
+                // to the verified V288.187 silhouette or target coordinates.
+                // Each band is a smooth function of the same Euclidean edge
+                // distance, so corners and straight edges share one profile.
+                float outerCrest=(float)Math.exp(-d*d/(2f*1.35f*1.35f));
+                float shoulder=(float)Math.exp(-(d-3.2f)*(d-3.2f)/(2f*2.5f*2.5f));
+                float innerTrough=(float)Math.exp(-(d-7.3f)*(d-7.3f)/(2f*2.8f*2.8f));
+                float innerBounce=(float)Math.exp(-(d-11f)*(d-11f)/(2f*2.4f*2.4f));
                 float u=(x+.5f)/n;
                 float v=(y+.5f)/n;
+                // Preserve the V288.191 top/bottom glints, but add a
+                // subtle directional shoulder and a recessed inner shadow.
                 float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
                 float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
                 float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
                 float cornerGlint=.22f*((1f-u)*(1f-v)+u*v);
                 float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
-                float brightness=(crest*.82f+feather*.18f)*rimStrength;
-                int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
-                float bevel=(.16f+.22f*(u+v)*.5f)*feather;
-                int dark=Math.min(255,Math.round(alpha/255f*bevel*16f));
-                if(a>0){out[i]=(a<<24)|0x00F4F9FF;active++;}
-                else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
+                float directional=.52f+.48f*((1f-u)*(1f-v)+u*v);
+                float light=(outerCrest*.74f+shoulder*.43f+innerBounce*.14f)
+                    *(rimStrength*.84f+.16f*directional);
+                float shadow=innerTrough*(.23f+.14f*directional);
+                float coverage=alpha/255f;
+                int lightAlpha=Math.min(255,Math.round(coverage*light*153f));
+                int shadowAlpha=Math.min(255,Math.round(coverage*shadow*91f));
+                // Premix in the cache, rather than drawing an extra outline.
+                // The dark inner shoulder provides thickness without an
+                // external frame. Final alpha remains <= source alpha.
+                int combined=Math.min(alpha,lightAlpha+shadowAlpha);
+                if(combined>0){
+                    float brightFraction=lightAlpha/(float)Math.max(1,lightAlpha+shadowAlpha);
+                    int r=Math.round(25f+219f*brightFraction);
+                    int g=Math.round(34f+215f*brightFraction);
+                    int bl=Math.round(53f+202f*brightFraction);
+                    out[i]=(combined<<24)|(r<<16)|(g<<8)|bl;
+                    active++;
+                }
             }
             if(active<100)return null;
             // V288.190: subpixel coverage resolve (retained in V288.191). The 384px distance-field
@@ -9562,26 +9581,36 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 int originalAlpha=pixels[i]>>>24;
                 if(originalAlpha==0)continue;
                 int weighted=0;
+                int weightedR=0,weightedG=0,weightedB=0;
                 for(int oy=-1;oy<=1;oy++){
                     int yy=Math.max(0,Math.min(n-1,y+oy));
                     int wy=oy==0?2:1;
                     for(int ox=-1;ox<=1;ox++){
                         int xx=Math.max(0,Math.min(n-1,x+ox));
                         int wx=ox==0?2:1;
-                        weighted+=((out[yy*n+xx]>>>24)*wx*wy);
+                        int color=out[yy*n+xx];
+                        int a=color>>>24;
+                        int weight=wx*wy;
+                        weighted+=a*weight;
+                        weightedR+=((color>>>16)&255)*a*weight;
+                        weightedG+=((color>>>8)&255)*a*weight;
+                        weightedB+=(color&255)*a*weight;
                     }
                 }
                 int smoothed=(weighted+8)/16;
-                // Respect the actual antialiased edge coverage, not a new
-                // alpha-threshold contour. This keeps the V288.187 alignment.
                 int a=Math.min(smoothed,originalAlpha);
-                if(a>0)resolved[i]=(a<<24)|0x00F4F9FF;
+                if(a>0){
+                    int r=Math.min(255,(weightedR+weighted/2)/Math.max(1,weighted));
+                    int g=Math.min(255,(weightedG+weighted/2)/Math.max(1,weighted));
+                    int b=Math.min(255,(weightedB+weighted/2)/Math.max(1,weighted));
+                    resolved[i]=(a<<24)|(r<<16)|(g<<8)|b;
+                }
             }
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
             result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288194_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288195_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
