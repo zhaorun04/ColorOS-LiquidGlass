@@ -9414,6 +9414,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
     // sampling coordinates and draw target EXACTLY unchanged. Compute a
     // two-pass 8-connected chamfer distance field instead of quantizing the
     // closest edge to integer Chebyshev pixels (the V288.188 stair-step).
+    // Felzenszwalb/Huttenlocher 1D lower-envelope EDT, O(n).
+    // All arrays are local to one cache-generation call (no shared scratch).
+    private static void iconEdt1d288191(float[] f,float[] out,int n,int[] v,float[] z){
+        int k=0;
+        v[0]=0;
+        z[0]=Float.NEGATIVE_INFINITY;
+        z[1]=Float.POSITIVE_INFINITY;
+        for(int q=1;q<n;q++){
+            float s;
+            do{
+                int p=v[k];
+                s=((f[q]+q*q)-(f[p]+p*p))/(2f*(q-p));
+                if(s<=z[k])k--;
+                else break;
+            }while(k>=0);
+            if(k<0){k=0;v[0]=q;z[0]=Float.NEGATIVE_INFINITY;z[1]=Float.POSITIVE_INFINITY;}
+            else {k++;v[k]=q;z[k]=s;z[k+1]=Float.POSITIVE_INFINITY;}
+        }
+        k=0;
+        for(int q=0;q<n;q++){
+            while(z[k+1]<q)k++;
+            int d=q-v[k];
+            out[q]=d*d+f[v[k]];
+        }
+    }
     private static android.graphics.Bitmap computeIconInnerMask288187(Drawable drawable){
         final int n=384;
         android.graphics.Bitmap sample=null;
@@ -9437,45 +9462,37 @@ public final class HookEntry implements IXposedHookLoadPackage {
             for(int pos:new int[]{0,n-1,(n-1)*n,n*n-1})
                 if((pixels[pos]>>>24)>40)corners++;
             if(corners>=2)return null;
-            final float inf=10000f;
-            final float diagonal=1.41421356f;
-            float[] distance=new float[n*n];
-            // Alpha=128 is the geometric boundary; fractional alpha retains
-            // subpixel coverage at the rim, including curved corners.
+            // V288.191: exact squared Euclidean distance transform (EDT),
+            // separable in X/Y. Only boundary pixels are seeds; fractional
+            // alpha coverage provides a subpixel starting distance. Unlike
+            // 8-neighbour chamfer, diagonal and axial distances are isotropic.
+            final float inf=1.0e9f;
+            float[] distanceSquared=new float[n*n];
             for(int y=0;y<n;y++)for(int x=0;x<n;x++){
                 int i=y*n+x;
-                int a=pixels[i]>>>24;
-                if(a<128){distance[i]=0f;continue;}
+                int alpha=pixels[i]>>>24;
+                if(alpha<128){distanceSquared[i]=0f;continue;}
                 boolean edge=x==0||y==0||x==n-1||y==n-1;
-                if(!edge){
-                    edge=((pixels[i-1]>>>24)<128)||((pixels[i+1]>>>24)<128)||
-                        ((pixels[i-n]>>>24)<128)||((pixels[i+n]>>>24)<128);
-                }
-                distance[i]=edge ? Math.max(0f,(a-128f)/255f) : inf;
+                if(!edge)edge=((pixels[i-1]>>>24)<128)||
+                    ((pixels[i+1]>>>24)<128)||
+                    ((pixels[i-n]>>>24)<128)||
+                    ((pixels[i+n]>>>24)<128);
+                float subpixel=Math.max(0f,(alpha-128f)/255f);
+                distanceSquared[i]=edge?subpixel*subpixel:inf;
             }
-            // Linear-time chamfer transform: no quadratic neighborhood scans
-            // and no expensive per-frame computation (the mask is cached).
-            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
-                int i=y*n+x;
-                float d=distance[i];
-                if(x>0)d=Math.min(d,distance[i-1]+1f);
-                if(y>0){
-                    d=Math.min(d,distance[i-n]+1f);
-                    if(x>0)d=Math.min(d,distance[i-n-1]+diagonal);
-                    if(x+1<n)d=Math.min(d,distance[i-n+1]+diagonal);
-                }
-                distance[i]=d;
+            float[] rowInput=new float[n];
+            float[] rowOutput=new float[n];
+            int[] edtV=new int[n];
+            float[] edtZ=new float[n+1];
+            for(int y=0;y<n;y++){
+                System.arraycopy(distanceSquared,y*n,rowInput,0,n);
+                iconEdt1d288191(rowInput,rowOutput,n,edtV,edtZ);
+                System.arraycopy(rowOutput,0,distanceSquared,y*n,n);
             }
-            for(int y=n-1;y>=0;y--)for(int x=n-1;x>=0;x--){
-                int i=y*n+x;
-                float d=distance[i];
-                if(x+1<n)d=Math.min(d,distance[i+1]+1f);
-                if(y+1<n){
-                    d=Math.min(d,distance[i+n]+1f);
-                    if(x>0)d=Math.min(d,distance[i+n-1]+diagonal);
-                    if(x+1<n)d=Math.min(d,distance[i+n+1]+diagonal);
-                }
-                distance[i]=d;
+            for(int x=0;x<n;x++){
+                for(int y=0;y<n;y++)rowInput[y]=distanceSquared[y*n+x];
+                iconEdt1d288191(rowInput,rowOutput,n,edtV,edtZ);
+                for(int y=0;y<n;y++)distanceSquared[y*n+x]=rowOutput[y];
             }
             int[] out=new int[n*n];
             int active=0;
@@ -9483,7 +9500,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 int i=y*n+x;
                 int alpha=pixels[i]>>>24;
                 if(alpha==0)continue;
-                float d=distance[i];
+                float d=(float)Math.sqrt(distanceSquared[i]);
                 if(d>15f)continue;
                 // Widths doubled to preserve the same *physical* optical
                 // thickness when the cached mask resolution doubles.
@@ -9504,7 +9521,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
             }
             if(active<100)return null;
-            // V288.190: subpixel coverage resolve. The 384px distance-field
+            // V288.190: subpixel coverage resolve (retained in V288.191). The 384px distance-field
             // still produces tiny directional quantization on a 1px glint.
             // Resolve ONLY the optical alpha using a symmetric 3x3 tent
             // kernel; clip the resolved coverage to the ORIGINAL icon alpha
@@ -9535,7 +9552,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288189_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288191_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
