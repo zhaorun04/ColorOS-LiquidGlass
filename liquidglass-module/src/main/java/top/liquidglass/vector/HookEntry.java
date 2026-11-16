@@ -9504,8 +9504,35 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
             }
             if(active<100)return null;
+            // V288.190: subpixel coverage resolve. The 384px distance-field
+            // still produces tiny directional quantization on a 1px glint.
+            // Resolve ONLY the optical alpha using a symmetric 3x3 tent
+            // kernel; clip the resolved coverage to the ORIGINAL icon alpha
+            // so neither a halo nor a shifted silhouette can be introduced.
+            // No changes to draw target, drawable bounds or cache keys.
+            int[] resolved=new int[n*n];
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                int i=y*n+x;
+                int originalAlpha=pixels[i]>>>24;
+                if(originalAlpha==0)continue;
+                int weighted=0;
+                for(int oy=-1;oy<=1;oy++){
+                    int yy=Math.max(0,Math.min(n-1,y+oy));
+                    int wy=oy==0?2:1;
+                    for(int ox=-1;ox<=1;ox++){
+                        int xx=Math.max(0,Math.min(n-1,x+ox));
+                        int wx=ox==0?2:1;
+                        weighted+=((out[yy*n+xx]>>>24)*wx*wy);
+                    }
+                }
+                int smoothed=(weighted+8)/16;
+                // Respect the actual antialiased edge coverage, not a new
+                // alpha-threshold contour. This keeps the V288.187 alignment.
+                int a=Math.min(smoothed,originalAlpha);
+                if(a>0)resolved[i]=(a<<24)|0x00F4F9FF;
+            }
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
-            result.setPixels(out,0,n,0,0,n,n);
+            result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
             if(diagnostics)log("ICON_OPTICS_288189_MASK_FAILED "+t.getClass().getSimpleName());
