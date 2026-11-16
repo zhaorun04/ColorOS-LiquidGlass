@@ -9298,7 +9298,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             for(int y=0;y<n;y++){
                 left[y]=n;right[y]=-1;
                 for(int x=0;x<n;x++){
-                    if((pixels[y*n+x]>>>24)>=96){
+                    if((pixels[y*n+x]>>>24)>=208){
                         if(x<left[y])left[y]=x;
                         right[y]=x;
                     }
@@ -9312,9 +9312,29 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(first<0)return null;
             // Build the silhouette on the alpha boundary, with both left and
             // right sides sampled from the same OEM drawable raster.
-            path.moveTo(left[first],first);
-            for(int y=first+1;y<=last;y++)if(right[y]>=left[y])path.lineTo(left[y],y);
-            for(int y=last;y>=first;y--)if(right[y]>=left[y])path.lineTo(right[y],y);
+            // V288.181: the 128px alpha contour is a pixel staircase. Smooth
+            // its left/right envelope before constructing a continuous quadratic
+            // boundary. Keep the actual alpha silhouette, not a guessed radius.
+            float[] lx=new float[n],rx=new float[n];
+            for(int y=first;y<=last;y++){
+                float ls=0f,rs=0f,weight=0f;
+                for(int k=-3;k<=3;k++){
+                    int yy=Math.max(first,Math.min(last,y+k));
+                    if(right[yy]<left[yy])continue;
+                    float w=4f-Math.abs(k);
+                    ls+=left[yy]*w;rs+=right[yy]*w;weight+=w;
+                }
+                lx[y]=weight>0f?ls/weight:left[y];
+                rx[y]=weight>0f?rs/weight:right[y];
+            }
+            path.moveTo(lx[first],first);
+            for(int y=first;y<last;y++)
+                path.quadTo(lx[y],y,(lx[y]+lx[y+1])*.5f,y+.5f);
+            path.lineTo(lx[last],last);
+            path.lineTo(rx[last],last);
+            for(int y=last;y>first;y--)
+                path.quadTo(rx[y],y,(rx[y]+rx[y-1])*.5f,y-.5f);
+            path.lineTo(rx[first],first);
             path.close();
             return path;
         }catch(Throwable t){
@@ -9348,7 +9368,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             ICON_FINE_LIGHT_288180[i]=paint;
         }
     }
-    private static void drawIconInnerOptics221(View owner, Canvas canvas, Path silhouette,
+    private static synchronized void drawIconInnerOptics221(View owner, Canvas canvas, Path silhouette,
             float left,float top,int width,int height,float density,Drawable source){
         if(silhouette==null || silhouette.isEmpty() || width<10 || height<10)return;
         int save=canvas.save();
@@ -9364,13 +9384,13 @@ public final class HookEntry implements IXposedHookLoadPackage {
             ICON_FINE_SHADER_288180[0].setLocalMatrix(matrix);
             ICON_FINE_SHADER_288180[1].setLocalMatrix(matrix);
             float span=Math.min(bounds.width(),bounds.height());
-            float feather=Math.min(3.0f*density,span*.038f);
-            float core=Math.min(.55f*density,span*.007f);
-            float[] widths={feather,feather*.74f,feather*.48f,core,feather*.57f,core*.78f};
-            int[] opacity={27,40,58,83,28,43};
+            float feather=Math.min(2.6f*density,span*.032f);
+            float core=Math.min(.65f*density,span*.008f);
+            float[] widths={feather,feather*.78f,feather*.57f,core,feather*.65f,core*.95f};
+            int[] opacity={18,23,29,34,16,19};
             for(int i=0;i<ICON_FINE_LIGHT_288180.length;i++){
                 Paint paint=ICON_FINE_LIGHT_288180[i];
-                paint.setStrokeWidth(Math.max(.4f,widths[i]*2f));
+                paint.setStrokeWidth(Math.max(1.0f,widths[i]*2f));
                 paint.setAlpha(opacity[i]);
                 canvas.drawPath(silhouette,paint);
             }
@@ -9411,11 +9431,25 @@ public final class HookEntry implements IXposedHookLoadPackage {
         android.graphics.Path mapped=new android.graphics.Path();
         float pad=Math.max(.35f*density,.5f);
         RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
-        if(contour!=null && !(d instanceof android.graphics.drawable.AdaptiveIconDrawable)){
+        if(contour!=null){
             android.graphics.Matrix matrix=new android.graphics.Matrix();
             matrix.setScale(w/128f,h/128f);
             matrix.postTranslate(left,top);
             contour.transform(matrix,mapped);
+            // V288.182: sample-derived alpha contour is preferred even for adaptive icons.
+            // Inset the optical boundary slightly so AA/fringe pixels cannot appear outside
+            // the visible opaque icon edge; keep the path shape and its corner geometry.
+            RectF opticalBounds288182=new RectF();
+            mapped.computeBounds(opticalBounds288182,true);
+            if(opticalBounds288182.width()>4f && opticalBounds288182.height()>4f){
+                float inset288182=Math.min(0.85f*density,Math.min(opticalBounds288182.width(),opticalBounds288182.height())*.008f);
+                android.graphics.Matrix insetMatrix288182=new android.graphics.Matrix();
+                insetMatrix288182.setScale(
+                    (opticalBounds288182.width()-2f*inset288182)/opticalBounds288182.width(),
+                    (opticalBounds288182.height()-2f*inset288182)/opticalBounds288182.height(),
+                    opticalBounds288182.centerX(),opticalBounds288182.centerY());
+                mapped.transform(insetMatrix288182);
+            }
         }else{
             // Prefer the actual adaptive icon mask over a guessed rounded square.
             boolean maskDrawn=false;
