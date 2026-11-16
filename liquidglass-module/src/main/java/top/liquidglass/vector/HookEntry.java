@@ -9508,11 +9508,28 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 float feather=(float)Math.exp(-d*d/(2f*6.5f*6.5f));
                 float u=(x+.5f)/n;
                 float v=(y+.5f)/n;
-                float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
-                float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
-                float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
-                float cornerGlint=.22f*((1f-u)*(1f-v)+u*v);
-                float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
+                // V288.192: illuminate by the LOCAL contour normal, not by
+                // global Y. Global pow(v,5) produced a horizontal brightness
+                // seam where the bottom straight edge meets curved corners.
+                // Central differences of the cached EDT give an inward normal;
+                // at the boundary use the original alpha-coverage gradient.
+                float gx=0f,gy=0f;
+                if(x>0 && x<n-1 && y>0 && y<n-1){
+                    gx=(float)Math.sqrt(distanceSquared[i+1])-(float)Math.sqrt(distanceSquared[i-1]);
+                    gy=(float)Math.sqrt(distanceSquared[i+n])-(float)Math.sqrt(distanceSquared[i-n]);
+                }
+                float magnitude=(float)Math.sqrt(gx*gx+gy*gy);
+                if(magnitude<.15f && x>0 && x<n-1 && y>0 && y<n-1){
+                    gx=((pixels[i+1]>>>24)-(pixels[i-1]>>>24))/255f;
+                    gy=((pixels[i+n]>>>24)-(pixels[i-n]>>>24))/255f;
+                    magnitude=(float)Math.sqrt(gx*gx+gy*gy);
+                }
+                float verticalFacing=magnitude>.0001f?Math.abs(gy)/magnitude:0f;
+                // Smooth curvature-dependent transition: bright on top/bottom,
+                // subdued on sides, without a straight-line/corner discontinuity.
+                float horizontalGlint=verticalFacing*verticalFacing*(3f-2f*verticalFacing);
+                float cornerGlint=.16f*((1f-u)*(1f-v)+u*v);
+                float rimStrength=.15f+.68f*horizontalGlint+cornerGlint;
                 float brightness=(crest*.82f+feather*.18f)*rimStrength;
                 int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
                 float bevel=(.16f+.22f*(u+v)*.5f)*feather;
@@ -9552,7 +9569,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288191_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288192_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
