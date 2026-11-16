@@ -9523,78 +9523,73 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 iconEdt1d288191(rowInput,rowOutput,n,edtV,edtZ);
                 for(int y=0;y<n;y++)distanceSquared[y*n+x]=rowOutput[y];
             }
-            // V288.196: single continuous micro-lens shoulder. Geometry and
-            // draw coordinates are inherited unchanged from V288.194. The
-            // reflection is one smooth lobe, not alternating light/dark rings.
-            // All expensive work is performed once per cached drawable.
-            int[] resolved=new int[n*n];
+            int[] out=new int[n*n];
             int active=0;
-            final float shoulder=5.8f;
             for(int y=0;y<n;y++)for(int x=0;x<n;x++){
                 int i=y*n+x;
                 int alpha=pixels[i]>>>24;
                 if(alpha==0)continue;
                 float d=(float)Math.sqrt(distanceSquared[i]);
-                if(d>=shoulder)continue;
-                // C1-continuous rounded shoulder, zero slope at both ends.
-                float t=Math.max(0f,Math.min(1f,d/shoulder));
-                float smooth=t*t*(3f-2f*t);
-                float shoulderWeight=1f-smooth;
-                // Preserve a visible reflection on EVERY straight side.
-                // Only its intensity varies gently with position; normals
-                // never gate the reflection to zero as in V288.193.
-                float u=(x+.5f)/n,v=(y+.5f)/n;
-                float upper=(1f-v)*(1f-v);
-                float lower=v*v;
-                float side=.18f+.12f*(1f-Math.abs(2f*u-1f));
-                float illumination=.24f+.38f*upper+.24f*lower+side;
-                float specular=shoulderWeight*shoulderWeight*(3f-2f*shoulderWeight);
-                // A restrained colour-preserving reflection: the local icon
-                // colour is moved toward light rather than painted white.
-                // No artificial dark ring or independent bevel stroke.
-                int r=(pixels[i]>>>16)&255,g=(pixels[i]>>>8)&255,bl=pixels[i]&255;
-                float reflect=.16f+.20f*illumination;
-                int rr=Math.min(255,Math.round(r+(255-r)*reflect));
-                int gg=Math.min(255,Math.round(g+(255-g)*reflect));
-                int bb=Math.min(255,Math.round(bl+(255-bl)*reflect));
-                // Fractional edge coverage and gentle optical falloff; all
-                // pixels remain strictly inside the original icon alpha.
-                int a=Math.min(alpha,Math.round(88f*specular*illumination*alpha/255f));
-                if(a>0){resolved[i]=(a<<24)|(rr<<16)|(gg<<8)|bb;active++;}
+                if(d>15f)continue;
+                // Widths doubled to preserve the same *physical* optical
+                // thickness when the cached mask resolution doubles.
+                float crest=(float)Math.exp(-d*d/(2f*1.8f*1.8f));
+                float feather=(float)Math.exp(-d*d/(2f*6.5f*6.5f));
+                float u=(x+.5f)/n;
+                float v=(y+.5f)/n;
+                float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
+                float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
+                float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
+                float cornerGlint=.22f*((1f-u)*(1f-v)+u*v);
+                float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
+                // V288.197: retain the V288.194 visible specular baseline on ALL
+                // four sides. Add only a shallow, monotonic interior shoulder;
+                // no secondary bright/dark ring and no per-pixel normal field.
+                // The shoulder is subordinate to the original glint so that
+                // downsampling cannot erase the verified thin reflection.
+                float baseline=(crest*.82f+feather*.18f)*rimStrength;
+                float shoulder=(float)Math.exp(-d*d/(2f*4.2f*4.2f));
+                float shoulderLight=.11f*shoulder*(.38f+.62f*horizontalGlint);
+                float brightness=baseline+shoulderLight;
+                int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
+                float bevel=(.16f+.22f*(u+v)*.5f)*feather;
+                int dark=Math.min(255,Math.round(alpha/255f*bevel*16f));
+                if(a>0){out[i]=(a<<24)|0x00F4F9FF;active++;}
+                else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
             }
             if(active<100)return null;
-            // Smooth colour AND premultiplied optical alpha together; this
-            // avoids the old bright jagged steps at rounded-to-straight joins.
-            int[] filtered=new int[n*n];
+            // V288.190: subpixel coverage resolve (retained in V288.191). The 384px distance-field
+            // still produces tiny directional quantization on a 1px glint.
+            // Resolve ONLY the optical alpha using a symmetric 3x3 tent
+            // kernel; clip the resolved coverage to the ORIGINAL icon alpha
+            // so neither a halo nor a shifted silhouette can be introduced.
+            // No changes to draw target, drawable bounds or cache keys.
+            int[] resolved=new int[n*n];
             for(int y=0;y<n;y++)for(int x=0;x<n;x++){
-                int i=y*n+x,originalAlpha=pixels[i]>>>24;
+                int i=y*n+x;
+                int originalAlpha=pixels[i]>>>24;
                 if(originalAlpha==0)continue;
-                int sa=0,sr=0,sg=0,sb=0;
+                int weighted=0;
                 for(int oy=-1;oy<=1;oy++){
-                    int yy=Math.max(0,Math.min(n-1,y+oy)),wy=oy==0?2:1;
+                    int yy=Math.max(0,Math.min(n-1,y+oy));
+                    int wy=oy==0?2:1;
                     for(int ox=-1;ox<=1;ox++){
-                        int xx=Math.max(0,Math.min(n-1,x+ox)),w=wy*(ox==0?2:1);
-                        int c=resolved[yy*n+xx],aa=c>>>24;
-                        sa+=w*aa;
-                        sr+=w*aa*((c>>>16)&255);
-                        sg+=w*aa*((c>>>8)&255);
-                        sb+=w*aa*(c&255);
+                        int xx=Math.max(0,Math.min(n-1,x+ox));
+                        int wx=ox==0?2:1;
+                        weighted+=((out[yy*n+xx]>>>24)*wx*wy);
                     }
                 }
-                int fa=Math.min(originalAlpha,(sa+8)/16);
-                if(fa>0 && sa>0){
-                    int fr=Math.min(255,(sr+sa/2)/sa);
-                    int fg=Math.min(255,(sg+sa/2)/sa);
-                    int fb=Math.min(255,(sb+sa/2)/sa);
-                    filtered[i]=(fa<<24)|(fr<<16)|(fg<<8)|fb;
-                }
+                int smoothed=(weighted+8)/16;
+                // Respect the actual antialiased edge coverage, not a new
+                // alpha-threshold contour. This keeps the V288.187 alignment.
+                int a=Math.min(smoothed,originalAlpha);
+                if(a>0)resolved[i]=(a<<24)|0x00F4F9FF;
             }
-            resolved=filtered;
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
             result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288196_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288197_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
