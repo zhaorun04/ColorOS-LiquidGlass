@@ -9298,7 +9298,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             for(int y=0;y<n;y++){
                 left[y]=n;right[y]=-1;
                 for(int x=0;x<n;x++){
-                    if((pixels[y*n+x]>>>24)>=208){
+                    if((pixels[y*n+x]>>>24)>=128){
                         if(x<left[y])left[y]=x;
                         right[y]=x;
                     }
@@ -9312,6 +9312,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(first<0)return null;
             // Build the silhouette on the alpha boundary, with both left and
             // right sides sampled from the same OEM drawable raster.
+            // V288.183: use the mid-alpha edge instead of the opaque core;
+            // the opaque-core threshold caused a visible gap around soft OEM edges.
             // V288.181: the 128px alpha contour is a pixel staircase. Smooth
             // its left/right envelope before constructing a continuous quadratic
             // boundary. Keep the actual alpha silhouette, not a guessed radius.
@@ -9436,20 +9438,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
             matrix.setScale(w/128f,h/128f);
             matrix.postTranslate(left,top);
             contour.transform(matrix,mapped);
-            // V288.182: sample-derived alpha contour is preferred even for adaptive icons.
-            // Inset the optical boundary slightly so AA/fringe pixels cannot appear outside
-            // the visible opaque icon edge; keep the path shape and its corner geometry.
-            RectF opticalBounds288182=new RectF();
-            mapped.computeBounds(opticalBounds288182,true);
-            if(opticalBounds288182.width()>4f && opticalBounds288182.height()>4f){
-                float inset288182=Math.min(0.85f*density,Math.min(opticalBounds288182.width(),opticalBounds288182.height())*.008f);
-                android.graphics.Matrix insetMatrix288182=new android.graphics.Matrix();
-                insetMatrix288182.setScale(
-                    (opticalBounds288182.width()-2f*inset288182)/opticalBounds288182.width(),
-                    (opticalBounds288182.height()-2f*inset288182)/opticalBounds288182.height(),
-                    opticalBounds288182.centerX(),opticalBounds288182.centerY());
-                mapped.transform(insetMatrix288182);
-            }
+            // V288.183: do not shrink the extracted alpha contour a second time.
+            // The inner half of each centered stroke is already retained by
+            // clipPath(silhouette); shrinking the path detached the light from
+            // the visible icon boundary, particularly on rounded corners.
+
         }else{
             // Prefer the actual adaptive icon mask over a guessed rounded square.
             boolean maskDrawn=false;
