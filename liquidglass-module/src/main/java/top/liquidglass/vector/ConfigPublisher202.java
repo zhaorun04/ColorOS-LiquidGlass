@@ -17,11 +17,11 @@ final class ConfigPublisher202 {
         "glass_tint_opacity","custom_blur_mode","clear_refraction","dynamic_sheen_mode",
         "surface_mode_195","surface_strength_195","surface_softness_195",
         "icon_optics_204","dock_glass_204","nonlinear_107","thickness_107",
-        "interior_107","focus_107","reflection_107","optical_style_186","custom_blur_tenths_95"
+        "interior_107","focus_107","reflection_107","optical_style_186","custom_blur_tenths_95","icon_specular_brightness_288199"
     };
     private static final int[] DEFAULTS={
         1,210,0,30,0,0,25,0,2,1,0,100,0,0,0,14,35,18,1,0,0,
-        3,100,100,1,1,65,55,20,45,30,0,140
+        3,100,100,1,1,65,55,20,45,30,0,140,100
     };
     private static boolean boolKey(String k){
         return k.equals("enabled")||k.equals("highlight")||k.equals("diagnostics")||
@@ -71,7 +71,7 @@ final class ConfigPublisher202 {
         finally{if(p!=null)p.destroy();}
     }
     static synchronized boolean publishVerified(String expected){
-        if(expected==null||!expected.matches("LG1(\\|-?[0-9]+){33}"))return false;
+        if(expected==null||!expected.matches("LG1(\\|-?[0-9]+){34}"))return false;
         String current=root("settings get global liquidglass_boot_snapshot_v1");
         if(expected.equals(current)){Log.i("LiquidGlass202","CONFIG_202_ALREADY_CURRENT");return true;}
         // First try the installed root service for compatibility and its own diagnostics.

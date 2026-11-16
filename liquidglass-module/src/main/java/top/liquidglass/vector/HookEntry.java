@@ -862,6 +862,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     private static volatile float folderMicroBlurDp95=14f; // independent float for V94 optical mode 3
     private static int opticalPipelineLogs195=0;
     private static volatile boolean iconOptics204=false, dockGlass204=true;
+    private static volatile int iconSpecularBrightness288199=100;
     private static volatile boolean clearRefraction=false; // false: frosted glass, true: clear refraction
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_FRAME;
     private static volatile android.graphics.Bitmap CUSTOM_BLUR_SOURCE;
@@ -1019,7 +1020,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V127: unchanged snapshots must not be reparsed on every restore/draw.
             if(configEverLoaded && raw.equals(lastBootSnapshot))return false;
             String[] v=raw.split("\\|",-1);
-            if(v.length!=16 && v.length!=20 && v.length!=21 && v.length!=22 && v.length!=25 && v.length!=27 && v.length!=32 && v.length!=33 && v.length!=34){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
+            if(v.length!=16 && v.length!=20 && v.length!=21 && v.length!=22 && v.length!=25 && v.length!=27 && v.length!=32 && v.length!=33 && v.length!=34 && v.length!=35){log("BOOT_SNAPSHOT_REJECT reason=field_count count="+v.length);return false;}
             // Parse all fields first: never partially apply a corrupt snapshot.
             // V194: validate every field before mutating any renderer state.
             int[] all=new int[v.length-1];
@@ -1042,6 +1043,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
             if(v.length>=32){nonlinear107=clampInt(x[26],0,100);thickness107=clampInt(x[27],0,100);interior107=clampInt(x[28],0,100);focus107=clampInt(x[29],0,100);reflection107=clampInt(x[30],0,100);}
             // V219: 0.1 dp blur survives Launcher restart and root publications.
             if(v.length>=34)folderMicroBlurDp95=clampInt(x[32],0,400)/10f;
+            int nextIconBrightness288199=v.length>=35?clampInt(x[33],50,150):100;
+            if(nextIconBrightness288199!=iconSpecularBrightness288199){
+                iconSpecularBrightness288199=nextIconBrightness288199;
+                synchronized(ICON_INNER_MASK_288187){ICON_INNER_MASK_288187.clear();ICON_INNER_RETRY_288187.clear();}
+            }
             // V194: optical style was previously Provider-only; now in root snapshot.
             opticalStyle186=v.length>=33?clampInt(x[31],0,2):0;
             syncCleanEdgeLighting177();
@@ -8748,7 +8754,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                                     invalidateGlassViews();
                                 }
                                 String direct=i.getStringExtra("lg_snapshot_203");
-                                if(direct!=null && direct.matches("LG1(\\|-?[0-9]+){33}")){
+                                if(direct!=null && direct.matches("LG1(\\|-?[0-9]+){34}")){
                                     latestDirectSnapshot203=direct;
                                     boolean applied=applySnapshot203(direct,"UI_DIRECT");
                                     log("CONFIG_203_DIRECT_RECEIVED applied="+applied);
@@ -9550,7 +9556,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 float baseline=(crest*.82f+feather*.18f)*rimStrength;
                 float shoulder=(float)Math.exp(-d*d/(2f*4.2f*4.2f));
                 float shoulderLight=.11f*shoulder*(.38f+.62f*horizontalGlint);
-                float brightness=baseline+shoulderLight;
+                float brightness=baseline*(iconSpecularBrightness288199/100f)+shoulderLight;
                 int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
                 float bevel=(.16f+.22f*(u+v)*.5f)*feather;
                 int dark=Math.min(255,Math.round(alpha/255f*bevel*16f));
