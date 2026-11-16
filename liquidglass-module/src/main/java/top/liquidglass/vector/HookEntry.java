@@ -9455,17 +9455,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
                     }
                 }
                 if(nearest>radius)continue;
-                float edge=(radius+1-nearest)/(float)(radius+1);
-                edge=edge*edge*(3f-2f*edge);
-                // Subtle directional illumination with a low, non-zero baseline.
-                float diagonal=(x+y)/(float)(2*n);
-                float light=.62f+.38f*(1f-diagonal);
-                float shadow=.18f*diagonal;
-                int a=Math.min(255,Math.round(alpha/255f*edge*light*62f));
-                int dark=Math.min(255,Math.round(alpha/255f*edge*shadow*22f));
-                // Premultiplied-looking neutral highlights, no outside pixels.
-                if(a>0){out[index]=(a<<24)|0x00EAF3FF;active++;}
-                if(dark>0 && a==0){out[index]=(dark<<24)|0x00152235;active++;}
+                // V288.188: keep V288.187's *exact* alpha silhouette and
+                // TextView draw target. Only change the optical response INSIDE
+                // the mask: a subpixel-like bright crest and a soft inner falloff.
+                // The thin crest is strongest at the top/bottom and rolls gently
+                // through both rounded corners, without an all-sides white frame.
+                float distance=Math.max(0f,nearest-1f);
+                float crest=(float)Math.exp(-distance*distance/(2f*0.90f*0.90f));
+                float feather=(float)Math.exp(-distance*distance/(2f*3.25f*3.25f));
+                float u=(x+.5f)/n;
+                float v=(y+.5f)/n;
+                float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
+                float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
+                // A narrow top/bottom glint, not a continuous bright outline.
+                float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
+                float upperLeft=(1f-u)*(1f-v);
+                float lowerRight=u*v;
+                float cornerGlint=.22f*(upperLeft+lowerRight);
+                float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
+                float brightness=(crest*.82f+feather*.18f)*rimStrength;
+                int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
+                // Gentle lower/right dark bevel, always inside the alpha mask.
+                float bevel=(.16f+.22f*(u+v)*.5f)*feather;
+                int dark=Math.min(255,Math.round(alpha/255f*bevel*16f));
+                if(a>0){out[index]=(a<<24)|0x00F4F9FF;active++;}
+                else if(dark>0){out[index]=(dark<<24)|0x00152235;active++;}
             }
             if(active<50)return null;
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
