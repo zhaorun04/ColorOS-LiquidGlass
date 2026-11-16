@@ -9462,6 +9462,32 @@ public final class HookEntry implements IXposedHookLoadPackage {
             for(int pos:new int[]{0,n-1,(n-1)*n,n*n-1})
                 if((pixels[pos]>>>24)>40)corners++;
             if(corners>=2)return null;
+            // V288.194: smooth the *input coverage* before EDT, not the
+            // final silhouette or the lighting direction. A binary alpha=128
+            // contour contains pixel stair steps even with exact EDT. A small
+            // separable [1,4,6,4,1]/16 filter gives stable subpixel coverage
+            // at curved-to-straight joins. Original alpha is still used for
+            // output clipping, preserving V288.187 icon alignment.
+            float[] coverage194=new float[n*n];
+            float[] horizontal194=new float[n*n];
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                float sum=0f;
+                for(int k=-2;k<=2;k++){
+                    int xx=Math.max(0,Math.min(n-1,x+k));
+                    int w=(k==0?6:(Math.abs(k)==1?4:1));
+                    sum+=w*(pixels[y*n+xx]>>>24);
+                }
+                horizontal194[y*n+x]=sum/16f;
+            }
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                float sum=0f;
+                for(int k=-2;k<=2;k++){
+                    int yy=Math.max(0,Math.min(n-1,y+k));
+                    int w=(k==0?6:(Math.abs(k)==1?4:1));
+                    sum+=w*horizontal194[yy*n+x];
+                }
+                coverage194[y*n+x]=sum/16f;
+            }
             // V288.191: exact squared Euclidean distance transform (EDT),
             // separable in X/Y. Only boundary pixels are seeds; fractional
             // alpha coverage provides a subpixel starting distance. Unlike
@@ -9470,14 +9496,17 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float[] distanceSquared=new float[n*n];
             for(int y=0;y<n;y++)for(int x=0;x<n;x++){
                 int i=y*n+x;
-                int alpha=pixels[i]>>>24;
-                if(alpha<128){distanceSquared[i]=0f;continue;}
+                float coverage=coverage194[i];
+                if(coverage<128f){distanceSquared[i]=0f;continue;}
                 boolean edge=x==0||y==0||x==n-1||y==n-1;
-                if(!edge)edge=((pixels[i-1]>>>24)<128)||
-                    ((pixels[i+1]>>>24)<128)||
-                    ((pixels[i-n]>>>24)<128)||
-                    ((pixels[i+n]>>>24)<128);
-                float subpixel=Math.max(0f,(alpha-128f)/255f);
+                if(!edge)edge=coverage194[i-1]<128f||
+                    coverage194[i+1]<128f||
+                    coverage194[i-n]<128f||
+                    coverage194[i+n]<128f;
+                // Fractional coverage controls the seed position smoothly;
+                // unlike an integer threshold, it varies continuously across
+                // rounded corners and their joins with straight edges.
+                float subpixel=Math.max(0f,(coverage-128f)/255f);
                 distanceSquared[i]=edge?subpixel*subpixel:inf;
             }
             float[] rowInput=new float[n];
@@ -9508,35 +9537,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 float feather=(float)Math.exp(-d*d/(2f*6.5f*6.5f));
                 float u=(x+.5f)/n;
                 float v=(y+.5f)/n;
-                // V288.193: use a symmetric, low-pass alpha gradient for the
-                // illumination normal. Differentiating sqrt(EDT) directly
-                // introduces quantized normal flips at curved edges. The
-                // underlying 384px alpha is the same verified silhouette;
-                // only the LIGHT DIRECTION is filtered, never the geometry.
-                // 5x5 separable binomial derivative, computed at cache build.
-                final int[] kernel={1,4,6,4,1};
-                float gx=0f,gy=0f;
-                for(int oy=-2;oy<=2;oy++){
-                    int yy=Math.max(0,Math.min(n-1,y+oy));
-                    int ym=Math.max(0,yy-1),yp=Math.min(n-1,yy+1);
-                    for(int ox=-2;ox<=2;ox++){
-                        int xx=Math.max(0,Math.min(n-1,x+ox));
-                        int xm=Math.max(0,xx-1),xp=Math.min(n-1,xx+1);
-                        int weight=kernel[oy+2]*kernel[ox+2];
-                        gx+=weight*((pixels[yy*n+xp]>>>24)-(pixels[yy*n+xm]>>>24));
-                        gy+=weight*((pixels[yp*n+xx]>>>24)-(pixels[ym*n+xx]>>>24));
-                    }
-                }
-                float magnitude=(float)Math.sqrt(gx*gx+gy*gy);
-                // At very flat alpha regions there is no stable local
-                // normal; fade to the baseline instead of choosing a noisy
-                // orientation. Soft saturation prevents a hard switch.
-                float confidence=magnitude/(magnitude+2500f);
-                float verticalFacing=magnitude>1f?Math.abs(gy)/magnitude:0f;
-                float horizontalGlint=verticalFacing*verticalFacing*(3f-2f*verticalFacing);
-                horizontalGlint*=confidence;
-                float cornerGlint=.16f*((1f-u)*(1f-v)+u*v);
-                float rimStrength=.15f+.68f*horizontalGlint+cornerGlint;
+                float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
+                float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
+                float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
+                float cornerGlint=.22f*((1f-u)*(1f-v)+u*v);
+                float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
                 float brightness=(crest*.82f+feather*.18f)*rimStrength;
                 int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
                 float bevel=(.16f+.22f*(u+v)*.5f)*feather;
@@ -9576,7 +9581,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288193_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288194_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
