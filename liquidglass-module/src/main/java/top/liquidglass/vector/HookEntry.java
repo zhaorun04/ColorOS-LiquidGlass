@@ -9410,8 +9410,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Long>());
     private static final Paint ICON_INNER_PAINT_288187 =
         new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    // V288.189: high-resolution antialiased alpha edge. Keep V288.187's
+    // sampling coordinates and draw target EXACTLY unchanged. Compute a
+    // two-pass 8-connected chamfer distance field instead of quantizing the
+    // closest edge to integer Chebyshev pixels (the V288.188 stair-step).
     private static android.graphics.Bitmap computeIconInnerMask288187(Drawable drawable){
-        final int n=192;
+        final int n=384;
         android.graphics.Bitmap sample=null;
         try{
             sample=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
@@ -9427,66 +9431,84 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 try{drawable.setBounds(0,0,n,n);drawable.draw(canvas);}
                 finally{drawable.setBounds(old);}
             }
-            int[] pixels=new int[n*n];sample.getPixels(pixels,0,n,0,0,n,n);
-            // Opaque rectangular raster has no reliable icon silhouette.
+            int[] pixels=new int[n*n];
+            sample.getPixels(pixels,0,n,0,0,n,n);
             int corners=0;
             for(int pos:new int[]{0,n-1,(n-1)*n,n*n-1})
                 if((pixels[pos]>>>24)>40)corners++;
             if(corners>=2)return null;
+            final float inf=10000f;
+            final float diagonal=1.41421356f;
+            float[] distance=new float[n*n];
+            // Alpha=128 is the geometric boundary; fractional alpha retains
+            // subpixel coverage at the rim, including curved corners.
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                int i=y*n+x;
+                int a=pixels[i]>>>24;
+                if(a<128){distance[i]=0f;continue;}
+                boolean edge=x==0||y==0||x==n-1||y==n-1;
+                if(!edge){
+                    edge=((pixels[i-1]>>>24)<128)||((pixels[i+1]>>>24)<128)||
+                        ((pixels[i-n]>>>24)<128)||((pixels[i+n]>>>24)<128);
+                }
+                distance[i]=edge ? Math.max(0f,(a-128f)/255f) : inf;
+            }
+            // Linear-time chamfer transform: no quadratic neighborhood scans
+            // and no expensive per-frame computation (the mask is cached).
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                int i=y*n+x;
+                float d=distance[i];
+                if(x>0)d=Math.min(d,distance[i-1]+1f);
+                if(y>0){
+                    d=Math.min(d,distance[i-n]+1f);
+                    if(x>0)d=Math.min(d,distance[i-n-1]+diagonal);
+                    if(x+1<n)d=Math.min(d,distance[i-n+1]+diagonal);
+                }
+                distance[i]=d;
+            }
+            for(int y=n-1;y>=0;y--)for(int x=n-1;x>=0;x--){
+                int i=y*n+x;
+                float d=distance[i];
+                if(x+1<n)d=Math.min(d,distance[i+1]+1f);
+                if(y+1<n){
+                    d=Math.min(d,distance[i+n]+1f);
+                    if(x>0)d=Math.min(d,distance[i+n-1]+diagonal);
+                    if(x+1<n)d=Math.min(d,distance[i+n+1]+diagonal);
+                }
+                distance[i]=d;
+            }
             int[] out=new int[n*n];
             int active=0;
-            final int radius=7;
             for(int y=0;y<n;y++)for(int x=0;x<n;x++){
-                int index=y*n+x;
-                int alpha=pixels[index]>>>24;
-                if(alpha<8)continue;
-                // Approximate inward distance to alpha boundary. The nearest
-                // low-alpha sample determines the edge band; no path resampling.
-                int nearest=radius+1;
-                for(int dy=-radius;dy<=radius;dy++){
-                    int yy=y+dy;
-                    if(yy<0||yy>=n){nearest=Math.min(nearest,Math.abs(dy));continue;}
-                    for(int dx=-radius;dx<=radius;dx++){
-                        int dist=Math.max(Math.abs(dx),Math.abs(dy));
-                        if(dist>=nearest)continue;
-                        int xx=x+dx;
-                        if(xx<0||xx>=n || (pixels[yy*n+xx]>>>24)<128)
-                            nearest=dist;
-                    }
-                }
-                if(nearest>radius)continue;
-                // V288.188: keep V288.187's *exact* alpha silhouette and
-                // TextView draw target. Only change the optical response INSIDE
-                // the mask: a subpixel-like bright crest and a soft inner falloff.
-                // The thin crest is strongest at the top/bottom and rolls gently
-                // through both rounded corners, without an all-sides white frame.
-                float distance=Math.max(0f,nearest-1f);
-                float crest=(float)Math.exp(-distance*distance/(2f*0.90f*0.90f));
-                float feather=(float)Math.exp(-distance*distance/(2f*3.25f*3.25f));
+                int i=y*n+x;
+                int alpha=pixels[i]>>>24;
+                if(alpha==0)continue;
+                float d=distance[i];
+                if(d>15f)continue;
+                // Widths doubled to preserve the same *physical* optical
+                // thickness when the cached mask resolution doubles.
+                float crest=(float)Math.exp(-d*d/(2f*1.8f*1.8f));
+                float feather=(float)Math.exp(-d*d/(2f*6.5f*6.5f));
                 float u=(x+.5f)/n;
                 float v=(y+.5f)/n;
                 float topWeight=(float)Math.pow(Math.max(0f,1f-v),5.0);
                 float bottomWeight=(float)Math.pow(Math.max(0f,v),5.0);
-                // A narrow top/bottom glint, not a continuous bright outline.
                 float horizontalGlint=Math.min(1f,topWeight+bottomWeight);
-                float upperLeft=(1f-u)*(1f-v);
-                float lowerRight=u*v;
-                float cornerGlint=.22f*(upperLeft+lowerRight);
+                float cornerGlint=.22f*((1f-u)*(1f-v)+u*v);
                 float rimStrength=.10f+.72f*horizontalGlint+cornerGlint;
                 float brightness=(crest*.82f+feather*.18f)*rimStrength;
                 int a=Math.min(255,Math.round(alpha/255f*brightness*138f));
-                // Gentle lower/right dark bevel, always inside the alpha mask.
                 float bevel=(.16f+.22f*(u+v)*.5f)*feather;
                 int dark=Math.min(255,Math.round(alpha/255f*bevel*16f));
-                if(a>0){out[index]=(a<<24)|0x00F4F9FF;active++;}
-                else if(dark>0){out[index]=(dark<<24)|0x00152235;active++;}
+                if(a>0){out[i]=(a<<24)|0x00F4F9FF;active++;}
+                else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
             }
-            if(active<50)return null;
+            if(active<100)return null;
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
             result.setPixels(out,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288187_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288189_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
