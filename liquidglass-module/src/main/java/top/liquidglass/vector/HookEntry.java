@@ -9355,11 +9355,11 @@ public final class HookEntry implements IXposedHookLoadPackage {
     static {
         ICON_FINE_SHADER_288180[0] = new android.graphics.LinearGradient(
             0f,0f,1f,1f,
-            new int[]{0xF8FFFFFF,0x92F8FCFF,0x12FFFFFF,0x72EAF5FF,0xE8FFFFFF},
+            new int[]{0xE8FFFFFF,0xC8F8FCFF,0xA6FFFFFF,0xB8EAF5FF,0xDCFFFFFF},
             new float[]{0f,.22f,.48f,.76f,1f},android.graphics.Shader.TileMode.CLAMP);
         ICON_FINE_SHADER_288180[1] = new android.graphics.LinearGradient(
             1f,0f,0f,1f,
-            new int[]{0x78152235,0x32172736,0x08152235,0x32152235,0x68152235},
+            new int[]{0x38152235,0x20172736,0x10152235,0x20152235,0x30152235},
             new float[]{0f,.25f,.50f,.75f,1f},android.graphics.Shader.TileMode.CLAMP);
         for(int i=0;i<ICON_FINE_LIGHT_288180.length;i++){
             Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -9389,7 +9389,10 @@ public final class HookEntry implements IXposedHookLoadPackage {
             float feather=Math.min(2.6f*density,span*.032f);
             float core=Math.min(.65f*density,span*.008f);
             float[] widths={feather,feather*.78f,feather*.57f,core,feather*.65f,core*.95f};
-            int[] opacity={18,23,29,34,16,19};
+            // V288.185: restore a continuous visible rim on the right/bottom.
+            // Earlier diagonal shader faded near zero at the center, while
+            // the dark pass overwhelmed the already dim opposite edges.
+            int[] opacity={22,28,34,40,9,11};
             for(int i=0;i<ICON_FINE_LIGHT_288180.length;i++){
                 Paint paint=ICON_FINE_LIGHT_288180[i];
                 paint.setStrokeWidth(Math.max(1.0f,widths[i]*2f));
@@ -9410,9 +9413,8 @@ public final class HookEntry implements IXposedHookLoadPackage {
         diagnoseIcon2058(v,d,bounds);
         float density=v.getResources().getDisplayMetrics().density;
         float w=bounds.width(),h=bounds.height();
-        // V288.184: TextView centers a top compound drawable inside its
-        // padded content area, not necessarily inside the whole View.
-        // Asymmetric OEM padding previously shifted the optical contour.
+        // V288.185: preserve V288.184 content-area placement until the OEM
+        // Drawable transform can be measured; avoid ungrounded X/Y offsets.
         float contentWidth=v.getWidth()-v.getPaddingLeft()-v.getPaddingRight();
         if(contentWidth<=0f)return;
         float left=v.getPaddingLeft()+(contentWidth-w)*.5f;
