@@ -9355,7 +9355,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
     static {
         ICON_FINE_SHADER_288180[0] = new android.graphics.LinearGradient(
             0f,0f,1f,1f,
-            new int[]{0xE8FFFFFF,0xC8F8FCFF,0xA6FFFFFF,0xB8EAF5FF,0xDCFFFFFF},
+            new int[]{0xD8FFFFFF,0xB0F8FCFF,0x65FFFFFF,0x9CEAF5FF,0xC8FFFFFF},
             new float[]{0f,.22f,.48f,.76f,1f},android.graphics.Shader.TileMode.CLAMP);
         ICON_FINE_SHADER_288180[1] = new android.graphics.LinearGradient(
             1f,0f,0f,1f,
@@ -9392,7 +9392,7 @@ public final class HookEntry implements IXposedHookLoadPackage {
             // V288.185: restore a continuous visible rim on the right/bottom.
             // Earlier diagonal shader faded near zero at the center, while
             // the dark pass overwhelmed the already dim opposite edges.
-            int[] opacity={22,28,34,40,9,11};
+            int[] opacity={16,22,26,32,8,9};
             for(int i=0;i<ICON_FINE_LIGHT_288180.length;i++){
                 Paint paint=ICON_FINE_LIGHT_288180[i];
                 paint.setStrokeWidth(Math.max(1.0f,widths[i]*2f));
@@ -9438,42 +9438,31 @@ public final class HookEntry implements IXposedHookLoadPackage {
             log("ICON_CONTOUR_20511 label="+v.getContentDescription()+" drawable="+type+
                 " alphaContour="+(contour!=null)+" fallback="+(contour==null)+" bounds="+bounds.toShortString());
         android.graphics.Path mapped=new android.graphics.Path();
-        float pad=Math.max(.35f*density,.5f);
-        RectF r=new RectF(left+pad,top+pad,left+w-pad,top+h-pad);
         if(contour!=null){
             android.graphics.Matrix matrix=new android.graphics.Matrix();
             matrix.setScale(w/128f,h/128f);
             matrix.postTranslate(left,top);
             contour.transform(matrix,mapped);
+            if(diagnostics && ICON_CONTOUR_LOG_2059.add("GEOMETRY186|"+type)){
+                RectF actual=new RectF();mapped.computeBounds(actual,true);
+                log("ICON_OPTICS_288186_GEOMETRY drawable="+type+
+                    " view="+v.getWidth()+"x"+v.getHeight()+
+                    " padding="+v.getPaddingLeft()+","+v.getPaddingTop()+","+
+                    v.getPaddingRight()+","+v.getPaddingBottom()+
+                    " bounds="+bounds.toShortString()+" contour="+actual.toShortString());
+            }
             // V288.183: do not shrink the extracted alpha contour a second time.
             // The inner half of each centered stroke is already retained by
             // clipPath(silhouette); shrinking the path detached the light from
             // the visible icon boundary, particularly on rounded corners.
 
         }else{
-            // Prefer the actual adaptive icon mask over a guessed rounded square.
-            boolean maskDrawn=false;
-            try{
-                Drawable unwrapped=d;
-                for(int depth=0;depth<3 && unwrapped instanceof android.graphics.drawable.InsetDrawable;depth++)
-                    unwrapped=((android.graphics.drawable.InsetDrawable)unwrapped).getDrawable();
-                if(unwrapped instanceof android.graphics.drawable.AdaptiveIconDrawable){
-                    android.graphics.Path mask=((android.graphics.drawable.AdaptiveIconDrawable)unwrapped).getIconMask();
-                    if(mask!=null && !mask.isEmpty()){
-                        RectF maskBounds=new RectF();mask.computeBounds(maskBounds,true);
-                        float aspect=maskBounds.height()>0?maskBounds.width()/maskBounds.height():0f;
-                        if(maskBounds.width()>1f && maskBounds.height()>1f && aspect>.92f && aspect<1.08f){
-                            android.graphics.Matrix matrix=new android.graphics.Matrix();
-                            matrix.setRectToRect(maskBounds,r,android.graphics.Matrix.ScaleToFit.CENTER);
-                            mask.transform(matrix,mapped);maskDrawn=true;
-                        }
-                    }
-                }
-            }catch(Throwable t){if(diagnostics)log("ICON_MASK_217_FALLBACK "+t.getClass().getSimpleName());}
-            if(!maskDrawn){
-                float corner=Math.min(r.width(),r.height())*.265f;
-                mapped.addRoundRect(r,corner,corner,android.graphics.Path.Direction.CW);
-            }
+            // V288.186: do not invent an icon silhouette. A guessed round-rect
+            // looks like an offset frame on OEM precomposed/opaque icons.
+            // The existing retry cache will retry when the Drawable changes.
+            if(diagnostics && ICON_CONTOUR_LOG_2059.add("NO_REAL_CONTOUR|"+type))
+                log("ICON_OPTICS_288186_SKIP_UNVERIFIED_CONTOUR drawable="+type);
+            return;
         }
         drawIconInnerOptics221(v,c,mapped,left,top,Math.round(w),Math.round(h),density,d);
     }
