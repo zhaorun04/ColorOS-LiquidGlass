@@ -9410,7 +9410,12 @@ public final class HookEntry implements IXposedHookLoadPackage {
         diagnoseIcon2058(v,d,bounds);
         float density=v.getResources().getDisplayMetrics().density;
         float w=bounds.width(),h=bounds.height();
-        float left=(v.getWidth()-w)*.5f;
+        // V288.184: TextView centers a top compound drawable inside its
+        // padded content area, not necessarily inside the whole View.
+        // Asymmetric OEM padding previously shifted the optical contour.
+        float contentWidth=v.getWidth()-v.getPaddingLeft()-v.getPaddingRight();
+        if(contentWidth<=0f)return;
+        float left=v.getPaddingLeft()+(contentWidth-w)*.5f;
         float top=v.getPaddingTop();
         if(top+h>v.getHeight())return;
         android.graphics.Path contour=null;
