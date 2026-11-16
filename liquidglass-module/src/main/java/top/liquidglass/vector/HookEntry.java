@@ -9324,8 +9324,30 @@ public final class HookEntry implements IXposedHookLoadPackage {
             return null;
         }finally{if(bitmap!=null)bitmap.recycle();}
     }
-    // V225: concentric clipped strokes form a smooth inward optical falloff.
-    // The source icon is never displaced, scaled, or painted outside its mask.
+    // V288.180: fine, directional inner-edge illumination for launcher icons.
+    // The icon's real silhouette remains the clip; no separate outside outline.
+    // Reuse paints/shaders instead of allocating gradients on every icon draw.
+    private static final Paint[] ICON_FINE_LIGHT_288180 = new Paint[6];
+    private static final android.graphics.LinearGradient[] ICON_FINE_SHADER_288180 =
+        new android.graphics.LinearGradient[2];
+    static {
+        ICON_FINE_SHADER_288180[0] = new android.graphics.LinearGradient(
+            0f,0f,1f,1f,
+            new int[]{0xF8FFFFFF,0x92F8FCFF,0x12FFFFFF,0x72EAF5FF,0xE8FFFFFF},
+            new float[]{0f,.22f,.48f,.76f,1f},android.graphics.Shader.TileMode.CLAMP);
+        ICON_FINE_SHADER_288180[1] = new android.graphics.LinearGradient(
+            1f,0f,0f,1f,
+            new int[]{0x78152235,0x32172736,0x08152235,0x32152235,0x68152235},
+            new float[]{0f,.25f,.50f,.75f,1f},android.graphics.Shader.TileMode.CLAMP);
+        for(int i=0;i<ICON_FINE_LIGHT_288180.length;i++){
+            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeJoin(Paint.Join.ROUND);
+            paint.setStrokeCap(Paint.Cap.ROUND);
+            paint.setShader(ICON_FINE_SHADER_288180[i<4?0:1]);
+            ICON_FINE_LIGHT_288180[i]=paint;
+        }
+    }
     private static void drawIconInnerOptics221(View owner, Canvas canvas, Path silhouette,
             float left,float top,int width,int height,float density,Drawable source){
         if(silhouette==null || silhouette.isEmpty() || width<10 || height<10)return;
@@ -9334,25 +9356,23 @@ public final class HookEntry implements IXposedHookLoadPackage {
             canvas.clipPath(silhouette);
             RectF bounds=new RectF();
             silhouette.computeBounds(bounds,true);
-            float span=Math.min(width,height);
-            // Clipping halves each centered stroke: width 2*r reaches r inward.
-            float core=Math.min(0.85f*density,span*0.010f);
-            float falloff=Math.min(3.6f*density,span*0.045f);
-            float[] widths={falloff,falloff*0.72f,falloff*0.46f,core};
-            float[] alpha={0.12f,0.18f,0.23f,0.28f};
-            for(int i=0;i<widths.length;i++){
-                Paint p=new Paint(Paint.ANTI_ALIAS_FLAG);
-                p.setStyle(Paint.Style.STROKE);
-                p.setStrokeJoin(Paint.Join.ROUND);
-                p.setStrokeCap(Paint.Cap.ROUND);
-                p.setStrokeWidth(Math.max(0.6f,widths[i]*2f));
-                p.setShader(new android.graphics.LinearGradient(
-                    bounds.left,bounds.top,bounds.right,bounds.bottom,
-                    new int[]{0xB8F5FAFF,0x24E6F0FA,0x28132236,0x92EDF7FF},
-                    new float[]{0f,0.32f,0.68f,1f},
-                    android.graphics.Shader.TileMode.CLAMP));
-                p.setAlpha(Math.round(alpha[i]*255f));
-                canvas.drawPath(silhouette,p);
+            if(bounds.width()<=0f || bounds.height()<=0f)return;
+            // The gradient tracks the actual OEM mask, including its curved corners.
+            android.graphics.Matrix matrix=new android.graphics.Matrix();
+            matrix.setScale(bounds.width(),bounds.height());
+            matrix.postTranslate(bounds.left,bounds.top);
+            ICON_FINE_SHADER_288180[0].setLocalMatrix(matrix);
+            ICON_FINE_SHADER_288180[1].setLocalMatrix(matrix);
+            float span=Math.min(bounds.width(),bounds.height());
+            float feather=Math.min(3.0f*density,span*.038f);
+            float core=Math.min(.55f*density,span*.007f);
+            float[] widths={feather,feather*.74f,feather*.48f,core,feather*.57f,core*.78f};
+            int[] opacity={27,40,58,83,28,43};
+            for(int i=0;i<ICON_FINE_LIGHT_288180.length;i++){
+                Paint paint=ICON_FINE_LIGHT_288180[i];
+                paint.setStrokeWidth(Math.max(.4f,widths[i]*2f));
+                paint.setAlpha(opacity[i]);
+                canvas.drawPath(silhouette,paint);
             }
         }finally{canvas.restoreToCount(save);}
     }
