@@ -9558,38 +9558,43 @@ public final class HookEntry implements IXposedHookLoadPackage {
                 else if(dark>0){out[i]=(dark<<24)|0x00152235;active++;}
             }
             if(active<100)return null;
-            // V288.190: subpixel coverage resolve (retained in V288.191). The 384px distance-field
-            // still produces tiny directional quantization on a 1px glint.
-            // Resolve ONLY the optical alpha using a symmetric 3x3 tent
-            // kernel; clip the resolved coverage to the ORIGINAL icon alpha
-            // so neither a halo nor a shifted silhouette can be introduced.
-            // No changes to draw target, drawable bounds or cache keys.
+            // V288.198: separable, symmetric 5-tap optical-alpha resolve.
+            // This filters quantization in the highlight intensity, NOT the
+            // original silhouette, drawable coordinates or EDT geometry.
+            // Blend with the verified V288.197 signal to preserve thin glints
+            // on straight edges after launcher bitmap downsampling.
+            final int[] kernel198={1,4,6,4,1};
+            int[] horizontal198=new int[n*n];
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                int sum=0;
+                for(int k=-2;k<=2;k++){
+                    int xx=Math.max(0,Math.min(n-1,x+k));
+                    sum+=kernel198[k+2]*(out[y*n+xx]>>>24);
+                }
+                horizontal198[y*n+x]=(sum+8)/16;
+            }
             int[] resolved=new int[n*n];
             for(int y=0;y<n;y++)for(int x=0;x<n;x++){
                 int i=y*n+x;
                 int originalAlpha=pixels[i]>>>24;
                 if(originalAlpha==0)continue;
-                int weighted=0;
-                for(int oy=-1;oy<=1;oy++){
-                    int yy=Math.max(0,Math.min(n-1,y+oy));
-                    int wy=oy==0?2:1;
-                    for(int ox=-1;ox<=1;ox++){
-                        int xx=Math.max(0,Math.min(n-1,x+ox));
-                        int wx=ox==0?2:1;
-                        weighted+=((out[yy*n+xx]>>>24)*wx*wy);
-                    }
+                int sum=0;
+                for(int k=-2;k<=2;k++){
+                    int yy=Math.max(0,Math.min(n-1,y+k));
+                    sum+=kernel198[k+2]*horizontal198[yy*n+x];
                 }
-                int smoothed=(weighted+8)/16;
-                // Respect the actual antialiased edge coverage, not a new
-                // alpha-threshold contour. This keeps the V288.187 alignment.
-                int a=Math.min(smoothed,originalAlpha);
+                int smooth=(sum+8)/16;
+                int original=out[i]>>>24;
+                // 75% filtered / 25% baseline: continuous rounded joins
+                // without extinguishing the previously visible straight glint.
+                int a=Math.min(originalAlpha,(3*smooth+original+2)/4);
                 if(a>0)resolved[i]=(a<<24)|0x00F4F9FF;
             }
             android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
             result.setPixels(resolved,0,n,0,0,n,n);
             return result;
         }catch(Throwable t){
-            if(diagnostics)log("ICON_OPTICS_288197_MASK_FAILED "+t.getClass().getSimpleName());
+            if(diagnostics)log("ICON_OPTICS_288198_MASK_FAILED "+t.getClass().getSimpleName());
             return null;
         }finally{if(sample!=null)sample.recycle();}
     }
