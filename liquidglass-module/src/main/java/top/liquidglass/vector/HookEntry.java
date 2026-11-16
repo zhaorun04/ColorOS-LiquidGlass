@@ -9401,6 +9401,81 @@ public final class HookEntry implements IXposedHookLoadPackage {
             }
         }finally{canvas.restoreToCount(save);}
     }
+    // V288.187: the edge is generated from the same sampled alpha pixels, not
+    // a reconstructed path or a series of centered strokes. The optical pixels
+    // exist only INSIDE the icon's alpha silhouette.
+    private static final java.util.Map<Drawable,android.graphics.Bitmap> ICON_INNER_MASK_288187 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,android.graphics.Bitmap>());
+    private static final java.util.Map<Drawable,Long> ICON_INNER_RETRY_288187 =
+        java.util.Collections.synchronizedMap(new java.util.WeakHashMap<Drawable,Long>());
+    private static final Paint ICON_INNER_PAINT_288187 =
+        new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    private static android.graphics.Bitmap computeIconInnerMask288187(Drawable drawable){
+        final int n=192;
+        android.graphics.Bitmap sample=null;
+        try{
+            sample=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
+            Canvas canvas=new Canvas(sample);
+            android.graphics.Bitmap source=extractSoftwareIconBitmap20511(drawable);
+            if(source!=null){
+                try{
+                    Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG|Paint.FILTER_BITMAP_FLAG);
+                    canvas.drawBitmap(source,null,new Rect(0,0,n,n),paint);
+                }finally{source.recycle();}
+            }else{
+                Rect old=new Rect(drawable.getBounds());
+                try{drawable.setBounds(0,0,n,n);drawable.draw(canvas);}
+                finally{drawable.setBounds(old);}
+            }
+            int[] pixels=new int[n*n];sample.getPixels(pixels,0,n,0,0,n,n);
+            // Opaque rectangular raster has no reliable icon silhouette.
+            int corners=0;
+            for(int pos:new int[]{0,n-1,(n-1)*n,n*n-1})
+                if((pixels[pos]>>>24)>40)corners++;
+            if(corners>=2)return null;
+            int[] out=new int[n*n];
+            int active=0;
+            final int radius=7;
+            for(int y=0;y<n;y++)for(int x=0;x<n;x++){
+                int index=y*n+x;
+                int alpha=pixels[index]>>>24;
+                if(alpha<8)continue;
+                // Approximate inward distance to alpha boundary. The nearest
+                // low-alpha sample determines the edge band; no path resampling.
+                int nearest=radius+1;
+                for(int dy=-radius;dy<=radius;dy++){
+                    int yy=y+dy;
+                    if(yy<0||yy>=n){nearest=Math.min(nearest,Math.abs(dy));continue;}
+                    for(int dx=-radius;dx<=radius;dx++){
+                        int dist=Math.max(Math.abs(dx),Math.abs(dy));
+                        if(dist>=nearest)continue;
+                        int xx=x+dx;
+                        if(xx<0||xx>=n || (pixels[yy*n+xx]>>>24)<128)
+                            nearest=dist;
+                    }
+                }
+                if(nearest>radius)continue;
+                float edge=(radius+1-nearest)/(float)(radius+1);
+                edge=edge*edge*(3f-2f*edge);
+                // Subtle directional illumination with a low, non-zero baseline.
+                float diagonal=(x+y)/(float)(2*n);
+                float light=.62f+.38f*(1f-diagonal);
+                float shadow=.18f*diagonal;
+                int a=Math.min(255,Math.round(alpha/255f*edge*light*62f));
+                int dark=Math.min(255,Math.round(alpha/255f*edge*shadow*22f));
+                // Premultiplied-looking neutral highlights, no outside pixels.
+                if(a>0){out[index]=(a<<24)|0x00EAF3FF;active++;}
+                if(dark>0 && a==0){out[index]=(dark<<24)|0x00152235;active++;}
+            }
+            if(active<50)return null;
+            android.graphics.Bitmap result=android.graphics.Bitmap.createBitmap(n,n,android.graphics.Bitmap.Config.ARGB_8888);
+            result.setPixels(out,0,n,0,0,n,n);
+            return result;
+        }catch(Throwable t){
+            if(diagnostics)log("ICON_OPTICS_288187_MASK_FAILED "+t.getClass().getSimpleName());
+            return null;
+        }finally{if(sample!=null)sample.recycle();}
+    }
     private static void drawIconEdge205(android.widget.TextView v,Canvas c){
         if(!iconOptics204 || !v.isShown() || v.getWidth()<=0 || v.getHeight()<=0)return;
         if(v.getContentDescription()==null || v.getContentDescription().length()==0)return;
@@ -9410,61 +9485,30 @@ public final class HookEntry implements IXposedHookLoadPackage {
         if(d==null)return;
         Rect bounds=d.getBounds();
         if(bounds.width()<8 || bounds.height()<8)return;
-        diagnoseIcon2058(v,d,bounds);
-        float density=v.getResources().getDisplayMetrics().density;
-        float w=bounds.width(),h=bounds.height();
-        // V288.185: preserve V288.184 content-area placement until the OEM
-        // Drawable transform can be measured; avoid ungrounded X/Y offsets.
-        float contentWidth=v.getWidth()-v.getPaddingLeft()-v.getPaddingRight();
-        if(contentWidth<=0f)return;
-        float left=v.getPaddingLeft()+(contentWidth-w)*.5f;
-        float top=v.getPaddingTop();
-        if(top+h>v.getHeight())return;
-        android.graphics.Path contour=null;
+        android.graphics.Bitmap mask;
         long now=android.os.SystemClock.uptimeMillis();
-        synchronized(ICON_CONTOUR_2059){
-            contour=ICON_CONTOUR_2059.get(d);
-            Long retry=ICON_CONTOUR_RETRY_20510.get(d);
-            if(contour==null && (retry==null || now>=retry.longValue())){
-                contour=computeIconContour2059(d);
-                if(contour!=null){
-                    ICON_CONTOUR_2059.put(d,contour);
-                    ICON_CONTOUR_RETRY_20510.remove(d);
-                }else ICON_CONTOUR_RETRY_20510.put(d,now+60000L);
+        synchronized(ICON_INNER_MASK_288187){
+            mask=ICON_INNER_MASK_288187.get(d);
+            Long retry=ICON_INNER_RETRY_288187.get(d);
+            if(mask==null && (retry==null || now>=retry.longValue())){
+                mask=computeIconInnerMask288187(d);
+                if(mask!=null){ICON_INNER_MASK_288187.put(d,mask);ICON_INNER_RETRY_288187.remove(d);}
+                else ICON_INNER_RETRY_288187.put(d,now+60000L);
             }
         }
-        String type=d.getClass().getName();
-        if(diagnostics && ICON_CONTOUR_LOG_2059.size()<40 && ICON_CONTOUR_LOG_2059.add(type+"|"+v.getContentDescription()))
-            log("ICON_CONTOUR_20511 label="+v.getContentDescription()+" drawable="+type+
-                " alphaContour="+(contour!=null)+" fallback="+(contour==null)+" bounds="+bounds.toShortString());
-        android.graphics.Path mapped=new android.graphics.Path();
-        if(contour!=null){
-            android.graphics.Matrix matrix=new android.graphics.Matrix();
-            matrix.setScale(w/128f,h/128f);
-            matrix.postTranslate(left,top);
-            contour.transform(matrix,mapped);
-            if(diagnostics && ICON_CONTOUR_LOG_2059.add("GEOMETRY186|"+type)){
-                RectF actual=new RectF();mapped.computeBounds(actual,true);
-                log("ICON_OPTICS_288186_GEOMETRY drawable="+type+
-                    " view="+v.getWidth()+"x"+v.getHeight()+
-                    " padding="+v.getPaddingLeft()+","+v.getPaddingTop()+","+
-                    v.getPaddingRight()+","+v.getPaddingBottom()+
-                    " bounds="+bounds.toShortString()+" contour="+actual.toShortString());
-            }
-            // V288.183: do not shrink the extracted alpha contour a second time.
-            // The inner half of each centered stroke is already retained by
-            // clipPath(silhouette); shrinking the path detached the light from
-            // the visible icon boundary, particularly on rounded corners.
-
-        }else{
-            // V288.186: do not invent an icon silhouette. A guessed round-rect
-            // looks like an offset frame on OEM precomposed/opaque icons.
-            // The existing retry cache will retry when the Drawable changes.
-            if(diagnostics && ICON_CONTOUR_LOG_2059.add("NO_REAL_CONTOUR|"+type))
-                log("ICON_OPTICS_288186_SKIP_UNVERIFIED_CONTOUR drawable="+type);
-            return;
-        }
-        drawIconInnerOptics221(v,c,mapped,left,top,Math.round(w),Math.round(h),density,d);
+        if(mask==null || mask.isRecycled())return;
+        // TextView top compound drawable is horizontally centered in its
+        // compound drawable content area, not necessarily the entire View.
+        float available=v.getWidth()-v.getPaddingLeft()-v.getPaddingRight();
+        if(available<=0)return;
+        float left=v.getPaddingLeft()+(available-bounds.width())*.5f;
+        float top=v.getPaddingTop();
+        if(top+bounds.height()>v.getHeight())return;
+        RectF target=new RectF(left,top,left+bounds.width(),top+bounds.height());
+        c.drawBitmap(mask,null,target,ICON_INNER_PAINT_288187);
+        if(diagnostics && ICON_CONTOUR_LOG_2059.add("MASK187|"+d.getClass().getName()))
+            log("ICON_OPTICS_288187_MASK drawable="+d.getClass().getName()+
+                " view="+v.getWidth()+"x"+v.getHeight()+" target="+target.toShortString());
     }
     private static void hookIconOptics205(ClassLoader loader){
         String[] candidates={"com.android.launcher3.BubbleTextView",
