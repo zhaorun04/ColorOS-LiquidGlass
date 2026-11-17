@@ -500,8 +500,8 @@ public final class MainActivity extends Activity {
         kyantGlobalSlider28827("色差强度 (%) · 0 为关闭", "liquidglass_kyant_chromatic_28827",0,0,100);
         section("02 · 桌面应用图标", "保留 V288.198 的边缘轮廓、5×5 平滑及连续微透镜效果。");
         toggle("启用图标玻璃光影","icon_optics_204",true);
-        slider("镜面高光亮度 (%) · 100 为 V288.198 原版","icon_specular_brightness_288199",100,50,150);
-        current.addView(text("亮度只增强镜面反射，内缘肩部保持原值；调整后自动同步 Launcher。",12,false));
+        slider("应用图标光学强度 (%)","icon_specular_brightness_288199",100,0,150);
+        current.addView(text("统一调节贴边高光与柔和内缘光晕；0% 关闭光学叠加，调整后自动同步 Launcher。",12,false));
         section("03 · 诊断与性能分析", "保留历史诊断能力；正常使用建议关闭日志和实验模式。");
         toggle("详细日志诊断","diagnostics",false);
         action("退出旧版折射诊断（模式 0）",()->new Thread(()->{
