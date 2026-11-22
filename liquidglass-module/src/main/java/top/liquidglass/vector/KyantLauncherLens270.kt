@@ -286,6 +286,31 @@ object KyantLauncherLens270 {
             releaseDx28820 = dx
             releaseAction28820 = if (action == MotionEvent.ACTION_UP) "UP" else "CANCEL"
             selectedHostIds28821 = selectVisibleHosts28821()
+            // V288.203 diagnostic-only fallback: the legacy visible-area top-3
+            // can exclude the actual drawing host during launcher rebound.
+            // When the opt-in same-frame probe is enabled, observe all attached,
+            // shown glass hosts (bounded to 12) without changing rendering gates.
+            val probe203 = try {
+                val context203 = activeTouchRoot28820?.get()?.context
+                    ?: activeTouchWorkspace28820?.get()?.context
+                context203 != null && Settings.Global.getInt(context203.contentResolver,
+                    "liquidglass_kyant_same_frame_probe_288139", 0) == 1
+            } catch (_: Throwable) { false }
+            if (probe203) {
+                val attached203 = liveHostProbes28821.entries.asSequence()
+                    .filter { (_, probe) ->
+                        try {
+                            val v = probe.weakAnchor.get()
+                            v != null && v.isAttachedToWindow && v.isShown
+                        } catch (_: Throwable) { false }
+                    }
+                    .map { it.key }.take(12).toSet()
+                selectedHostIds28821 = selectedHostIds28821 + attached203
+                android.util.Log.i("KyantSync288139",
+                    "KYANT288139_SELECT selected=${selectedHostIds28821.joinToString()} " +
+                    "live=${liveHostProbes28821.size} attached=${attached203.size} " +
+                    "scope=diagnostic_only")
+            }
             releaseNs28820.set(SystemClock.elapsedRealtimeNanos())
             releaseDownSerial28899 = gestureDownSerial28893
             val serial = releaseSeq28820.incrementAndGet()
