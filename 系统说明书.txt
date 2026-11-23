@@ -1,7 +1,6 @@
-ColorOS-LiquidGlass V1.9.205.288.199 系统说明书
+ColorOS-LiquidGlass V1.9.205.288.204 系统说明书
 
-保留 V288.198 图标光学基线；新增 50%-150% 镜面高光亮度调节（默认 100%）。
-Kyant0 统一控制桌面文件夹和 Dock；历史诊断与详细日志保留。
-旧版 01/02/03/04/06 UI 入口删除，底层兼容代码保留。
-Root 辅助脚本沿用既有升级广播自动维护，不提供手动按钮。
-注意：尚未完成 Android 编译与真机测试；请先备份并验证。
+基于 V288.203 的诊断限定更新：仅在屏幕相交、已附着、isShown 且 alpha>0 的玻璃宿主上采集 KYANT288139_PREDRAW/SOURCE。每次释放重新选择最多 12 个可见宿主，并在每个回调重新检查可见性。
+新增 KYANT288204_SELECT 和 KYANT288204_GESTURE_SUMMARY；从 Workspace 反射 getCurrentPage/getCurrentScreen，750ms 后比对起始/最终页。不同页标记 PAGE_SWITCH，同页标记 SAME_PAGE_SETTLED（不能证明回弹），无法读取页号标记 UNKNOWN。诊断仅限 opt-in，不修改折射、模糊和图标光学算法。
+开启：settings put global liquidglass_kyant_same_frame_probe_288139 1；重启 Launcher 后生效。
+注意：源码尚未完成 Android 编译和真机验证；SAME_PAGE_SETTLED 不是严格回弹判定，OEM 页状态可能不可读取。

@@ -229,12 +229,66 @@ object KyantLauncherLens270 {
     )
     private val liveHostProbes28821 = ConcurrentHashMap<Int, ReleaseHostProbe28821>()
     @Volatile private var selectedHostIds28821: Set<Int> = emptySet()
+    // V288.204: diagnostic-only screen intersection. Re-evaluate at each callback,
+    // because a host visible on release can move offscreen during page settling.
+    private fun visibleGlass204(id: Int): Boolean {
+        val v = liveHostProbes28821[id]?.weakAnchor?.get() ?: return false
+        return try {
+            if (!v.isAttachedToWindow || !v.isShown || v.alpha <= 0f) return false
+            val r = Rect()
+            if (!v.getGlobalVisibleRect(r) || r.isEmpty) return false
+            val display = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            v.display?.getRealMetrics(display)
+            if (display.widthPixels <= 0 || display.heightPixels <= 0) return false
+            r.intersect(0, 0, display.widthPixels, display.heightPixels) && !r.isEmpty
+        } catch (_: Throwable) { false }
+    }
+    @Volatile private var gestureStartPage204: Int? = null
+    private fun workspacePage204(): Int? {
+        val ws = activeTouchWorkspace28820?.get() ?: return null
+        // OEM page accessors differ; do not infer a page from dx or scrollX.
+        for (methodName in arrayOf("getCurrentPage", "getCurrentScreen")) {
+            var c: Class<*>? = ws.javaClass
+            while (c != null) {
+                try {
+                    val m = c.getDeclaredMethod(methodName)
+                    m.isAccessible = true
+                    val value = m.invoke(ws)
+                    if (value is Number && value.toInt() >= 0) return value.toInt()
+                    break
+                } catch (_: NoSuchMethodException) {
+                    c = c.superclass
+                } catch (_: Throwable) { break }
+            }
+        }
+        return null
+    }
+    private fun summarizeGesture204(serial: Long, start: Int?, releasePage: Int?) {
+        val root = activeTouchRoot28820?.get() ?: return
+        root.postDelayed({
+            if (releaseSeq28820.get() != serial) return@postDelayed
+            val finalPage = workspacePage204()
+            val kind = when {
+                releaseAction28820 == "CANCEL" -> "CANCEL"
+                start == null || finalPage == null -> "UNKNOWN"
+                start != finalPage -> "PAGE_SWITCH"
+                else -> "SAME_PAGE_SETTLED"
+            }
+            // SAME_PAGE_SETTLED is not proof of a rebound: a non-page-changing
+            // drag can also settle on the same page.
+            android.util.Log.i("KyantSync288204", "KYANT288204_GESTURE_SUMMARY " +
+                "release=$serial gesture=$kind startPage=$start releasePage=$releasePage " +
+                "finalPage=$finalPage visibleHosts=${selectedHostIds28821.count { visibleGlass204(it) }} " +
+                "scope=diagnostic_only_not_presented")
+        }, 750L)
+    }
     private fun selectVisibleHosts28821(): Set<Int> {
         // Re-select on EVERY release; never freeze the first three attached hosts.
         val all = liveHostProbes28821.entries.mapNotNull { (id, probe) ->
             val anchor = probe.weakAnchor.get() ?: return@mapNotNull null
             try {
-                if (!anchor.isAttachedToWindow || !anchor.isShown) return@mapNotNull null
+                if (!visibleGlass204(id)) return@mapNotNull null
                 val r = Rect()
                 if (!anchor.getGlobalVisibleRect(r) || r.isEmpty) return@mapNotNull null
                 Pair(id, r.width().toLong() * r.height().toLong())
@@ -269,6 +323,7 @@ object KyantLauncherLens270 {
                 XposedBridge.log("KYANT28893_TOUCH_DOWN downSerial=$gestureDownSerial28893 " +
                     "priorRelease=${releaseSeq28820.get()} eventMs=${event.eventTime} " +
                     "rawX=${event.rawX} rawY=${event.rawY} via=$method")
+                gestureStartPage204 = workspacePage204()
                 touchDownX28820 = event.rawX
                 touchDownY28820 = event.rawY
             }
@@ -286,10 +341,7 @@ object KyantLauncherLens270 {
             releaseDx28820 = dx
             releaseAction28820 = if (action == MotionEvent.ACTION_UP) "UP" else "CANCEL"
             selectedHostIds28821 = selectVisibleHosts28821()
-            // V288.203 diagnostic-only fallback: the legacy visible-area top-3
-            // can exclude the actual drawing host during launcher rebound.
-            // When the opt-in same-frame probe is enabled, observe all attached,
-            // shown glass hosts (bounded to 12) without changing rendering gates.
+            // V288.204: select ONLY currently screen-visible glass hosts.
             val probe203 = try {
                 val context203 = activeTouchRoot28820?.get()?.context
                     ?: activeTouchWorkspace28820?.get()?.context
@@ -297,19 +349,11 @@ object KyantLauncherLens270 {
                     "liquidglass_kyant_same_frame_probe_288139", 0) == 1
             } catch (_: Throwable) { false }
             if (probe203) {
-                val attached203 = liveHostProbes28821.entries.asSequence()
-                    .filter { (_, probe) ->
-                        try {
-                            val v = probe.weakAnchor.get()
-                            v != null && v.isAttachedToWindow && v.isShown
-                        } catch (_: Throwable) { false }
-                    }
-                    .map { it.key }.take(12).toSet()
-                selectedHostIds28821 = selectedHostIds28821 + attached203
-                android.util.Log.i("KyantSync288139",
-                    "KYANT288139_SELECT selected=${selectedHostIds28821.joinToString()} " +
-                    "live=${liveHostProbes28821.size} attached=${attached203.size} " +
-                    "scope=diagnostic_only")
+                selectedHostIds28821 = liveHostProbes28821.keys.asSequence()
+                    .filter { visibleGlass204(it) }.take(12).toSet()
+                android.util.Log.i("KyantSync288204",
+                    "KYANT288204_SELECT visible=${selectedHostIds28821.joinToString()} " +
+                    "live=${liveHostProbes28821.size} scope=visible_screen_intersection")
             }
             releaseNs28820.set(SystemClock.elapsedRealtimeNanos())
             releaseDownSerial28899 = gestureDownSerial28893
@@ -332,6 +376,7 @@ object KyantLauncherLens270 {
                 "tNs=${releaseNs28820.get()} dx=$dx via=$method")
             XposedBridge.log("KYANT28821_TOUCH_RELEASE seq=$serial action=$releaseAction28820 " +
                 "dx=$dx dy=$dy rawX=${event.rawX} rawY=${event.rawY} eventMs=${event.eventTime} via=$method")
+            if (probe203) summarizeGesture204(serial, gestureStartPage204, workspacePage204())
             beginUiFrameCadence288140(serial, releaseNs28820.get())
             releaseSnapshot28821("BEFORE", serial, method)
         } else if (eventKey == lastTouchEventKey28820 &&
@@ -2766,7 +2811,7 @@ object KyantLauncherLens270 {
                     SystemClock.elapsedRealtimeNanos() - nativeDrawStart288109)
             }
         }.apply { isClickable = false; isFocusable = false; setWillNotDraw(false) } else null
-        if (releaseTrace28820) {
+        if (releaseTrace28820 || releaseProbe139) {
             liveHostProbes28821[trace28815Host] = ReleaseHostProbe28821(WeakReference(anchor)) {
                 val livePos = glassScreenPosition(lastBounds)
                 val published = bridgePublishedPosition.get()
@@ -3125,7 +3170,7 @@ object KyantLauncherLens270 {
             if (folderContainment28886) XposedBridge.log(
                 "KYANT28886_FOLDER_DISPOSE host=$trace28815Host reason=$reason " +
                 "parent=${frame.parent?.javaClass?.simpleName}")
-            if (releaseTrace28820) liveHostProbes28821.remove(trace28815Host)
+            if (releaseTrace28820 || releaseProbe139) liveHostProbes28821.remove(trace28815Host)
             if (activeCountRegistered) {
                 if (perfProfile288109) KyantPerf288109.unregister(trace28815Host)
                 activeHostCount.decrementAndGet()
@@ -3910,7 +3955,7 @@ object KyantLauncherLens270 {
                         val gateRelease141 = releaseSeq28820.get()
                         val gateAge141 = gateNow141 - releaseNs28820.get()
                         if (gateRelease141 > 0L && gateAge141 in 0L..650_000_000L &&
-                            trace28815Host in selectedHostIds28821) {
+                            trace28815Host in selectedHostIds28821 && visibleGlass204(trace28815Host)) {
                             if (visibilityProbeRelease288141 != gateRelease141) {
                                 visibilityProbeRelease288141 = gateRelease141
                                 visibilityProbeCount288141 = 0
@@ -4976,7 +5021,7 @@ object KyantLauncherLens270 {
                     val release139 = releaseSeq28820.get()
                     val age139 = now139 - releaseNs28820.get()
                     if (release139 > 0L && age139 in 0L..650_000_000L &&
-                        traceHost28890 in selectedHostIds28821) {
+                        traceHost28890 in selectedHostIds28821 && visibleGlass204(traceHost28890)) {
                         if (sourceProbeCounters288139[0] != release139) {
                             sourceProbeCounters288139[0] = release139
                             sourceProbeCounters288139[1] = 0L
