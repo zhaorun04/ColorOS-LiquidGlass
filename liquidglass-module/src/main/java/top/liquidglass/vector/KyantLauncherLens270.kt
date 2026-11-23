@@ -229,7 +229,7 @@ object KyantLauncherLens270 {
     )
     private val liveHostProbes28821 = ConcurrentHashMap<Int, ReleaseHostProbe28821>()
     @Volatile private var selectedHostIds28821: Set<Int> = emptySet()
-    // V288.204: diagnostic-only screen intersection. Re-evaluate at each callback,
+    // V288.205: diagnostic-only screen intersection. Re-evaluate at each callback,
     // because a host visible on release can move offscreen during page settling.
     private fun visibleGlass204(id: Int): Boolean {
         val v = liveHostProbes28821[id]?.weakAnchor?.get() ?: return false
@@ -243,6 +243,29 @@ object KyantLauncherLens270 {
             if (display.widthPixels <= 0 || display.heightPixels <= 0) return false
             r.intersect(0, 0, display.widthPixels, display.heightPixels) && !r.isEmpty
         } catch (_: Throwable) { false }
+    }
+    // V288.205: diagnostic-only visible rectangle and screen clipping at callback time.
+    // This reports the anchor geometry, not proof of a presented GPU frame.
+    private fun visibleInfo205(id: Int): String {
+        val anchor = liveHostProbes28821[id]?.weakAnchor?.get() ?: return "anchor=gone visible=false"
+        return try {
+            val rect = Rect()
+            val shown = anchor.isAttachedToWindow && anchor.isShown && anchor.alpha > 0f
+            val intersects = shown && anchor.getGlobalVisibleRect(rect) && !rect.isEmpty
+            val metrics = android.util.DisplayMetrics()
+            @Suppress("DEPRECATION")
+            anchor.display?.getRealMetrics(metrics)
+            val screen = Rect(0, 0, metrics.widthPixels, metrics.heightPixels)
+            val clipped = Rect(rect)
+            val onScreen = intersects && clipped.intersect(screen) && !clipped.isEmpty
+            val fullArea = anchor.width.toLong() * anchor.height.toLong()
+            val clippedArea = if (onScreen) clipped.width().toLong() * clipped.height().toLong() else 0L
+            val ratio = if (fullArea > 0L) clippedArea.toDouble() / fullArea else 0.0
+            "visible=$onScreen rect=${if (onScreen) clipped.toShortString() else "none"} " +
+                "anchorSize=${anchor.width}x${anchor.height} visibleRatio=$ratio " +
+                "anchorClass=${anchor.javaClass.simpleName} coordinateSpace=globalVisibleRect " +
+                "page=${workspacePage204() ?: "UNKNOWN"}"
+        } catch (t: Throwable) { "visible=UNKNOWN error=${t.javaClass.simpleName}" }
     }
     @Volatile private var gestureStartPage204: Int? = null
     private fun workspacePage204(): Int? {
@@ -4102,6 +4125,17 @@ object KyantLauncherLens270 {
                                     "uiFrameAgeMs=${if (uiFrameCallbackAtNs288140 > 0) (now139 - uiFrameCallbackAtNs288140) / 1_000_000f else -1f} " +
                                     "callbackGapMs=$gap139 preSeqBeforeUpdate=${predrawSerial28890} " +
                                     "scope=ui_predraw_not_presented")
+                                val delta205 = kotlin.math.max(kotlin.math.abs(currentSample.x - commit139.x),
+                                    kotlin.math.abs(currentSample.y - commit139.y))
+                                if (delta205 > 0.5f) {
+                                    android.util.Log.i("KyantSync288205", "KYANT288205_COMMIT_GATE " +
+                                        "host=$trace28815Host release=$release139 gapPx=$delta205 " +
+                                        "nativeFrameCommit=$nativeFrameCommit28863 visible=$visible " +
+                                        "frameVisible=${frame.visibility == View.VISIBLE} " +
+                                        "layoutMatches=$layoutMatches compositionSeen=${compositionSeen.get()} " +
+                                        "positionUpdatePending=$updatePosition " +
+                                        "stage=before_native_frame_commit " + visibleInfo205(trace28815Host))
+                                }
                             }
                         }
                     }
@@ -5053,6 +5087,14 @@ object KyantLauncherLens270 {
                                 "referenceGen=${reference.generationId} gpuReference=$gpuReference288110 " +
                                 "coordinatePath=$sourceMatrixAb28866 legacySync=$legacySyncAbMode " +
                                 "scope=source_draw_callback_not_presented")
+                            if (nativeGap139.isFinite() && nativeGap139 > 0.5f) {
+                                android.util.Log.i("KyantSync288205", "KYANT288205_VISIBLE_SOURCE " +
+                                    "host=$traceHost28890 release=$release139 ageMs=${age139 / 1_000_000f} " +
+                                    "nativeDrawGapPx=$nativeGap139 preAgeMs=$preAge139 " +
+                                    "committedX=${committedPosition.x} drawX=${drawPosition.x} " +
+                                    "nativeX=${native139?.x} " + visibleInfo205(traceHost28890) +
+                                    " scope=source_callback_not_presented")
+                            }
                         }
                     }
                 }
