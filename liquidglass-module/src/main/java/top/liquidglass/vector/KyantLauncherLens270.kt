@@ -263,6 +263,7 @@ object KyantLauncherLens270 {
             val ratio = if (fullArea > 0L) clippedArea.toDouble() / fullArea else 0.0
             "visible=$onScreen rect=${if (onScreen) clipped.toShortString() else "none"} " +
                 "anchorSize=${anchor.width}x${anchor.height} visibleRatio=$ratio " +
+                "visibilityBand=${if (!onScreen) "OFFSCREEN" else if (ratio >= 0.5) "MAJORITY_VISIBLE" else "EDGE_ONLY"} " +
                 "anchorClass=${anchor.javaClass.simpleName} coordinateSpace=globalVisibleRect " +
                 "page=${workspacePage204() ?: "UNKNOWN"}"
         } catch (t: Throwable) { "visible=UNKNOWN error=${t.javaClass.simpleName}" }
@@ -4130,10 +4131,11 @@ object KyantLauncherLens270 {
                                 if (delta205 > 0.5f) {
                                     android.util.Log.i("KyantSync288205", "KYANT288205_COMMIT_GATE " +
                                         "host=$trace28815Host release=$release139 gapPx=$delta205 " +
-                                        "nativeFrameCommit=$nativeFrameCommit28863 visible=$visible " +
+                                        "nativeFrameCommit=$nativeFrameCommit28863 commitEligibleVisible=$visible " +
                                         "frameVisible=${frame.visibility == View.VISIBLE} " +
                                         "layoutMatches=$layoutMatches compositionSeen=${compositionSeen.get()} " +
                                         "positionUpdatePending=$updatePosition " +
+                                        "commitGateCandidate=${if (nativeFrameCommit28863 != 1) "NATIVE_FRAME_MODE_DISABLED" else if (!visible) "COMMIT_VISIBLE_FALSE" else if (frame.visibility != View.VISIBLE) "FRAME_HIDDEN" else if (!layoutMatches) "LAYOUT_MISMATCH" else "CHECK_DOWNSTREAM"} " +
                                         "stage=before_native_frame_commit " + visibleInfo205(trace28815Host))
                                 }
                             }
@@ -5092,7 +5094,9 @@ object KyantLauncherLens270 {
                                     "host=$traceHost28890 release=$release139 ageMs=${age139 / 1_000_000f} " +
                                     "nativeDrawGapPx=$nativeGap139 preAgeMs=$preAge139 " +
                                     "committedX=${committedPosition.x} drawX=${drawPosition.x} " +
-                                    "nativeX=${native139?.x} " + visibleInfo205(traceHost28890) +
+                                    "nativeX=${native139?.x} " +
+                                    "drawCoordinatePath=$sourceMatrixAb28866 " +
+                                    "comparisonSpace=UNVERIFIED_NATIVE_VS_DRAW " + visibleInfo205(traceHost28890) +
                                     " scope=source_callback_not_presented")
                             }
                         }
