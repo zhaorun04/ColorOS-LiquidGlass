@@ -4156,6 +4156,16 @@ object KyantLauncherLens270 {
                         val gapX208 = kotlin.math.abs(currentSample.x - previous208.x)
                         val gapY208 = kotlin.math.abs(currentSample.y - previous208.y)
                         val gap208 = kotlin.math.max(gapX208, gapY208)
+                        if (gap208 > 0.5f && releaseNs28820.get() > 0L &&
+                            SystemClock.elapsedRealtimeNanos() - releaseNs28820.get() in 0L..650_000_000L &&
+                            trace28815Host in selectedHostIds28821) {
+                            android.util.Log.i("KyantSync288209", "KYANT288209_COMMIT " +
+                                "host=$trace28815Host gapPx=$gap208 accepted=${gap208 <= 16f} " +
+                                "visible=$visible frameVisible=${frame.visibility == View.VISIBLE} " +
+                                "layoutMatches=$layoutMatches preSeq=$predrawSerial28890 " +
+                                "nativeX=${currentSample.x} committedX=${previous208.x} " +
+                                "scope=predraw_not_presented")
+                        }
                         if (gap208 > 0.015625f && gap208 <= 16f) {
                             samplePosition.value = currentSample
                             lastSample = currentSample
@@ -5109,6 +5119,9 @@ object KyantLauncherLens270 {
                                 "nativeDrawGapPx=$nativeGap139 " +
                                 "sourceInputX=${originalDrawPosition142.x} sourceInputY=${originalDrawPosition142.y} " +
                                 "preDrawGapPx=${if (pre139 != null) kotlin.math.max(kotlin.math.abs(pre139.pos.x - drawPosition.x), kotlin.math.abs(pre139.pos.y - drawPosition.y)) else Float.NaN} " +
+                                "frameAudit209=${if (pre139 == null) "NO_PREDRAW" else if (pre139.releaseSeq != release139) "CROSS_RELEASE" else if (preAge139 < 0f || preAge139 > 16f) "STALE_PREDRAW" else if (kotlin.math.max(kotlin.math.abs(pre139.pos.x - drawPosition.x), kotlin.math.abs(pre139.pos.y - drawPosition.y)) > 0.5f) "PREDRAW_DRAW_DIVERGED" else "PREDRAW_DRAW_MATCH"} " +
+                                "predrawSeqNow209=$predrawSerial28890 predrawSeqConsumed209=${pre139?.serial ?: -1L} " +
+                                "drawNativeDeltaX209=${if (native139 != null) native139.x - drawPosition.x else Float.NaN} " +
                                 "sourceBitmapOriginX=${if (gpuReference288110) drawPosition.x else Float.NaN} sourceBitmapOriginY=${if (gpuReference288110) drawPosition.y else Float.NaN} " +
                                 "bridgeVersion=${bridgeVersion.value} reference=${System.identityHashCode(reference)} " +
                                 "referenceGen=${reference.generationId} gpuReference=$gpuReference288110 " +
