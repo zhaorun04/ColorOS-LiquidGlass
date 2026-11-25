@@ -4143,6 +4143,28 @@ object KyantLauncherLens270 {
                     }
                     // Geometry may have changed since the initial pre-draw read.
                     nativePredrawPosition28824 = currentSample
+                    // V288.208: In the default pipeline, the geometry gate can
+                    // leave the Compose source one native position update behind.
+                    // Reconcile a visible, laid-out host from the SAME PreDraw
+                    // matrix snapshot; do not add a fixed pixel compensation.
+                    // Large discontinuities and fully offscreen hosts retain the
+                    // existing behavior pending separate lifecycle verification.
+                    if (nativeFrameCommit28863 == 0 && visible &&
+                        frame.visibility == View.VISIBLE && layoutMatches &&
+                        currentSample.x.isFinite() && currentSample.y.isFinite()) {
+                        val previous208 = samplePosition.value
+                        val gapX208 = kotlin.math.abs(currentSample.x - previous208.x)
+                        val gapY208 = kotlin.math.abs(currentSample.y - previous208.y)
+                        val gap208 = kotlin.math.max(gapX208, gapY208)
+                        if (gap208 > 0.015625f && gap208 <= 16f) {
+                            samplePosition.value = currentSample
+                            lastSample = currentSample
+                            lastCommitNs = SystemClock.elapsedRealtimeNanos()
+                            sampleCommitCount++
+                            cadenceCommits++
+                            compose.postInvalidateOnAnimation()
+                        }
+                    }
                     // The existing moved/geometry gate may skip committing the
                     // real native matrix while Workspace is scrolling. Mode 1
                     // closes that gap using the same PreDraw snapshot for every
