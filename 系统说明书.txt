@@ -14,3 +14,5 @@ V288.208 变更：默认模式下可见且布局匹配的 Host，在 PreDraw 使
 构建状态：当前执行环境无法下载 Gradle Wrapper，未通过编译及真机验证；请先在 GitHub Actions 构建后测试。
 
 V288.209：增加 PreDraw 提交及 GPU Source 快照关联诊断，输出 frameAudit209、predrawSeqConsumed209、drawNativeDeltaX209 和 KYANT288209_COMMIT。保持 V288.208 的坐标提交行为与全部光学渲染参数不变。本版用于确认同帧根因，不宣称已解决回弹错位。
+
+V1.9.205.288.210：GPU Source 绘制坐标受限恢复；仅在新鲜 PreDraw 与 Native 坐标吻合、宿主可见、偏差不超过80px时纠正旧坐标。保留原光学参数和渲染算法。需要 GitHub Actions 编译及真机回归验证。

@@ -5025,13 +5025,53 @@ object KyantLauncherLens270 {
                 // current native matrix is sampled only for a visible, same-page
                 // rebound with a bounded 0.5..16px gap. No Compose State write,
                 // no shader/bridge mutation, and no changes to run(View).
-                val drawPosition = if (legacySyncAbMode == 0 && motionAbMode == 0 &&
+                val drawPositionLegacy210 = if (legacySyncAbMode == 0 && motionAbMode == 0 &&
                     sourceMatrixAb28866 == 0 && strictSnapshotAb288143 == 0 &&
                     sameFrameSnapshotAb288142 == 0) {
                     KyantReboundConsume288152.choose(
                         diagnosticAnchor288104, drawPositionBefore152,
                         currentNativePosition, releaseNs28820.get())
                 } else drawPositionBefore152
+                // V288.210: bounded Source-coordinate recovery. PreDraw is not a
+                // SurfaceFlinger frame token: use it only if a fresh native read
+                // agrees with the same coordinate-space checkpoint. Never apply
+                // correction to an offscreen host or incompatible A/B mode.
+                val now210 = SystemClock.elapsedRealtimeNanos()
+                val pre210 = predrawSample28890.get()
+                val native210 = if (legacySyncAbMode == 0 && motionAbMode == 0 &&
+                    sourceMatrixAb28866 == 0 && strictSnapshotAb288143 == 0 &&
+                    sameFrameSnapshotAb288142 == 0 && pre210 != null &&
+                    pre210.releaseSeq == releaseSeq28820.get() &&
+                    now210 >= pre210.atNs && now210 - pre210.atNs <= 8_000_000L &&
+                    diagnosticAnchor288104.isAttachedToWindow && diagnosticAnchor288104.isShown)
+                    try { currentNativePosition() } catch (_: Throwable) { null }
+                else null
+                val preNativeGap210 = if (pre210 != null && native210 != null &&
+                    native210.x.isFinite() && native210.y.isFinite())
+                    kotlin.math.max(kotlin.math.abs(pre210.pos.x - native210.x),
+                        kotlin.math.abs(pre210.pos.y - native210.y)) else Float.NaN
+                val staleGap210 = if (native210 != null)
+                    kotlin.math.max(kotlin.math.abs(native210.x - drawPositionLegacy210.x),
+                        kotlin.math.abs(native210.y - drawPositionLegacy210.y)) else Float.NaN
+                val onScreen210 = native210 != null &&
+                    native210.x + diagnosticAnchor288104.width > 0f &&
+                    native210.x < screenW.toFloat() &&
+                    native210.y + diagnosticAnchor288104.height > 0f &&
+                    native210.y < screenH.toFloat()
+                val recovered210 = onScreen210 && preNativeGap210.isFinite() &&
+                    preNativeGap210 <= 1.5f && staleGap210.isFinite() &&
+                    staleGap210 > 0.5f && staleGap210 <= 80f
+                val drawPosition = if (recovered210 && native210 != null)
+                    native210 else drawPositionLegacy210
+                if (recovered210 && native210 != null &&
+                    releaseSeq28820.get() > 0L &&
+                    now210 - releaseNs28820.get() in 0L..650_000_000L) {
+                    android.util.Log.i("KyantSync288210",
+                        "KYANT288210_RECOVER host=$traceHost28890 " +
+                        "preSeq=${pre210?.serial} preNativeGapPx=$preNativeGap210 " +
+                        "oldX=${drawPositionLegacy210.x} correctedX=${native210.x} " +
+                        "deltaPx=$staleGap210 scope=source_callback_not_presented")
+                }
                 if (strictSnapshotAb288143 == 1) {
                     val c143 = snapshot143Counters
                     c143[0]++
