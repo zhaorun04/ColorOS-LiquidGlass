@@ -4128,7 +4128,7 @@ object KyantLauncherLens270 {
                                     "scope=ui_predraw_not_presented")
                                 val delta205 = kotlin.math.max(kotlin.math.abs(currentSample.x - commit139.x),
                                     kotlin.math.abs(currentSample.y - commit139.y))
-                                if (delta205 > 0.5f) {
+                                if (delta205 > 0.5f && nativeFrameCommit28863 == 1) {
                                     android.util.Log.i("KyantSync288205", "KYANT288205_COMMIT_GATE " +
                                         "host=$trace28815Host release=$release139 gapPx=$delta205 " +
                                         "nativeFrameCommit=$nativeFrameCommit28863 commitEligibleVisible=$visible " +
@@ -5085,6 +5085,9 @@ object KyantLauncherLens270 {
                                 "uiFrameRelease=$uiFrameRelease288140 uiFrameOrdinal=$uiFrameOrdinal288140 " +
                                 "uiFrameAgeMs=${if (uiFrameCallbackAtNs288140 > 0) (now139 - uiFrameCallbackAtNs288140) / 1_000_000f else -1f} " +
                                 "nativeDrawGapPx=$nativeGap139 " +
+                                "sourceInputX=${originalDrawPosition142.x} sourceInputY=${originalDrawPosition142.y} " +
+                                "preDrawGapPx=${if (pre139 != null) kotlin.math.max(kotlin.math.abs(pre139.pos.x - drawPosition.x), kotlin.math.abs(pre139.pos.y - drawPosition.y)) else Float.NaN} " +
+                                "sourceBitmapOriginX=${if (gpuReference288110) drawPosition.x else Float.NaN} sourceBitmapOriginY=${if (gpuReference288110) drawPosition.y else Float.NaN} " +
                                 "bridgeVersion=${bridgeVersion.value} reference=${System.identityHashCode(reference)} " +
                                 "referenceGen=${reference.generationId} gpuReference=$gpuReference288110 " +
                                 "coordinatePath=$sourceMatrixAb28866 legacySync=$legacySyncAbMode " +
@@ -5096,7 +5099,7 @@ object KyantLauncherLens270 {
                                     "committedX=${committedPosition.x} drawX=${drawPosition.x} " +
                                     "nativeX=${native139?.x} " +
                                     "drawCoordinatePath=$sourceMatrixAb28866 " +
-                                    "comparisonSpace=UNVERIFIED_NATIVE_VS_DRAW " + visibleInfo205(traceHost28890) +
+                                    "comparisonSpace=UNVERIFIED_NATIVE_VS_DRAW gpuReference=$gpuReference288110 " + visibleInfo205(traceHost28890) +
                                     " scope=source_callback_not_presented")
                             }
                         }
