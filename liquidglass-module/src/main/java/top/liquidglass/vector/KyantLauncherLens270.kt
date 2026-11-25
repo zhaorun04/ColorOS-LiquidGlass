@@ -5120,7 +5120,7 @@ object KyantLauncherLens270 {
                                 "sourceInputX=${originalDrawPosition142.x} sourceInputY=${originalDrawPosition142.y} " +
                                 "preDrawGapPx=${if (pre139 != null) kotlin.math.max(kotlin.math.abs(pre139.pos.x - drawPosition.x), kotlin.math.abs(pre139.pos.y - drawPosition.y)) else Float.NaN} " +
                                 "frameAudit209=${if (pre139 == null) "NO_PREDRAW" else if (pre139.releaseSeq != release139) "CROSS_RELEASE" else if (preAge139 < 0f || preAge139 > 16f) "STALE_PREDRAW" else if (kotlin.math.max(kotlin.math.abs(pre139.pos.x - drawPosition.x), kotlin.math.abs(pre139.pos.y - drawPosition.y)) > 0.5f) "PREDRAW_DRAW_DIVERGED" else "PREDRAW_DRAW_MATCH"} " +
-                                "predrawSeqNow209=$predrawSerial28890 predrawSeqConsumed209=${pre139?.serial ?: -1L} " +
+                                "predrawSeqConsumed209=${pre139?.serial ?: -1L} " +
                                 "drawNativeDeltaX209=${if (native139 != null) native139.x - drawPosition.x else Float.NaN} " +
                                 "sourceBitmapOriginX=${if (gpuReference288110) drawPosition.x else Float.NaN} sourceBitmapOriginY=${if (gpuReference288110) drawPosition.y else Float.NaN} " +
                                 "bridgeVersion=${bridgeVersion.value} reference=${System.identityHashCode(reference)} " +
