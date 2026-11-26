@@ -1626,6 +1626,8 @@ object KyantLauncherLens270 {
         val predrawSample28890 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
         val bridgeSample28890 = java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>(null)
         var predrawSerial28890 = 0L
+        // Native bridge observation correlated to the latest PreDraw generation.
+        val nativeDrawSnapshot211 = java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>(null)
         var previousPredrawX28890 = Float.NaN
         var previousPredrawDx28890 = 0f
         var lastReversalNs28890 = 0L
@@ -2619,6 +2621,14 @@ object KyantLauncherLens270 {
                 val oldPos = try { glassScreenPosition(lastBounds) } catch (_: Throwable) { return }
                 val pos = if (nativeCarrierAb28869 == 1)
                     nativeCarrierDrawPosition28870(this, oldPos, "NATIVE_BITMAP_BRIDGE") else oldPos
+                // V288.211: publish the exact position observed by the native bridge.
+                // A PreDraw generation is a UI correlation key, not a presentation fence.
+                val pre211 = predrawSample28890.get()
+                if (gpuReference288110 && nativeCarrierAb28869 == 0 && pre211 != null && pos.x.isFinite() && pos.y.isFinite() &&
+                    pre211.releaseSeq == releaseSeq28820.get()) {
+                    nativeDrawSnapshot211.set(ReboundSample28890(pre211.serial,
+                        SystemClock.elapsedRealtimeNanos(), pos, pre211.releaseSeq))
+                }
                 // V288.22 mode 1: Compose draw itself samples the reference frame.
                 // Do not publish an independent native Bitmap frame first.
                 if (!gpuReference288110 &&
@@ -3387,7 +3397,7 @@ object KyantLauncherLens270 {
                 bridgePublishedPosition, bridgeMismatchObserved, { pos -> sampleBridgeAt(pos) }, predrawMatrixSnapshot,
                 reboundTrace28890, trace28815Host, perfProfile288109,
                 sameFrameProbe288139, sameFrameSnapshotAb288142, strictSnapshotAb288143, coordinateAudit288144, frameCorrelation288145,
-                predrawSample28890, bridgeSample28890,
+                predrawSample28890, bridgeSample28890, nativeDrawSnapshot211,
                 { glassScreenPosition(lastBounds) },
                 sourceMatrixAb28866, { composeViewScreenPosition28866() },
                 zeroLensAb28868, continuousMotionProbe28868, continuousRun28868,
@@ -4160,13 +4170,13 @@ object KyantLauncherLens270 {
                             SystemClock.elapsedRealtimeNanos() - releaseNs28820.get() in 0L..650_000_000L &&
                             trace28815Host in selectedHostIds28821) {
                             android.util.Log.i("KyantSync288209", "KYANT288209_COMMIT " +
-                                "host=$trace28815Host gapPx=$gap208 accepted=${gap208 <= 16f} " +
+                                "host=$trace28815Host gapPx=$gap208 accepted=true " +
                                 "visible=$visible frameVisible=${frame.visibility == View.VISIBLE} " +
                                 "layoutMatches=$layoutMatches preSeq=$predrawSerial28890 " +
                                 "nativeX=${currentSample.x} committedX=${previous208.x} " +
                                 "scope=predraw_not_presented")
                         }
-                        if (gap208 > 0.015625f && gap208 <= 16f) {
+                        if (gap208 > 0.015625f) {
                             samplePosition.value = currentSample
                             lastSample = currentSample
                             lastCommitNs = SystemClock.elapsedRealtimeNanos()
@@ -4301,12 +4311,13 @@ object KyantLauncherLens270 {
                             drawRequestWindow28865 = now65
                         }
                     }
+                    val snapshotAt211 = SystemClock.elapsedRealtimeNanos()
+                    predrawSerial28890++
+                    predrawSample28890.set(ReboundSample28890(predrawSerial28890,
+                        snapshotAt211, currentSample, releaseSeq28820.get()))
                     if (reboundTrace28890 || timelineTrace28893 || sameFrameProbe288139 || sameFrameSnapshotAb288142 == 1 || strictSnapshotAb288143 == 1 || coordinateAudit288144 || frameCorrelation288145) {
-                        val now90 = SystemClock.elapsedRealtimeNanos()
+                        val now90 = snapshotAt211
                         val releaseSeq90 = releaseSeq28820.get()
-                        predrawSerial28890++
-                        predrawSample28890.set(ReboundSample28890(
-                            predrawSerial28890, now90, currentSample, releaseSeq90))
                         val step90 = if (previousPredrawX28890.isFinite())
                             currentSample.x - previousPredrawX28890 else 0f
                         val reversal90 = kotlin.math.abs(step90) > 0.35f &&
@@ -4479,6 +4490,7 @@ object KyantLauncherLens270 {
         frameCorrelation288145: Boolean,
         predrawSample28890: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
         bridgeSample28890: java.util.concurrent.atomic.AtomicReference<BridgeSample28890?>,
+        nativeDrawSnapshot211: java.util.concurrent.atomic.AtomicReference<ReboundSample28890?>,
         currentNativePosition: () -> Offset,
         sourceMatrixAb28866: Int, currentComposeViewPosition28866: () -> Offset,
         zeroLensAb28868: Int, continuousMotionProbe28868: Boolean,
@@ -5032,46 +5044,24 @@ object KyantLauncherLens270 {
                         diagnosticAnchor288104, drawPositionBefore152,
                         currentNativePosition, releaseNs28820.get())
                 } else drawPositionBefore152
-                // V288.210: bounded Source-coordinate recovery. PreDraw is not a
-                // SurfaceFlinger frame token: use it only if a fresh native read
-                // agrees with the same coordinate-space checkpoint. Never apply
-                // correction to an offscreen host or incompatible A/B mode.
-                val now210 = SystemClock.elapsedRealtimeNanos()
-                val pre210 = predrawSample28890.get()
-                val native210 = if (legacySyncAbMode == 0 && motionAbMode == 0 &&
-                    sourceMatrixAb28866 == 0 && strictSnapshotAb288143 == 0 &&
-                    sameFrameSnapshotAb288142 == 0 && pre210 != null &&
-                    pre210.releaseSeq == releaseSeq28820.get() &&
-                    now210 >= pre210.atNs && now210 - pre210.atNs <= 8_000_000L &&
-                    diagnosticAnchor288104.isAttachedToWindow && diagnosticAnchor288104.isShown)
-                    try { currentNativePosition() } catch (_: Throwable) { null }
-                else null
-                val preNativeGap210 = if (pre210 != null && native210 != null &&
-                    native210.x.isFinite() && native210.y.isFinite())
-                    kotlin.math.max(kotlin.math.abs(pre210.pos.x - native210.x),
-                        kotlin.math.abs(pre210.pos.y - native210.y)) else Float.NaN
-                val staleGap210 = if (native210 != null)
-                    kotlin.math.max(kotlin.math.abs(native210.x - drawPositionLegacy210.x),
-                        kotlin.math.abs(native210.y - drawPositionLegacy210.y)) else Float.NaN
-                val onScreen210 = native210 != null &&
-                    native210.x + diagnosticAnchor288104.width > 0f &&
-                    native210.x < screenW.toFloat() &&
-                    native210.y + diagnosticAnchor288104.height > 0f &&
-                    native210.y < screenH.toFloat()
-                val recovered210 = onScreen210 && preNativeGap210.isFinite() &&
-                    preNativeGap210 <= 1.5f && staleGap210.isFinite() &&
-                    staleGap210 > 0.5f && staleGap210 <= 80f
-                val drawPosition = if (recovered210 && native210 != null)
-                    native210 else drawPositionLegacy210
-                if (recovered210 && native210 != null &&
-                    releaseSeq28820.get() > 0L &&
-                    now210 - releaseNs28820.get() in 0L..650_000_000L) {
-                    android.util.Log.i("KyantSync288210",
-                        "KYANT288210_RECOVER host=$traceHost28890 " +
-                        "preSeq=${pre210?.serial} preNativeGapPx=$preNativeGap210 " +
-                        "oldX=${drawPositionLegacy210.x} correctedX=${native210.x} " +
-                        "deltaPx=$staleGap210 scope=source_callback_not_presented")
-                }
+                // V288.211: consume one immutable native observation only when it
+                // belongs to the current PreDraw generation. No pixel compensation.
+                // Keep all explicit A/B modes and affine rendering paths unchanged.
+                val pre211 = predrawSample28890.get()
+                val native211 = nativeDrawSnapshot211.get()
+                val now211 = SystemClock.elapsedRealtimeNanos()
+                val compatible211 = gpuReference288110 && !affineGpuAb288153 &&
+                    legacySyncAbMode == 0 && motionAbMode == 0 && sourceMatrixAb28866 == 0 &&
+                    strictSnapshotAb288143 == 0 && sameFrameSnapshotAb288142 == 0 &&
+                    diagnosticAnchor288104.isAttachedToWindow && diagnosticAnchor288104.isShown
+                val sameGeneration211 = compatible211 && pre211 != null && native211 != null &&
+                    pre211.serial == native211.serial && pre211.releaseSeq == native211.releaseSeq &&
+                    pre211.releaseSeq == releaseSeq28820.get() && native211.atNs >= pre211.atNs &&
+                    native211.atNs <= now211 && native211.pos.x.isFinite() && native211.pos.y.isFinite() &&
+                    native211.pos.x + previewWidth > 0f && native211.pos.x < screenW.toFloat() &&
+                    native211.pos.y + previewHeight > 0f && native211.pos.y < screenH.toFloat()
+                val drawPosition = if (sameGeneration211 && native211 != null) native211.pos
+                    else drawPositionLegacy210
                 if (strictSnapshotAb288143 == 1) {
                     val c143 = snapshot143Counters
                     c143[0]++
@@ -5124,6 +5114,7 @@ object KyantLauncherLens270 {
                 // Read a fresh native View position ONLY for <=9 bounded samples per
                 // selected host per gesture. All values are callback observations,
                 // not a SurfaceFlinger frame ID or evidence of presented-frame match.
+                var auditDestination211 = false
                 if (sameFrameProbe288139) {
                     val now139 = SystemClock.elapsedRealtimeNanos()
                     val release139 = releaseSeq28820.get()
@@ -5139,6 +5130,12 @@ object KyantLauncherLens270 {
                             now139 - sourceProbeCounters288139[2] >= 45_000_000L) {
                             sourceProbeCounters288139[1]++
                             sourceProbeCounters288139[2] = now139
+                            auditDestination211 = true
+                            android.util.Log.i("KyantSync288211", "KYANT288211_CONSUME host=$traceHost28890 " +
+                                "release=$release139 preSeq=${pre211?.serial} nativeSeq=${native211?.serial} " +
+                                "accepted=$sameGeneration211 compatible=$compatible211 " +
+                                "nativeX=${native211?.pos?.x} drawX=${drawPosition.x} " +
+                                "scope=ui_generation_not_presented")
                             val pre139 = predrawSample28890.get()
                             val preAge139 = if (pre139 != null) (now139 - pre139.atNs) / 1_000_000f else -1f
                             val native139 = try { currentNativePosition() } catch (_: Throwable) { null }
@@ -5748,6 +5745,12 @@ object KyantLauncherLens270 {
                                     if (!affineDone288153) {
                                         canvas.nativeCanvas.drawBitmap(reference, null,
                                             wholeDestination, bitmapPaint)
+                                        if (auditDestination211) android.util.Log.i("KyantSync288211",
+                                            "KYANT288211_BITMAP host=$traceHost28890 preSeq=${pre211?.serial} " +
+                                            "nativeSeq=${native211?.serial} accepted=$sameGeneration211 " +
+                                            "originX=${drawPosition.x} originY=${drawPosition.y} " +
+                                            "dstLeft=${wholeDestination.left} dstTop=${wholeDestination.top} " +
+                                            "scope=canvas_recorded_not_presented")
                                     }
                                     if (frameOwnershipProbe288157) {
                                         KyantCoordinateSpaceProbe288158.observe(
